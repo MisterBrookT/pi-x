@@ -1,0 +1,14 @@
+{
+  "globalConcurrencyLimit": 4,
+  "maxSubagentSpawnsPerRun": 8,
+  "maxSubagentSpawnsPerSession": 24,
+  "maxActiveAsyncRunsPerSession": 2,
+  "parallel": {
+    "maxTasks": 4,
+    "concurrency": 4
+  },
+  "scheduledRuns": {
+    "enabled": false,
+    "maxPending": 0
+  }
+}
