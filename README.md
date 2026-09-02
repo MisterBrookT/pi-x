@@ -22,8 +22,8 @@ npm run setup
 - `todo` plus the `/todo` terminal view
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - Claude Code subscription models through the local authenticated `claude` CLI
-- `/bench speed` and `/bench doctor`
-- `/pix-prompt` to export the exact active prompt
+- `/bench` for health, startup-speed, and prompt-overhead checks
+- `/prompt` to export the exact active prompt
 
 Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, and Opus 5. Install and authenticate the official Claude CLI before selecting the `pi-claude-cli` provider.
 
@@ -32,9 +32,8 @@ Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, an
 | Command | Purpose |
 | --- | --- |
 | `/todo` | Show todo state for the current session branch |
-| `/bench speed` | Compare three naive-Pi and Pix startup samples |
-| `/bench doctor` | Check expected tools and open a highlighted naive-Pi → Pix prompt diff |
-| `/pix-prompt [path]` | Export the exact effective Pix system prompt |
+| `/bench` | Check Pix health, compare startup speed, and open a highlighted naive-Pi → Pix prompt diff |
+| `/prompt [path]` | Export the exact effective Pix system prompt |
 
 ## LSP
 
@@ -56,7 +55,7 @@ npm run setup
 npm run check
 ```
 
-`docs/system-prompts.html` contains the complete base Pi and OMP prompt comparison. `/bench doctor` compares naive Pi with the active Pix prompt on the current machine.
+`docs/system-prompts.html` contains the complete base Pi and OMP prompt comparison. `/bench` compares naive Pi with the active Pix prompt on the current machine. Future task-performance checks are scoped in `ROADMAP.md`.
 
 ## License
 
