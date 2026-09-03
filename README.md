@@ -122,6 +122,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 ```bash
 npm install
 npm run check
+npm run smoke:anthropic  # live OAuth check: Fable 5.1, Opus 5, Sonnet 5 at minimal
 ```
 
 `docs/system-prompts.html` contains the complete public-safe naive-Pi and Pix prompts. `/bench` compares naive Pi with the active Pix prompt on the current machine. Future task-performance checks are scoped in `ROADMAP.md`.

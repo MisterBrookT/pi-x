@@ -22,7 +22,8 @@
   },
   "scripts": {
     "check": "node --test && npm run prompt:snapshot",
-    "prompt:snapshot": "node scripts/render-prompt-comparison.mjs"
+    "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
+    "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
   },
   "dependencies": {
     "@narumitw/pi-lsp": "0.49.6",

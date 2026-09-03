@@ -151,7 +151,7 @@ test("Fable 5.1 uses OMP's safe preserved-thinking binding", async () => {
   let request;
   await collect(createPixAnthropicStream()({ ...model, id: "claude-fable-5-1" }, context, {
     apiKey: "sk-ant-oat01-test",
-    reasoning: "high",
+    reasoning: "minimal",
     fetch: async (_url, init) => {
       request = { body: JSON.parse(init.body), headers: init.headers };
       return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -161,6 +161,7 @@ test("Fable 5.1 uses OMP's safe preserved-thinking binding", async () => {
     type: "adaptive",
     block_binding: { prefix_mismatch_behavior: "drop_block" },
   });
+  assert.deepEqual(request.body.output_config, { effort: "low" });
   assert.match(request.headers["anthropic-beta"], /thinking-binding-controls-2026-08-01/);
 });
 
