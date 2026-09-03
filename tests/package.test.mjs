@@ -13,6 +13,9 @@ test("slash commands stay minimal", async () => {
   const prompt = await readFile(new URL("extensions/prompt-inspector.ts", root), "utf8");
   for (const dependency of ["pi-subagents", "pi-web-access", "@narumitw/pi-lsp"]) assert.match(upstream, new RegExp(dependency));
   assert.match(upstream, /property === "registerCommand"/);
+  assert.match(upstream, /PI_SUBAGENT_MAX_DEPTH/);
+  assert.match(upstream, /Math\.min\(requestedConcurrency, 4\)/);
+  assert.match(upstream, /Math\.min\(requestedSpawns, 8\)/);
   assert.match(capabilities, /websearch/);
   assert.match(capabilities, /subagent/);
   assert.match(capabilities, /action !== "on" && action !== "off"/);

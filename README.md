@@ -1,6 +1,6 @@
 # Pix
 
-Pix is a focused [Pi](https://github.com/earendil-works/pi-mono) package: **web access + bounded subagents + visible todo tracking + structured questions + optional LSP + Claude Code models**.
+**Pix equips Pi with the essential tools for everyday coding.** It is a focused [Pi](https://github.com/earendil-works/pi-mono) package with web access, bounded subagents, visible todo tracking, structured questions, optional LSP, and Claude Code models.
 
 ## Philosophy
 
@@ -49,15 +49,10 @@ pi install git:github.com/MisterBrookT/pix
 Or ask an agent:
 
 ```text
-Help me install Pix from https://github.com/MisterBrookT/pix. Verify that Pi and Node.js 22+ are available, install Pix using the repository's documented Pi command, apply its recommended setup, and do not change unrelated Pi configuration.
+Help me install Pix from https://github.com/MisterBrookT/pix. Verify that Pi and Node.js 22+ are available, install Pix using the repository's documented Pi command, and do not change unrelated Pi configuration.
 ```
 
-Restart Pi. Optional local setup applies Pix's conservative subagent limits:
-
-```bash
-cd ~/.pi/agent/git/github.com/MisterBrookT/pix
-npm run setup
-```
+Restart Pi. Pix's conservative subagent limits apply automatically.
 
 ## What it adds
 
@@ -91,7 +86,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 ## Design boundaries
 
 - Delegate only genuinely independent or context-heavy work.
-- Default limits: 4 concurrent children, 8 per run, 24 per session, and 2 active async runs.
+- Default limits: 4 concurrent children, 8 per run, 24 per session, and one level of delegation.
 - Use todo for meaningful multi-step work, not every response.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
@@ -101,7 +96,6 @@ Pix does not download language servers. Install only what your projects need. Fo
 
 ```bash
 npm install
-npm run setup
 npm run check
 ```
 
