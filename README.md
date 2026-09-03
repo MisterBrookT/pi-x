@@ -1,6 +1,6 @@
 # Pix
 
-**Pix equips Pi with the essential tools for everyday coding.** It is a focused [Pi](https://github.com/earendil-works/pi-mono) package with web access, bounded subagents, visible todo tracking, structured questions, optional LSP, and Claude Code models.
+**Pix equips Pi with the essential tools for everyday coding.** It is a focused [Pi](https://github.com/earendil-works/pi-mono) package with web access, bounded subagents, visible todo tracking, structured questions, and optional LSP.
 
 ## Philosophy
 
@@ -64,12 +64,11 @@ Restart Pi.
 - a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
-- Claude Code subscription models through the local authenticated `claude` CLI
 - `/bench` for health, startup-speed, and prompt-overhead checks
 - `/prompt` to export the exact active prompt
 - a configurable footer with cache efficiency and latest-response token speed
 
-Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, and Opus 5. Install and authenticate the official Claude CLI before selecting the `pi-claude-cli` provider.
+For Claude subscription models, authenticate Pi's native `anthropic` provider and select the model there. Pix deliberately does not proxy model calls through the `claude` CLI: Pi's native provider preserves structured conversation history and prompt caching across tool turns.
 
 ## Commands
 
@@ -113,7 +112,6 @@ Pix is built on Pi and the work of its extension community. Special thanks to:
 - **Pi**, for the coding harness, extension API, and official todo and question examples adapted by Pix.
 - **LazyPi**, whose curated package catalog demonstrated a practical combination of web access, subagents, todo tracking, and Claude CLI integration.
 - **pi-web-access**, **pi-subagents**, and **pi-lsp**, which provide Pix's web, delegation, and language-server capabilities.
-- **pi-claude-cli**, whose provider implementation Pix adapts for current Pi and a deliberately small Claude model list.
 
 See `THIRD_PARTY_NOTICES.md` for repositories and licenses.
 
