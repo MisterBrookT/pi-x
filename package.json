@@ -55,6 +55,7 @@
     "extensions": [
       "./extensions/capabilities.ts",
       "./extensions/benchmark.ts",
+      "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
       "./extensions/prompt-compact.ts",
       "./extensions/prompt-inspector.ts",

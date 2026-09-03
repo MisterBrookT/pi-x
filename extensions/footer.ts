@@ -4,6 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getSettingsListTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type SettingItem } from "@earendil-works/pi-tui";
+import { isFastModeEnabled } from "../src/fast-mode.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "../src/footer.js";
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
@@ -79,7 +80,8 @@ export default function (pi: ExtensionAPI) {
         const model = ctx.model;
         let right = model?.id ?? "no-model";
         if (options.provider && model) right = `(${model.provider}) ${right}`;
-        if (options.thinking && model?.reasoning) right += ` • ${ctx.thinkingLevel ?? "off"}`;
+        if (options.thinking && model?.reasoning) right += ` ${ctx.thinkingLevel ?? "off"}`;
+        if (isFastModeEnabled()) right += " fast";
         const left = parts.join(" ");
         const room = width - visibleWidth(left) - visibleWidth(right);
         const stats = room >= 2 ? left + " ".repeat(room) + right : truncateToWidth(`${left}  ${right}`, width);

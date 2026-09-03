@@ -7,6 +7,7 @@ test("prompt snapshots and comparison exist",async()=>{for(const p of ["docs/pro
 
 test("slash commands stay minimal", async () => {
   const capabilities = await readFile(new URL("extensions/capabilities.ts", root), "utf8");
+  const fast = await readFile(new URL("extensions/fast-mode.ts", root), "utf8");
   const upstream = await readFile(new URL("extensions/upstream-tools.ts", root), "utf8");
   const todo = await readFile(new URL("extensions/todo.ts", root), "utf8");
   const bench = await readFile(new URL("extensions/benchmark.ts", root), "utf8");
@@ -18,6 +19,8 @@ test("slash commands stay minimal", async () => {
   assert.match(upstream, /Math\.min\(requestedSpawns, 8\)/);
   assert.match(capabilities, /websearch/);
   assert.match(capabilities, /subagent/);
+  assert.match(fast, /registerCommand\("fast"/);
+  assert.match(fast, /Usage: \/fast \[on\|off\|status\]/);
   assert.match(capabilities, /action !== "on" && action !== "off"/);
   assert.match(capabilities, /action === "config"/);
   assert.match(todo, /registerCommand\("todo"/);

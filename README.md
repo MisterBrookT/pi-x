@@ -28,7 +28,7 @@ Pix deliberately does not include unevaluated complexity: autonomous memory, an 
 | Todo tracking | Example only | Yes | Yes |
 | Structured questions | Example only | Yes | Yes |
 | LSP diagnostics | No | Optional | Yes |
-| User-facing surface | Small | Six Pix commands | Broad |
+| User-facing surface | Small | Seven Pix commands | Broad |
 
 Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's design, excluding personal and project `AGENTS.md`, skills, and conversation context. Provider tokenizers and OMP's conditional configuration can produce different totals. `docs/system-prompts.html` contains the full public-safe naive-Pi → Pix comparison.
 
@@ -68,6 +68,7 @@ Restart Pi.
 - `question` for structured user choices, adapted from Pi's official example
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/bench` for health, startup-speed, and prompt-overhead checks
+- `/fast` for persistent priority-processing control on supported providers
 - `/prompt` to export the exact active prompt
 - a configurable footer with cache efficiency and latest-response token speed
 
@@ -87,12 +88,15 @@ For Claude subscription models, authenticate Pi's native `anthropic` provider an
 
 | Command | Purpose |
 | --- | --- |
+| `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/prompt [path]` | Export the exact effective Pix system prompt |
 | `/bench` | Check Pix health, startup speed, and prompt overhead |
 | `/websearch [on\|off]` | Show or toggle web access for this session |
 | `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models |
+
+Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while enabled, and it does not affect subagents.
 
 Pix keeps three primary roles: `worker` for implementation, `scout` for fast codebase discovery, and `critic` for read-only review. Each can use a different model and thinking level through `/subagent config`.
 
@@ -107,7 +111,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 - Use todo for meaningful multi-step work, not every response.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
-- Dependency administration commands are hidden; Pix keeps six user-facing commands.
+- Dependency administration commands are hidden; Pix keeps seven user-facing commands.
 
 ## Development
 
