@@ -16,6 +16,8 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 - Claude subscription access;
 - prompt and startup-overhead inspection.
 
+In the input editor, `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
+
 Pix deliberately does not include unevaluated complexity: autonomous memory, an MCP umbrella, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
 
 | | Naive Pi | Pix | OMP |
@@ -59,11 +61,13 @@ Restart Pi.
 - `web_search` and content fetching through `pi-web-access`
 - `subagent` through `pi-subagents`
 - `todo` plus the `/todo` terminal view
+- a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - Claude Code subscription models through the local authenticated `claude` CLI
 - `/bench` for health, startup-speed, and prompt-overhead checks
 - `/prompt` to export the exact active prompt
+- a configurable footer with cache efficiency and latest-response token speed
 
 Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, and Opus 5. Install and authenticate the official Claude CLI before selecting the `pi-claude-cli` provider.
 
@@ -71,6 +75,7 @@ Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, an
 
 | Command | Purpose |
 | --- | --- |
+| `/footer` | Choose footer metrics; choices persist across sessions |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/prompt [path]` | Export the exact effective Pix system prompt |
 | `/bench` | Check Pix health, startup speed, and prompt overhead |

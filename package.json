@@ -1,6 +1,6 @@
 {
   "name": "pi-pix",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, Claude CLI models, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -56,9 +56,11 @@
     "extensions": [
       "./extensions/capabilities.ts",
       "./extensions/benchmark.ts",
+      "./extensions/footer.ts",
       "./extensions/prompt-compact.ts",
       "./extensions/prompt-inspector.ts",
       "./extensions/question.ts",
+      "./extensions/smart-editor.ts",
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
       "./vendor/pi-claude-cli/index.ts"

@@ -12,6 +12,8 @@ export interface ClaudeResultMessage {
   subtype: "success" | "error";
   result?: string;
   error?: string;
+  is_error?: boolean;
+  terminal_reason?: string;
   session_id?: string;
 }
 

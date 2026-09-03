@@ -23,7 +23,6 @@ import {
 import {
   buildPrompt,
   buildSystemPrompt,
-  buildResumePrompt,
 } from "./prompt-builder.js";
 import {
   spawnClaude,
@@ -81,22 +80,13 @@ export function streamViaCli(
     try {
       const cwd = options?.cwd ?? process.cwd();
 
-      // Resume if pi provides a session ID AND this isn't the first turn.
-      // Pi passes sessionId on every call (including first), but we can only
-      // --resume a CLI session that already exists on disk from a prior turn.
-      const resumeSessionId =
-        options?.sessionId && context.messages.length > 1
-          ? options.sessionId
-          : undefined;
-
-      // Build prompt: if resuming, only send the latest user turn;
-      // otherwise build the full flattened conversation history
-      const prompt = resumeSessionId
-        ? buildResumePrompt(context)
-        : buildPrompt(context);
-      const systemPrompt = resumeSessionId
-        ? undefined
-        : buildSystemPrompt(context, cwd);
+      // Always start a fresh CLI subprocess with Pi's complete context. Reusing
+      // Claude sessions is unsafe here because tool-call subprocesses are killed
+      // before Claude can execute the tool, which can leave --resume waiting on
+      // stale CLI session state with no stdout.
+      const resumeSessionId = undefined;
+      const prompt = buildPrompt(context);
+      const systemPrompt = buildSystemPrompt(context, cwd);
 
       // Compute effort level from reasoning options
       const effort = mapThinkingEffort(
@@ -112,7 +102,7 @@ export function streamViaCli(
         effort,
         mcpConfigPath: options?.mcpConfigPath,
         resumeSessionId,
-        newSessionId: !resumeSessionId ? options?.sessionId : undefined,
+        newSessionId: undefined,
       });
       const getStderr = captureStderr(proc);
 
@@ -271,8 +261,12 @@ export function streamViaCli(
         } else if (msg.type === "control_request") {
           handleControlRequest(msg, proc!.stdin!);
         } else if (msg.type === "result") {
-          if (msg.subtype === "error") {
-            endStreamWithError(msg.error ?? "Unknown error from Claude CLI");
+          // Claude CLI can report API/auth failures as subtype "success" with
+          // is_error=true, so subtype alone is not a reliable success signal.
+          if (msg.subtype === "error" || msg.is_error) {
+            endStreamWithError(
+              msg.error ?? msg.result ?? `Claude CLI failed (${msg.terminal_reason ?? "unknown error"})`,
+            );
           }
           // For both success and error: clean up the subprocess
           clearTimeout(inactivityTimer);
