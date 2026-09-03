@@ -1,6 +1,6 @@
 {
   "name": "pi-pix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, Claude CLI models, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -26,10 +26,11 @@
     "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
-    "pi-subagents": "0.63.0",
-    "pi-web-access": "0.27.0",
     "@narumitw/pi-lsp": "0.49.6",
-    "cross-spawn": "7.0.6"
+    "cross-spawn": "7.0.6",
+    "jsonc-parser": "3.3.1",
+    "pi-subagents": "0.63.0",
+    "pi-web-access": "0.27.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -49,10 +50,13 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/*.ts",
-      "./node_modules/pi-subagents/index.ts",
-      "./node_modules/pi-web-access/index.ts",
-      "./node_modules/@narumitw/pi-lsp/dist/index.ts",
+      "./extensions/capabilities.ts",
+      "./extensions/benchmark.ts",
+      "./extensions/prompt-compact.ts",
+      "./extensions/prompt-inspector.ts",
+      "./extensions/question.ts",
+      "./extensions/todo.ts",
+      "./extensions/upstream-tools.ts",
       "./vendor/pi-claude-cli/index.ts"
     ]
   },

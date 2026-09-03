@@ -7,7 +7,7 @@ import { getPackageDir, type ExtensionAPI } from "@earendil-works/pi-coding-agen
 import { compactPixPrompt } from "../src/compact-prompt.js";
 
 const exec = promisify(execFile);
-const requiredTools = ["web_search", "fetch_content", "subagent", "todo", "lsp_diagnostics", "lsp_fix"];
+const requiredTools = ["web_search", "fetch_content", "subagent", "todo", "question", "lsp_diagnostics", "lsp_fix"];
 
 async function timed(args: string[]): Promise<number> {
   const started = performance.now();
