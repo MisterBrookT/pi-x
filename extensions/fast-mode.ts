@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 
       const target = fastModeTarget(ctx.model);
       if ((action === "on" || (!action && !isFastModeEnabled())) && !target) {
-        ctx.ui.notify("Fast mode is unavailable for the current provider", "error");
+        ctx.ui.notify("Fast mode is unavailable for the current provider", "warning");
         return;
       }
 

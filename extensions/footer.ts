@@ -75,14 +75,7 @@ export default function (pi: ExtensionAPI) {
         if (options.tokenSpeed && latestSpeed !== undefined) parts.push(`${latestSpeed.toFixed(1)} tok/s`);
         if (options.cost && cost) parts.push(`$${cost.toFixed(3)}`);
         const context = ctx.getContextUsage();
-        if (options.context && context) {
-          const display = `${context.percent === null ? "?" : context.percent.toFixed(1) + "%"}/${formatTokens(context.contextWindow)}`;
-          parts.push(context.percent !== null && context.percent > 90
-            ? theme.fg("error", display)
-            : context.percent !== null && context.percent > 70
-              ? theme.fg("warning", display)
-              : display);
-        }
+        if (options.context && context) parts.push(`${context.percent === null ? "?" : context.percent.toFixed(1) + "%"}/${formatTokens(context.contextWindow)}`);
 
         const model = ctx.model;
         let right = model?.id ?? "no-model";
