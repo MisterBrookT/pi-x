@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, access } from "node:fs/promises";
 const root=new URL("..",import.meta.url);
-test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts"]) assert.ok(e.includes(x));assert.equal(j.pi.skills,undefined);});
+test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts"]) assert.ok(e.includes(x));assert.deepEqual(j["pi-subagents"].agents,["./agents"]);assert.equal(j.pi.skills,undefined);});
 test("prompt snapshots and comparison exist",async()=>{for(const p of ["docs/prompts/pi-default.txt","docs/prompts/pix-default.txt","docs/system-prompts.html"])await access(new URL(p,root));});
 
 test("slash commands stay minimal", async () => {
@@ -19,9 +19,11 @@ test("slash commands stay minimal", async () => {
   assert.match(capabilities, /action === "config"/);
   assert.match(todo, /registerCommand\("todo"/);
   assert.doesNotMatch(todo, /registerCommand\("todos"/);
+  assert.match(todo, /Usage: \/todo \[on\|off\]/);
   assert.match(bench, /registerCommand\("bench"/);
   assert.doesNotMatch(bench, /bench speed|bench doctor/);
   assert.match(prompt, /registerCommand\("prompt"/);
   assert.doesNotMatch(prompt, /registerCommand\("pix-prompt"/);
   await access(new URL("extensions/question.ts", root));
+  await access(new URL("agents/critic.md", root));
 });

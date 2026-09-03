@@ -76,11 +76,13 @@ Claude Code models are intentionally limited to Fable 5.1, Fable 5, Sonnet 5, an
 
 | Command | Purpose |
 | --- | --- |
-| `/todo` | Show todo state for the current session branch |
+| `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/prompt [path]` | Export the exact effective Pix system prompt |
 | `/bench` | Check Pix health, startup speed, and prompt overhead |
 | `/websearch [on\|off]` | Show or toggle web access for this session |
 | `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models |
+
+Pix keeps three primary roles: `worker` for implementation, `scout` for fast codebase discovery, and `critic` for read-only review. Each can use a different model and thinking level through `/subagent config`.
 
 ## LSP
 

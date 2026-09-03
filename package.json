@@ -1,6 +1,6 @@
 {
   "name": "pi-pix",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, Claude CLI models, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -48,6 +48,11 @@
       "optional": true
     }
   },
+  "pi-subagents": {
+    "agents": [
+      "./agents"
+    ]
+  },
   "pi": {
     "extensions": [
       "./extensions/capabilities.ts",
@@ -64,6 +69,7 @@
     "node": ">=22"
   },
   "files": [
+    "agents",
     "config",
     "docs",
     "extensions",

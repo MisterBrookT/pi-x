@@ -17,6 +17,7 @@ const Params = Type.Object({
 
 export default function (pi: ExtensionAPI) {
   let state: State = { items: [], nextId: 1 };
+  let enabled = true;
   const restore = (ctx: ExtensionContext) => {
     state = { items: [], nextId: 1 };
     for (const entry of ctx.sessionManager.getBranch()) {
@@ -27,6 +28,7 @@ export default function (pi: ExtensionAPI) {
     renderWidget(ctx);
   };
   const renderWidget = (ctx: ExtensionContext) => {
+    if (!enabled) return ctx.ui.setWidget("pix-todo", undefined);
     const open = state.items.filter(i => i.status !== "done");
     if (!open.length) return ctx.ui.setWidget("pix-todo", undefined);
     ctx.ui.setWidget("pix-todo", open.slice(0, 6).map(i => `${i.status === "active" ? "›" : "○"} #${i.id} ${i.text}`));
@@ -34,7 +36,7 @@ export default function (pi: ExtensionAPI) {
   const result = (action: string, text: string, error?: string): { content: [{type:"text";text:string}]; details: Details; isError?: boolean } => ({
     content: [{ type: "text", text }], details: { action, items: structuredClone(state.items), nextId: state.nextId, error }, ...(error ? { isError: true } : {})
   });
-  pi.on("session_start", (_e, ctx) => restore(ctx));
+  pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
   pi.on("session_tree", (_e, ctx) => restore(ctx));
   pi.registerTool({
     name: "todo",
@@ -54,5 +56,25 @@ export default function (pi: ExtensionAPI) {
     renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold(`todo ${args.action}`)),0,0); },
     renderResult(r, _o, theme) { const t=r.content[0]; return new Text(theme.fg(r.isError?"error":"muted",t?.type==="text"?t.text:""),0,0); }
   });
-  pi.registerCommand("todo", { description: "Show the current Pix todo list", handler: async (_args, ctx) => { const lines=state.items.length?state.items.map(i=>`[${i.status}] #${i.id} ${i.text}`):["No todos"]; ctx.ui.notify(lines.join("\n"),"info"); } });
+  pi.registerCommand("todo", {
+    description: "Show or toggle todo tracking: /todo [on|off]",
+    handler: async (rawArgs, ctx) => {
+      const action = rawArgs.trim().toLowerCase();
+      if (action === "on" || action === "off") {
+        enabled = action === "on";
+        const active = new Set(pi.getActiveTools());
+        if (enabled) active.add("todo"); else active.delete("todo");
+        pi.setActiveTools([...active]);
+        renderWidget(ctx);
+        ctx.ui.notify(`todo ${action}`, "info");
+        return;
+      }
+      if (action) {
+        ctx.ui.notify("Usage: /todo [on|off]", "error");
+        return;
+      }
+      const lines = state.items.length ? state.items.map(i => `[${i.status}] #${i.id} ${i.text}`) : ["No todos"];
+      ctx.ui.notify(`${enabled ? "todo is on" : "todo is off"}\n${lines.join("\n")}`, "info");
+    },
+  });
 }

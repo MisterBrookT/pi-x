@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 
-const agents = ["scout", "researcher", "worker", "reviewer", "oracle", "delegate"];
+const agents = ["worker", "scout", "critic"];
 const thinkingLevels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 async function configureSubagent(ctx: ExtensionContext) {
