@@ -18,18 +18,19 @@ import nodeCrypto from "node:crypto";
 // Version / identity constants (omp: claude-code-fingerprint.ts)
 // ---------------------------------------------------------------------------
 
-/** Claude runtime version bundled by the current Cowork desktop release. */
+/** Claude Code version pinned by OMP c4da0d08. */
 export const claudeCodeVersion = "2.1.257";
+export const claudeCodeSdkVersion = "0.112.1";
 
-/** User-Agent emitted by Cowork's `claude-desktop` inference entrypoint. */
-export const coworkUserAgent = `claude-cli/${claudeCodeVersion} (external, claude-desktop)`;
+/** User-Agent emitted by Claude Code's CLI inference entrypoint. */
+export const coworkUserAgent = `claude-cli/${claudeCodeVersion} (external, cli)`;
 
 /** Prefix used to isolate custom Anthropic OAuth tools from built-in tools. */
 export const claudeToolPrefix = "_";
 
-/** Identity block prepended by Cowork's Claude runtime. */
+/** Identity block prepended by Claude Code's CLI runtime. */
 export const claudeCodeSystemInstruction =
-	"You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+	"You are Claude Code, Anthropic's official CLI for Claude.";
 
 /** Cowork's per-request output-token ceiling. */
 export const CLAUDE_CODE_MAX_OUTPUT_TOKENS = 64000;
@@ -38,6 +39,7 @@ export const CLAUDE_CODE_MAX_OUTPUT_TOKENS = 64000;
 // Beta profiles (omp: anthropic.ts lines ~157-206)
 // ---------------------------------------------------------------------------
 
+const oauthAuthBeta = "oauth-2025-04-20";
 const midConversationSystemBeta = "mid-conversation-system-2026-04-07";
 const contextManagementBeta = "context-management-2025-06-27";
 const structuredOutputsBeta = "structured-outputs-2025-12-15";
@@ -46,6 +48,7 @@ const fallbackCreditBeta = "fallback-credit-2026-06-01";
 const effortBeta = "effort-2025-11-24";
 
 const coworkUtilityBetaDefaults = [
+	oauthAuthBeta,
 	"interleaved-thinking-2025-05-14",
 	thinkingTokenCountBeta,
 	contextManagementBeta,
@@ -55,12 +58,12 @@ const coworkUtilityBetaDefaults = [
 
 const coworkAgentBetaDefaults = [
 	"claude-code-20250219",
+	oauthAuthBeta,
 	"interleaved-thinking-2025-05-14",
 	thinkingTokenCountBeta,
 	contextManagementBeta,
 	"prompt-caching-scope-2026-01-05",
 	midConversationSystemBeta,
-	"advanced-tool-use-2025-11-20",
 ] as const;
 
 /**
@@ -122,20 +125,22 @@ export function mapStainlessArch(arch: string): "x64" | "arm64" | "x86" | `other
 	}
 }
 
-/**
- * Static headers emitted by Cowork's Linux Claude runtime.
- *
- * DO NOT "portability-fix" these. `X-Stainless-OS` and `X-Stainless-Runtime-Version`
- * are pinned fingerprint values copied from omp 17.4.2 — they deliberately do NOT
- * describe the host running this code, and reading them from `process` would change
- * what goes out on the wire. Only `X-Stainless-Arch` is host-derived, which is what
- * omp does too.
- */
+export function mapStainlessOs(platform: string): "MacOS" | "Windows" | "Linux" | "FreeBSD" | `Other::${string}` {
+	switch (platform.toLowerCase()) {
+		case "darwin": return "MacOS";
+		case "win32": return "Windows";
+		case "linux": return "Linux";
+		case "freebsd": return "FreeBSD";
+		default: return `Other::${platform}`;
+	}
+}
+
+/** Static headers emitted by current Claude Code's CLI runtime. */
 export const coworkHeaders: Record<string, string> = {
 	"X-Stainless-Arch": mapStainlessArch(process.arch),
 	"X-Stainless-Lang": "js",
-	"X-Stainless-OS": "Linux",
-	"X-Stainless-Package-Version": "0.94.0",
+	"X-Stainless-OS": mapStainlessOs(process.platform),
+	"X-Stainless-Package-Version": claudeCodeSdkVersion,
 	"X-Stainless-Retry-Count": "0",
 	"X-Stainless-Runtime": "node",
 	"X-Stainless-Runtime-Version": "v26.3.0",
@@ -170,7 +175,7 @@ export function createClaudeBillingHeader(firstUserMessageText: string): string 
 		.update(`59cf53e54c78${k}${claudeCodeVersion}`)
 		.digest("hex")
 		.slice(0, 3);
-	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${claudeCodeVersion}.${versionSuffix}; cc_entrypoint=claude-desktop; ${CCH_PLACEHOLDER_STR};`;
+	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${claudeCodeVersion}.${versionSuffix}; cc_entrypoint=cli; ${CCH_PLACEHOLDER_STR};`;
 }
 
 // --- xxHash64, pure JS -----------------------------------------------------

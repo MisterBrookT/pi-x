@@ -93,7 +93,7 @@ test("subscription transport retries rejected fast mode once at normal speed", a
   const requests = [];
   const mockFetch = async (_url, init) => {
     requests.push({ headers: { ...init.headers }, body: JSON.parse(init.body) });
-    if (requests.length === 1) return new Response("fast unavailable", { status: 400 });
+    if (requests.length === 1) return new Response('{"type":"invalid_request_error","message":"speed fast is not supported"}', { status: 400 });
     return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
   };
 
@@ -163,6 +163,76 @@ test("Fable 5.1 uses OMP's safe preserved-thinking binding", async () => {
   });
   assert.deepEqual(request.body.output_config, { effort: "low" });
   assert.match(request.headers["anthropic-beta"], /thinking-binding-controls-2026-08-01/);
+});
+
+test("repairs orphaned tool calls from reloaded sessions", async () => {
+  setFastModeEnabled(false);
+  let body;
+  const orphanId = `call|${"x".repeat(90)}`;
+  const interrupted = {
+    ...context,
+    messages: [
+      { role: "user", content: "start" },
+      {
+        role: "assistant",
+        api: "anthropic-messages",
+        provider: "pix-anthropic",
+        model: model.id,
+        stopReason: "toolUse",
+        content: [{ type: "toolCall", id: orphanId, name: "read", arguments: { path: "/tmp/x" } }],
+      },
+      { role: "user", content: "continue after reload" },
+    ],
+  };
+  await collect(createPixAnthropicStream()(model, interrupted, {
+    apiKey: "sk-ant-oat01-test",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  }));
+
+  const toolUseIndex = body.messages.findIndex((message) =>
+    Array.isArray(message.content) && message.content.some((block) => block.type === "tool_use"),
+  );
+  assert.ok(toolUseIndex >= 0);
+  const wireToolId = body.messages[toolUseIndex].content.find((block) => block.type === "tool_use").id;
+  assert.match(wireToolId, /^[a-zA-Z0-9_-]{1,64}$/);
+  assert.equal(body.messages[toolUseIndex + 1].role, "user");
+  assert.ok(body.messages[toolUseIndex + 1].content.some((block) =>
+    block.type === "tool_result" && block.tool_use_id === wireToolId && block.is_error === true,
+  ));
+});
+
+test("keeps real multi-tool results and synthesizes only missing siblings", async () => {
+  setFastModeEnabled(false);
+  let body;
+  await collect(createPixAnthropicStream()(model, {
+    ...context,
+    messages: [
+      { role: "user", content: "start" },
+      {
+        role: "assistant", api: "anthropic-messages", provider: "pix-anthropic", model: model.id,
+        stopReason: "toolUse",
+        content: [
+          { type: "toolCall", id: "call_a", name: "read", arguments: {} },
+          { type: "toolCall", id: "call_b", name: "read", arguments: {} },
+        ],
+      },
+      { role: "toolResult", toolCallId: "call_a", toolName: "read", content: [{ type: "text", text: "A" }], isError: false },
+      { role: "user", content: "continue" },
+    ],
+  }, {
+    apiKey: "sk-ant-oat01-test",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  }));
+  const results = body.messages.flatMap((message) => Array.isArray(message.content)
+    ? message.content.filter((block) => block.type === "tool_result") : []);
+  assert.equal(results.filter((block) => block.tool_use_id === "call_a").length, 1);
+  assert.equal(results.filter((block) => block.tool_use_id === "call_b" && block.is_error).length, 1);
 });
 
 test("API-key requests can use fast mode", async () => {

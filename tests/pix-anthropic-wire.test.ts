@@ -113,19 +113,20 @@ const h = captured!.headers;
 const b = captured!.body;
 
 console.log("\n=== REQUEST HEADERS (omp fingerprint) ===");
-check("User-Agent is Cowork claude-desktop", h["user-agent"] === "claude-cli/2.1.257 (external, claude-desktop)", h["user-agent"]);
+check("User-Agent is current Claude Code CLI", h["user-agent"] === "claude-cli/2.1.257 (external, cli)", h["user-agent"]);
 check("Authorization uses Bearer (not x-api-key)", (h.authorization ?? "").startsWith("Bearer sk-ant-oat01"));
 check("no x-api-key header on OAuth", h["x-api-key"] === undefined);
 check("x-app: cli", h["x-app"] === "cli");
 check("anthropic-version present", h["anthropic-version"] === "2023-06-01");
-check("x-client-request-id is a uuid", /^[0-9a-f-]{36}$/.test(h["x-client-request-id"] ?? ""));
+check("no obsolete x-client-request-id", h["x-client-request-id"] === undefined);
 check("X-Stainless-Runtime: node", h["x-stainless-runtime"] === "node");
-check("X-Stainless-Package-Version: 0.94.0", h["x-stainless-package-version"] === "0.94.0");
+check("X-Stainless-Package-Version: 0.112.1", h["x-stainless-package-version"] === "0.112.1");
 check("Connection: keep-alive", (h.connection ?? "").includes("keep-alive"));
 
 const betas = (h["anthropic-beta"] ?? "").split(",");
 console.log(`\n  betas: ${h["anthropic-beta"]}`);
 check("beta claude-code-20250219", betas.includes("claude-code-20250219"));
+check("beta oauth-2025-04-20", betas.includes("oauth-2025-04-20"));
 check("beta interleaved-thinking-2025-05-14", betas.includes("interleaved-thinking-2025-05-14"));
 check("beta context-management-2025-06-27", betas.includes("context-management-2025-06-27"));
 check("beta effort-2025-11-24 (thinking requested)", betas.includes("effort-2025-11-24"));
@@ -137,16 +138,14 @@ check("max_tokens clamped to 64000 despite model.maxTokens=128000", b.max_tokens
 check("thinking enabled", b.thinking?.type === "enabled");
 check("budget_tokens < max_tokens", b.thinking?.budget_tokens < b.max_tokens, `${b.thinking?.budget_tokens} vs ${b.max_tokens}`);
 
-console.log("\n=== BODY: Cowork system blocks ===");
+console.log("\n=== BODY: current Claude Code system blocks ===");
 check("system[0] is the billing header", String(b.system?.[0]?.text ?? "").startsWith(CLAUDE_BILLING_HEADER_PREFIX));
-check("system[0] carries cc_entrypoint=claude-desktop", String(b.system?.[0]?.text).includes("cc_entrypoint=claude-desktop"));
-check("system[1] is Claude Agent SDK identity", b.system?.[1]?.text === "You are a Claude agent, built on Anthropic's Claude Agent SDK.");
-check("system[1] is NOT pi's 'You are Claude Code' string", !String(b.system?.[1]?.text).includes("official CLI"));
-check("system has ONLY billing + identity on OAuth", b.system?.length === 2, `got ${b.system?.length} blocks`);
-check("caller's prompt is NOT in system (would bill extra usage)", !b.system?.some((s: any) => String(s.text).includes("wire test")));
-check("caller's prompt relocated to a <system-reminder> user turn", String(b.messages?.[0]?.content ?? "").includes("<system-reminder>") && String(b.messages?.[0]?.content ?? "").includes("You are a helpful assistant for the wire test."));
-check("relocated prompt is followed by a synthetic assistant ack", b.messages?.[1]?.role === "assistant");
-check("original first user message preserved after relocation", JSON.stringify(b.messages?.[2] ?? {}).includes("First user message"));
+check("system[0] carries cc_entrypoint=cli", String(b.system?.[0]?.text).includes("cc_entrypoint=cli"));
+check("system[1] is Claude Code identity", b.system?.[1]?.text === "You are Claude Code, Anthropic's official CLI for Claude.");
+check("caller prompt is relocated out of system for plan billing", !b.system?.some((s: any) => String(s.text).includes("wire test")));
+check("system has billing and identity", b.system?.length === 2, `got ${b.system?.length} blocks`);
+check("synthetic system-reminder preserves caller prompt", JSON.stringify(b.messages?.[0]).includes("<system-reminder>") && JSON.stringify(b.messages?.[0]).includes("wire test"));
+check("original first user message remains after synthetic acknowledgement", JSON.stringify(b.messages?.[2] ?? {}).includes("First user message"));
 
 console.log("\n=== BODY: cch attestation patched on the wire ===");
 const cchMatch = /cch=([0-9a-f]{5})/.exec(captured!.rawBody);
@@ -165,8 +164,6 @@ console.log("\n=== BODY: tool naming (omp prefixes, pi renames) ===");
 check("tools prefixed with _", b.tools?.[0]?.name === "_read_file", b.tools?.[0]?.name);
 check("second tool prefixed", b.tools?.[1]?.name === "_bash", b.tools?.[1]?.name);
 check("NOT renamed to Claude Code built-ins (Read/Bash)", !b.tools?.some((t: any) => t.name === "Read" || t.name === "Bash"));
-// Index 3, not 1: the OAuth prompt relocation prepends a <system-reminder> user
-// turn plus a synthetic assistant ack ahead of the caller's real messages.
 check("assistant tool_use replayed with prefix", b.messages?.[3]?.content?.[0]?.name === "_read_file", b.messages?.[3]?.content?.[0]?.name);
 check("metadata.user_id cloaked", /^user_[0-9a-f]{64}_account_/.test(b.metadata?.user_id ?? ""));
 
@@ -201,7 +198,7 @@ console.log("\n=== HEADER ENFORCEMENT (model.headers must not clobber fingerprin
 		/* drain */
 	}
 	srv.close();
-	check("model.headers cannot override User-Agent", hijacked["user-agent"] === "claude-cli/2.1.257 (external, claude-desktop)", hijacked["user-agent"]);
+	check("model.headers cannot override User-Agent", hijacked["user-agent"] === "claude-cli/2.1.257 (external, cli)", hijacked["user-agent"]);
 	check("model.headers cannot override anthropic-beta", hijacked["anthropic-beta"] !== "evil-beta");
 	check("non-enforced custom header still passes through", hijacked["x-custom-allowed"] === "keepme");
 }

@@ -30,7 +30,6 @@ import {
 	calculateCost,
 	createAssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
-import nodeCrypto from "node:crypto";
 import fs from "node:fs";
 import {
 	CLAUDE_CODE_MAX_OUTPUT_TOKENS,
@@ -48,6 +47,18 @@ import {
 import { fastModeActiveFor, recordFastModeFallback } from "../../src/fast-mode.ts";
 
 const ANTHROPIC_VERSION = "2023-06-01";
+
+function isFastModeUnsupported(status: number, message: string): boolean {
+	return (status === 400 && /invalid_request/i.test(message) && /speed/i.test(message) && /not support/i.test(message)) ||
+		(status === 429 && /rate_limit_error/i.test(message) && /fast mode/i.test(message));
+}
+
+function resolveAdaptiveEffort(modelId: string, level: string): string {
+	if (level === "minimal") return "low";
+	if (modelId === "claude-sonnet-4-6" && (level === "xhigh" || level === "max")) return "high";
+	if (modelId === "claude-opus-4-6" && level === "xhigh") return "high";
+	return level;
+}
 
 /**
  * Headers this provider owns. Model-level headers can add new keys but may not
@@ -88,8 +99,14 @@ function sanitizeSurrogates(text: string): string {
  * still line up after sanitizing.
  */
 function sanitizeToolId(id: string): string {
+	if (/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return id;
 	const cleaned = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-	return cleaned || "_";
+	let hash = 2166136261;
+	for (const char of id) {
+		hash ^= char.codePointAt(0) ?? 0;
+		hash = Math.imul(hash, 16777619);
+	}
+	return `${cleaned.slice(0, 54) || "_"}_${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function normalizeImageMediaType(mimeType: string): string {
@@ -129,8 +146,50 @@ function convertContentBlocks(content: (TextContent | ImageContent)[]): unknown 
 	return blocks;
 }
 
+function repairOrphanedToolCalls(messages: Message[]): Message[] {
+	const repaired: Message[] = [];
+	let pending: ToolCall[] = [];
+	let resultIds = new Set<string>();
+	const flush = () => {
+		for (const call of pending) {
+			if (resultIds.has(call.id)) continue;
+			repaired.push({
+				role: "toolResult",
+				toolCallId: call.id,
+				toolName: call.name,
+				content: [{ type: "text", text: "No result provided" }],
+				isError: true,
+				timestamp: Date.now(),
+			} as ToolResultMessage);
+		}
+		pending = [];
+		resultIds = new Set();
+	};
+
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			flush();
+			if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+			pending = message.content.filter((block): block is ToolCall => block.type === "toolCall");
+			repaired.push(message);
+		} else if (message.role === "toolResult") {
+			if (pending.some((call) => call.id === message.toolCallId) && !resultIds.has(message.toolCallId)) {
+				resultIds.add(message.toolCallId);
+				repaired.push(message);
+			}
+		} else if (message.role === "user") {
+			flush();
+			repaired.push(message);
+		} else {
+			repaired.push(message);
+		}
+	}
+	flush();
+	return repaired;
+}
+
 /** Ported from omp's convertAnthropicMessages (tool naming differs from pi). */
-function convertMessages(messages: Message[], isOAuth: boolean, cacheEnabled: boolean): unknown[] {
+function convertMessages(messages: Message[], model: Model<any>, isOAuth: boolean, cacheEnabled: boolean): unknown[] {
 	const params: any[] = [];
 	const nameFor = (name: string) => (isOAuth ? applyClaudeToolPrefix(name) : name);
 
@@ -159,10 +218,11 @@ function convertMessages(messages: Message[], isOAuth: boolean, cacheEnabled: bo
 			}
 		} else if (msg.role === "assistant") {
 			const blocks: any[] = [];
+			const sameDeployment = msg.provider === model.provider && msg.api === model.api && msg.model === model.id;
 			for (const block of msg.content) {
 				if (block.type === "text" && block.text.trim()) {
 					blocks.push({ type: "text", text: sanitizeSurrogates(block.text) });
-				} else if (block.type === "thinking" && block.redacted) {
+				} else if (block.type === "thinking" && block.redacted && sameDeployment) {
 					blocks.push({ type: "redacted_thinking", data: block.thinkingSignature });
 				} else if (block.type === "thinking" && block.thinking.trim()) {
 					const sig = (block as ThinkingContent).thinkingSignature;
@@ -170,7 +230,7 @@ function convertMessages(messages: Message[], isOAuth: boolean, cacheEnabled: bo
 					// call. History replayed across a provider swap (e.g. an OpenAI/Codex
 					// reasoning-item id landing here) carries a signature Anthropic can't
 					// verify and 400s on, so treat it the same as "no signature".
-					if (sig && msg.api === "anthropic-messages") {
+					if (sig && sameDeployment) {
 						blocks.push({
 							type: "thinking",
 							thinking: sanitizeSurrogates(block.thinking),
@@ -293,7 +353,7 @@ function buildSystemBlocks(context: Context, isOAuth: boolean, cacheEnabled: boo
 		{ type: "text", text: createClaudeBillingHeader(firstUserText(context.messages)) },
 		{ type: "text", text: claudeCodeSystemInstruction },
 	];
-	if (cacheEnabled) blocks[1].cache_control = { type: "ephemeral" };
+	if (cacheEnabled) blocks[blocks.length - 1].cache_control = { type: "ephemeral" };
 	return blocks;
 }
 
@@ -448,7 +508,7 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					extraBetas.push("thinking-binding-controls-2026-08-01");
 				}
 				const betaHeader = buildBetaHeader(
-					oauth ? buildCoworkBetas(true, thinkingRequested) : [],
+					oauth ? buildCoworkBetas(hasTools || thinkingRequested, thinkingRequested) : [],
 					extraBetas,
 				);
 
@@ -463,9 +523,9 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 							"anthropic-version": ANTHROPIC_VERSION,
 							Authorization: `Bearer ${apiKey}`,
 							"x-app": "cli",
-							"x-client-request-id": nodeCrypto.randomUUID(),
+							...(options?.sessionId ? { "X-Claude-Code-Session-Id": options.sessionId } : {}),
 							Connection: "keep-alive",
-							"Accept-Encoding": "gzip, deflate, br",
+							"Accept-Encoding": "gzip, deflate, br, zstd",
 						}
 					: {
 							Accept: "text/event-stream",
@@ -494,21 +554,27 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					: modelMaxTokens;
 				const maxTokens = Math.min(ceiling, options?.maxTokens ?? modelMaxTokens);
 
+				// Repair interrupted/reloaded tool flows before serializing. Anthropic
+				// requires every tool_use to be followed immediately by tool_result.
+				const normalizedContext = { ...context, messages: repairOrphanedToolCalls(context.messages) };
 				// On OAuth the harness prompt is relocated into a leading
 				// <system-reminder> user turn (see relocateSystemPromptForOAuth).
 				const outboundMessages = oauth
-					? relocateSystemPromptForOAuth(context)
-					: context.messages;
+					? relocateSystemPromptForOAuth(normalizedContext)
+					: normalizedContext.messages;
 				const cacheEnabled = options?.cacheRetention !== "none";
 
 				let body: Record<string, unknown> = {
 					model: model.id,
-					messages: convertMessages(outboundMessages, oauth, cacheEnabled),
+					messages: convertMessages(outboundMessages, model, oauth, cacheEnabled),
 				};
 
-				const systemBlocks = buildSystemBlocks(context, oauth, cacheEnabled);
+				const systemBlocks = buildSystemBlocks(normalizedContext, oauth, cacheEnabled);
 				if (systemBlocks) body.system = systemBlocks;
-				if (hasTools) body.tools = convertTools(context.tools!, oauth, cacheEnabled);
+				if (hasTools) {
+					body.tools = convertTools(context.tools!, oauth, cacheEnabled);
+					if (options?.toolChoice) body.tool_choice = { type: options.toolChoice };
+				}
 
 				if (oauth) {
 					body.metadata = { user_id: generateClaudeCloakingUserId() };
@@ -525,7 +591,7 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 								? { block_binding: { prefix_mismatch_behavior: "drop_block" } }
 								: {}),
 						};
-						body.output_config = { effort: level === "minimal" ? "low" : level };
+						body.output_config = { effort: resolveAdaptiveEffort(model.id, level) };
 					} else {
 						const custom = (options?.thinkingBudgets as any)?.[level];
 						const budget = custom ?? THINKING_BUDGETS[level] ?? 10240;
@@ -542,7 +608,7 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				if (replacedBody !== undefined) body = replacedBody as Record<string, unknown>;
 
 				const baseUrl = (model.baseUrl ?? "https://api.anthropic.com").replace(/\/+$/, "");
-				const url = `${baseUrl}/v1/messages`;
+				const url = `${baseUrl}/v1/messages${oauth ? "?beta=true" : ""}`;
 				let serialized = JSON.stringify(body);
 
 				if (config.debug) {
@@ -573,9 +639,10 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				});
 				await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
 
-				if (!response.ok && wantsFast && [400, 403, 429, 529].includes(response.status) && !options?.signal?.aborted) {
-					// Match OMP's user-visible behavior: a server/model/account that
-					// rejects fast mode gets one immediate retry at normal speed.
+				const initialError = !response.ok ? await response.clone().text().catch(() => "") : "";
+				if (!response.ok && wantsFast && isFastModeUnsupported(response.status, initialError) && !options?.signal?.aborted) {
+					// Match OMP's user-visible behavior only for classified fast-mode
+					// rejection; unrelated 400/429 responses must not be duplicated.
 					await response.body?.cancel().catch(() => undefined);
 					delete body.speed;
 					serialized = JSON.stringify(body);
@@ -587,7 +654,6 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 						.join(",");
 					if (normalBetas) headers["anthropic-beta"] = normalBetas;
 					else delete headers["anthropic-beta"];
-					headers["x-client-request-id"] = nodeCrypto.randomUUID();
 					response = await doFetch(url, {
 						method: "POST",
 						headers,

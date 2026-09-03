@@ -82,10 +82,10 @@ function generatePKCE(): { verifier: string; challenge: string } {
 	return { verifier, challenge };
 }
 
-async function postJson(url: string, body: unknown): Promise<string> {
+async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<string> {
 	const response = await fetch(url, {
 		method: "POST",
-		headers: { "Content-Type": "application/json", Accept: "application/json" },
+		headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
 		body: JSON.stringify(body),
 		signal: AbortSignal.timeout(30_000),
 	});
@@ -246,8 +246,8 @@ export async function loginAnthropic(callbacks: OAuthLoginCallbacks): Promise<Pi
 		.then((input) => {
 			const parsed = parseAuthorizationInput(input);
 			if (!parsed.code) throw new Error("No authorization code provided");
-			if (parsed.state !== state) throw new Error("OAuth callback state mismatch");
-			return { code: parsed.code, state: parsed.state };
+			if (parsed.state && parsed.state !== state) throw new Error("OAuth callback state mismatch");
+			return { code: parsed.code, state: parsed.state ?? state };
 		});
 
 	let received: { code: string; state: string };
@@ -284,6 +284,9 @@ export async function refreshAnthropicToken(
 		grant_type: "refresh_token",
 		client_id: CLIENT_ID,
 		refresh_token: credentials.refresh,
+	}, {
+		"anthropic-beta": "oauth-2025-04-20",
+		"User-Agent": "anthropic-sdk-typescript/0.112.1 userOAuthProvider",
 	});
 	const data = parseTokenResponse(responseBody, "token refresh");
 
