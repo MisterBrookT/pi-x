@@ -72,13 +72,17 @@ Restart Pi.
 - `/prompt` to export the exact active prompt
 - a configurable footer with cache efficiency and latest-response token speed
 
-For Claude subscription models, authenticate Pi's native `anthropic` provider and select the model there. Pix does not replace or proxy Pi's model providers.
+For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model under the separate `pix-anthropic` provider. Pix leaves Pi's native `anthropic` provider unchanged; that provider uses Anthropic's third-party extra-usage billing.
+
+> **Anthropic subscription warning:** `pix-anthropic` is an unofficial, OMP-derived compatibility transport that reproduces Claude Code's request fingerprint. Anthropic may change or reject this behavior, and using it may risk account restriction. Use Pi's native `anthropic` provider if that risk is unacceptable.
+>
+> `pix-anthropic` has its own provider and credential namespace, so Pi updates cannot overwrite Pix's implementation or the built-in `anthropic` provider. Pix vendors a reviewed OMP snapshot and tests both its locked Pi version and the latest Pi release; protocol updates are adopted deliberately.
 
 ## Compatibility
 
 | Component | Supported |
 | --- | --- |
-| Pi | Current release; verified with 0.84.4 |
+| Pi | Current release; verified with 0.84.4 and tested weekly against latest |
 | Node.js | 22 or newer |
 | macOS and Linux | Supported |
 | Windows | Expected to work; not yet verified |
@@ -96,7 +100,7 @@ For Claude subscription models, authenticate Pi's native `anthropic` provider an
 | `/websearch [on\|off]` | Show or toggle web access for this session |
 | `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models |
 
-Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while enabled, and it does not affect subagents.
+Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
 Pix keeps three primary roles: `worker` for implementation, `scout` for fast codebase discovery, and `critic` for read-only review. Each can use a different model and thinking level through `/subagent config`.
 

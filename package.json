@@ -54,6 +54,7 @@
   "pi": {
     "extensions": [
       "./extensions/capabilities.ts",
+      "./extensions/pix-anthropic/index.ts",
       "./extensions/benchmark.ts",
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",

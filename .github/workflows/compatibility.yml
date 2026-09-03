@@ -1,0 +1,27 @@
+name: compatibility
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pi: [locked, latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Test against latest Pi
+        if: matrix.pi == 'latest'
+        run: npm install --no-save @earendil-works/pi-coding-agent@latest
+      - run: npm run check
