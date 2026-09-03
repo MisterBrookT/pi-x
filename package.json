@@ -1,6 +1,6 @@
 {
   "name": "pi-pix",
-  "version": "0.3.1",
+  "version": "0.1.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
