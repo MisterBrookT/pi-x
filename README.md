@@ -52,7 +52,7 @@ Or ask an agent:
 Help me install Pix from https://github.com/MisterBrookT/pix. Verify that Pi and Node.js 22+ are available, install Pix using the repository's documented Pi command, and do not change unrelated Pi configuration.
 ```
 
-Restart Pi. Pix's conservative subagent limits apply automatically.
+Restart Pi.
 
 ## What it adds
 
