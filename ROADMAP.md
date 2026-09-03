@@ -1,4 +1,4 @@
 # Roadmap
 
-1. Build a stronger benchmark: task correctness, latency, token usage, tool-call efficiency, and measurable feature value.
+1. Build an out-of-the-box benchmark suite that tracks real-world quality, reliability, latency, token usage, and cost for every Pix feature and supported model.
 2. Promote Pix with a dedicated website, polished visuals, screenshots, demos, and clearer documentation.
