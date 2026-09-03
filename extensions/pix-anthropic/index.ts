@@ -60,13 +60,37 @@ type ModelSpec = {
 };
 
 /**
- * Catalog mirrors pi's own models-store.json for the anthropic provider, so
+ * Catalog tracks OMP's current Anthropic model set needed by Pix, so
  * `/model pix-anthropic/<id>` offers the same set you already have.
  * `maxTokens` stays at the true model ceiling — the OAuth 64k clamp is applied
  * per-request in stream.ts, exactly as omp does it, so API-key users keep the
  * full ceiling.
  */
 const MODELS: ModelSpec[] = [
+	{
+		id: "claude-fable-5-1",
+		name: "Claude Fable 5.1 (pix)",
+		contextWindow: 1000000,
+		maxTokens: 128000,
+		cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+		compat: { forceAdaptiveThinking: true, supportsTemperature: false, supportsStrictTools: true },
+	},
+	{
+		id: "claude-fable-5",
+		name: "Claude Fable 5 (pix)",
+		contextWindow: 1000000,
+		maxTokens: 128000,
+		cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+		compat: { forceAdaptiveThinking: true, supportsTemperature: false, supportsStrictTools: true },
+	},
+	{
+		id: "claude-mythos-5",
+		name: "Claude Mythos 5 (pix)",
+		contextWindow: 1000000,
+		maxTokens: 128000,
+		cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+		compat: { forceAdaptiveThinking: true, supportsTemperature: false, supportsStrictTools: true },
+	},
 	{
 		id: "claude-opus-5",
 		name: "Claude Opus 5 (pix)",

@@ -52,7 +52,17 @@ test("registers an isolated Pix provider using Pi's current provider contract", 
   assert.equal(registration.config.apiKey, "$PIX_ANTHROPIC_API_KEY");
   assert.equal(typeof registration.config.streamSimple, "function");
   assert.equal(typeof registration.config.oauth.login, "function");
-  assert.ok(registration.config.models.some(({ id }) => id === "claude-opus-4-8"));
+  const ids = new Set(registration.config.models.map(({ id }) => id));
+  for (const id of [
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-5",
+    "claude-sonnet-5",
+  ]) {
+    assert.ok(ids.has(id), `missing current OMP model ${id}`);
+  }
+  assert.equal(registration.config.models.length, 12);
 });
 
 test("subscription transport reports Anthropic cache usage exactly", async () => {
@@ -134,6 +144,23 @@ test("transport honors Pi hooks, headers, adaptive thinking, Unicode, and cache 
   assert.deepEqual(seen.request.body.metadata, { hook: true });
   assert.match(JSON.stringify(seen.request.body), /👋/);
   assert.doesNotMatch(JSON.stringify(seen.request.body), /cache_control/);
+});
+
+test("Fable 5.1 uses OMP's safe preserved-thinking binding", async () => {
+  setFastModeEnabled(false);
+  let body;
+  await collect(createPixAnthropicStream()({ ...model, id: "claude-fable-5-1" }, context, {
+    apiKey: "sk-ant-oat01-test",
+    reasoning: "high",
+    fetch: async (_url, init) => {
+      body = JSON.parse(init.body);
+      return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  }));
+  assert.deepEqual(body.thinking, {
+    type: "adaptive",
+    block_binding: { prefix_mismatch_behavior: "drop_block" },
+  });
 });
 
 test("API-key requests can use fast mode", async () => {

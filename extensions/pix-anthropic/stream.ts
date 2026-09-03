@@ -516,7 +516,12 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				if (thinkingRequested) {
 					const level = options!.reasoning as string;
 					if (model.compat?.forceAdaptiveThinking) {
-						body.thinking = { type: "adaptive" };
+						body.thinking = {
+							type: "adaptive",
+							...(model.id === "claude-fable-5-1"
+								? { block_binding: { prefix_mismatch_behavior: "drop_block" } }
+								: {}),
+						};
 						body.output_config = { effort: level === "minimal" ? "low" : level };
 					} else {
 						const custom = (options?.thinkingBudgets as any)?.[level];
