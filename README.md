@@ -42,6 +42,12 @@ Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's de
 Install Pix:
 
 ```bash
+pi install npm:@brooktang/pi-x
+```
+
+Or install the current GitHub version:
+
+```bash
 pi install git:github.com/MisterBrookT/pix
 ```
 
