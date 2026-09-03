@@ -48,13 +48,13 @@ pi install npm:@brooktang/pi-x
 Or install the current GitHub version:
 
 ```bash
-pi install git:github.com/MisterBrookT/pix
+pi install git:github.com/MisterBrookT/pi-x
 ```
 
 Or ask an agent:
 
 ```text
-Help me install Pix from https://github.com/MisterBrookT/pix. Verify that Pi and Node.js 22+ are available, install Pix using the repository's documented Pi command, and do not change unrelated Pi configuration.
+Help me install Pix from https://github.com/MisterBrookT/pi-x. Verify that Pi and Node.js 22+ are available, install Pix using the repository's documented Pi command, and do not change unrelated Pi configuration.
 ```
 
 Restart Pi.

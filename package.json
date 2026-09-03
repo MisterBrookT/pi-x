@@ -14,11 +14,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MisterBrookT/pix.git"
+    "url": "git+https://github.com/MisterBrookT/pi-x.git"
   },
-  "homepage": "https://github.com/MisterBrookT/pix#readme",
+  "homepage": "https://github.com/MisterBrookT/pi-x#readme",
   "bugs": {
-    "url": "https://github.com/MisterBrookT/pix/issues"
+    "url": "https://github.com/MisterBrookT/pi-x/issues"
   },
   "scripts": {
     "check": "node --test && npm run prompt:snapshot",
