@@ -148,19 +148,20 @@ test("transport honors Pi hooks, headers, adaptive thinking, Unicode, and cache 
 
 test("Fable 5.1 uses OMP's safe preserved-thinking binding", async () => {
   setFastModeEnabled(false);
-  let body;
+  let request;
   await collect(createPixAnthropicStream()({ ...model, id: "claude-fable-5-1" }, context, {
     apiKey: "sk-ant-oat01-test",
     reasoning: "high",
     fetch: async (_url, init) => {
-      body = JSON.parse(init.body);
+      request = { body: JSON.parse(init.body), headers: init.headers };
       return new Response(SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
     },
   }));
-  assert.deepEqual(body.thinking, {
+  assert.deepEqual(request.body.thinking, {
     type: "adaptive",
     block_binding: { prefix_mismatch_behavior: "drop_block" },
   });
+  assert.match(request.headers["anthropic-beta"], /thinking-binding-controls-2026-08-01/);
 });
 
 test("API-key requests can use fast mode", async () => {

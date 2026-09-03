@@ -444,6 +444,9 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				const wantsFast = fastModeActiveFor(model);
 				const extraBetas = [...(config.extraBetas ?? [])];
 				if (wantsFast) extraBetas.push("fast-mode-2026-02-01");
+				if (thinkingRequested && model.id === "claude-fable-5-1") {
+					extraBetas.push("thinking-binding-controls-2026-08-01");
+				}
 				const betaHeader = buildBetaHeader(
 					oauth ? buildCoworkBetas(true, thinkingRequested) : [],
 					extraBetas,
