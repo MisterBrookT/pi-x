@@ -1,6 +1,6 @@
 {
   "name": "pi-pix",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -78,5 +78,10 @@
     "README.md",
     "ROADMAP.md",
     "THIRD_PARTY_NOTICES.md"
+  ],
+  "bundledDependencies": [
+    "@narumitw/pi-lsp",
+    "pi-subagents",
+    "pi-web-access"
   ]
 }

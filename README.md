@@ -13,7 +13,6 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 - visible multi-step todo tracking;
 - structured questions when user judgment is required;
 - optional language-server diagnostics;
-- Claude subscription access;
 - prompt and startup-overhead inspection.
 
 In the input editor, `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
@@ -29,8 +28,7 @@ Pix deliberately does not include unevaluated complexity: autonomous memory, an 
 | Todo tracking | Example only | Yes | Yes |
 | Structured questions | Example only | Yes | Yes |
 | LSP diagnostics | No | Optional | Yes |
-| Claude subscription models | No | Yes | Yes |
-| User-facing surface | Small | Five Pix commands | Broad |
+| User-facing surface | Small | Six Pix commands | Broad |
 
 Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's design, excluding personal and project `AGENTS.md`, skills, and conversation context. Provider tokenizers and OMP's conditional configuration can produce different totals. `docs/system-prompts.html` contains the full public-safe naive-Pi → Pix comparison.
 
@@ -40,7 +38,6 @@ Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's de
 
 - [Pi coding agent](https://github.com/earendil-works/pi-mono) installed and available as `pi`
 - Node.js 22 or newer
-- Optional: the authenticated [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) for Claude subscription models
 
 Install Pix:
 
@@ -68,7 +65,17 @@ Restart Pi.
 - `/prompt` to export the exact active prompt
 - a configurable footer with cache efficiency and latest-response token speed
 
-For Claude subscription models, authenticate Pi's native `anthropic` provider and select the model there. Pix deliberately does not proxy model calls through the `claude` CLI: Pi's native provider preserves structured conversation history and prompt caching across tool turns.
+For Claude subscription models, authenticate Pi's native `anthropic` provider and select the model there. Pix does not replace or proxy Pi's model providers.
+
+## Compatibility
+
+| Component | Supported |
+| --- | --- |
+| Pi | Current release; verified with 0.84.4 |
+| Node.js | 22 or newer |
+| macOS and Linux | Supported |
+| Windows | Expected to work; not yet verified |
+| Language servers | Optional and installed separately |
 
 ## Commands
 
@@ -94,7 +101,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 - Use todo for meaningful multi-step work, not every response.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
-- Dependency administration commands are hidden; Pix keeps five user-facing commands.
+- Dependency administration commands are hidden; Pix keeps six user-facing commands.
 
 ## Development
 
@@ -110,7 +117,7 @@ npm run check
 Pix is built on Pi and the work of its extension community. Special thanks to:
 
 - **Pi**, for the coding harness, extension API, and official todo and question examples adapted by Pix.
-- **LazyPi**, whose curated package catalog demonstrated a practical combination of web access, subagents, todo tracking, and Claude CLI integration.
+- **LazyPi**, whose curated package catalog demonstrated a practical combination of web access, subagents, and todo tracking.
 - **pi-web-access**, **pi-subagents**, and **pi-lsp**, which provide Pix's web, delegation, and language-server capabilities.
 
 See `THIRD_PARTY_NOTICES.md` for repositories and licenses.
