@@ -46,6 +46,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("fast", {
     description: "Toggle priority processing for supported models",
+    getArgumentCompletions: (prefix) => {
+      const options = [
+        { value: "on", label: "on", description: "Enable priority processing" },
+        { value: "off", label: "off", description: "Disable priority processing" },
+        { value: "status", label: "status", description: "Show current fast-mode status" },
+      ].filter(option => option.value.startsWith(prefix));
+      return options.length ? options : null;
+    },
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
       if (action && action !== "on" && action !== "off" && action !== "status") {

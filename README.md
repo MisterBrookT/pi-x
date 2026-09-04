@@ -15,7 +15,7 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 - optional language-server diagnostics;
 - prompt and startup-overhead inspection.
 
-In the input editor, `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
+In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. Pix commands still use menus to complete supported arguments such as `/subagent config`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
 
 Pix deliberately does not include unevaluated complexity: autonomous memory, an MCP umbrella, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
 
@@ -64,7 +64,7 @@ Restart Pi.
 - `web_search` and content fetching through `pi-web-access`
 - `subagent` through `pi-subagents`
 - `todo` plus the `/todo` terminal view
-- a restrained smart editor that continues lists and compacts pasted images
+- inline local-history and macOS word completion, plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/bench` for health, startup-speed, and prompt-overhead checks
@@ -102,7 +102,7 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 
 Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
-Pix keeps three primary roles: `worker` for implementation, `scout` for fast codebase discovery, and `critic` for read-only review. Each can use a different model and thinking level through `/subagent config`.
+Pix focuses on two built-in roles from `pi-subagents`: `worker` for implementation and `scout` for fast codebase discovery. Each can use a different model and thinking level through `/subagent config`.
 
 ## LSP
 

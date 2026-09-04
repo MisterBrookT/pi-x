@@ -1,6 +1,6 @@
 {
   "name": "@brooktang/pi-x",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -22,6 +22,7 @@
   },
   "scripts": {
     "check": "node --test && npm run prompt:snapshot",
+    "test:tui": "node --test tests/tui-*.test.mjs",
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
   },
@@ -46,11 +47,6 @@
     "typebox": {
       "optional": true
     }
-  },
-  "pi-subagents": {
-    "agents": [
-      "./agents"
-    ]
   },
   "pi": {
     "extensions": [
@@ -83,6 +79,11 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "bundledDependencies": [
+    "@narumitw/pi-lsp",
+    "pi-subagents",
+    "pi-web-access"
+  ],
+  "bundleDependencies": [
     "@narumitw/pi-lsp",
     "pi-subagents",
     "pi-web-access"

@@ -11,6 +11,8 @@ function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
   pi.registerTool({
     ...tool,
     execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal, onUpdate: unknown, ctx: unknown) {
+      const isInlineWorkflow = typeof params.workflowScript === "string" || typeof params.workflowScriptPath === "string";
+      if (!isInlineWorkflow) return execute(toolCallId, params, signal, onUpdate, ctx);
       const requestedConcurrency = typeof params.globalConcurrencyLimit === "number" ? params.globalConcurrencyLimit : 4;
       const requestedSpawns = typeof params.maxSubagentSpawnsPerRun === "number" ? params.maxSubagentSpawnsPerRun : 8;
       return execute(toolCallId, {

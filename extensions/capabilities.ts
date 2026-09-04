@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 
-const agents = ["worker", "scout", "critic"];
+const agents = ["worker", "scout"];
 const thinkingLevels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 async function configureSubagent(ctx: ExtensionContext) {
@@ -14,7 +14,10 @@ async function configureSubagent(ctx: ExtensionContext) {
   }
   const agent = await ctx.ui.select("Configure subagent", agents);
   if (!agent) return;
-  const models = ["inherit", ...new Set(ctx.modelRegistry.getAvailable().map((model) => `${model.provider}/${model.id}`))];
+  const availableModels = ctx.scopedModels.length
+    ? ctx.scopedModels.map(({ model }) => model)
+    : ctx.modelRegistry.getAvailable();
+  const models = ["inherit", ...new Set(availableModels.map((model) => `${model.provider}/${model.id}`))];
   const model = await ctx.ui.select(`${agent} model`, models);
   if (!model) return;
   const thinking = await ctx.ui.select(`${agent} thinking`, thinkingLevels);
@@ -38,6 +41,18 @@ async function configureSubagent(ctx: ExtensionContext) {
   ctx.ui.notify(`${agent}: ${model}, thinking ${thinking}. Run /reload to apply.`, "info");
 }
 
+const commandOptions = {
+  websearch: [
+    { value: "on", label: "on", description: "Enable web access" },
+    { value: "off", label: "off", description: "Disable web access" },
+  ],
+  subagent: [
+    { value: "on", label: "on", description: "Enable subagents" },
+    { value: "off", label: "off", description: "Disable subagents" },
+    { value: "config", label: "config", description: "Configure role models and thinking" },
+  ],
+} as const;
+
 const capabilities = {
   websearch: ["web_search", "source_check", "fetch_content", "get_search_content"],
   subagent: ["subagent", "bg_wait", "subagent_supervisor"],
@@ -57,6 +72,10 @@ export default function (pi: ExtensionAPI) {
       description: command === "subagent"
         ? "Show, toggle, or configure subagents: /subagent [on|off|config]"
         : "Show or change web access: /websearch [on|off]",
+      getArgumentCompletions: (prefix) => {
+        const matches = commandOptions[command as keyof typeof commandOptions].filter(option => option.value.startsWith(prefix));
+        return matches.length ? [...matches] : null;
+      },
       handler: async (rawArgs, ctx) => {
         const action = rawArgs.trim().toLowerCase();
         const available = new Set(pi.getAllTools().map((tool) => tool.name));

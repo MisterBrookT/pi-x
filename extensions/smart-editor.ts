@@ -2,7 +2,9 @@ import {
 	CustomEditor,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import registerHistoryCompletion from "./history-completion.ts";
+import { WordCompletion } from "../src/word-completion.ts";
 import {
 	continuedListMarker,
 	createImageLabel,
@@ -22,7 +24,17 @@ const isNewline = (data: string): boolean =>
 	data === "\n" ||
 	data === "\x1b[13;2~";
 
+export function completionSuggestion(
+	text: string,
+	historySuggestion: (prefix: string) => string | undefined,
+	wordCompletion: Pick<WordCompletion, "suffix">,
+): string | undefined {
+	if (text.trimStart().startsWith("/")) return undefined;
+	return historySuggestion(text) ?? wordCompletion.suffix(text);
+}
+
 export default function smartEditor(pi: ExtensionAPI) {
+	const historySuggestion = registerHistoryCompletion(pi);
 	const images = new Map<number, ImageReference>();
 	const pastes = new Map<number, PasteReference>();
 	let nextImageId = 1;
@@ -31,12 +43,35 @@ export default function smartEditor(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
 
-		ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 			class SmartEditor extends CustomEditor {
-				private pasteBuffer: string | undefined;
+				private smartPasteBuffer: string | undefined;
+				private readonly wordCompletion = new WordCompletion();
+
+				constructor() {
+					super(tui, editorTheme, keybindings);
+					this.wordCompletion.onUpdate = () => tui.requestRender();
+				}
+
+				private inlineSuggestion(): string | undefined {
+					const lines = this.getLines();
+					const cursor = this.getCursor();
+					if (cursor.line !== lines.length - 1 || cursor.col !== (lines.at(-1)?.length ?? 0)) return undefined;
+					const text = this.getText();
+					return completionSuggestion(text, historySuggestion, this.wordCompletion);
+				}
 
 				override render(width: number): string[] {
-					return super.render(width).map((line) => truncateToWidth(line, width, ""));
+					const suggestion = this.inlineSuggestion()?.split("\n", 1)[0];
+					return super.render(width).map((line) => {
+						if (!suggestion || !line.includes(CURSOR_MARKER)) return truncateToWidth(line, width, "");
+						const markerAt = line.indexOf(CURSOR_MARKER);
+						const beforeCursor = line.slice(0, markerAt);
+						const available = Math.max(0, width - visibleWidth(beforeCursor));
+						const visibleGhost = sliceByColumn(suggestion, 0, available, true);
+						const ghost = editorTheme.selectList.description(visibleGhost);
+						return `${beforeCursor}${CURSOR_MARKER}${ghost}${" ".repeat(Math.max(0, available - visibleWidth(visibleGhost)))}`;
+					});
 				}
 
 				private insertPastedValue(text: string): void {
@@ -66,13 +101,21 @@ export default function smartEditor(pi: ExtensionAPI) {
 				}
 
 				override handleInput(data: string): void {
-					if (this.pasteBuffer !== undefined) {
-						this.pasteBuffer += data;
-						const end = this.pasteBuffer.indexOf(PASTE_END);
+					if (matchesKey(data, "tab")) {
+						const suggestion = this.inlineSuggestion();
+						if (suggestion) {
+							this.insertTextAtCursor(suggestion);
+							return;
+						}
+					}
+
+					if (this.smartPasteBuffer !== undefined) {
+						this.smartPasteBuffer += data;
+						const end = this.smartPasteBuffer.indexOf(PASTE_END);
 						if (end >= 0) {
-							const pasted = this.pasteBuffer.slice(0, end);
-							const remainder = this.pasteBuffer.slice(end + PASTE_END.length);
-							this.pasteBuffer = undefined;
+							const pasted = this.smartPasteBuffer.slice(0, end);
+							const remainder = this.smartPasteBuffer.slice(end + PASTE_END.length);
+							this.smartPasteBuffer = undefined;
 							this.insertPastedValue(pasted);
 							if (remainder) super.handleInput(remainder);
 						}
@@ -82,12 +125,12 @@ export default function smartEditor(pi: ExtensionAPI) {
 					const start = data.indexOf(PASTE_START);
 					if (start >= 0) {
 						if (start > 0) super.handleInput(data.slice(0, start));
-						this.pasteBuffer = data.slice(start + PASTE_START.length);
-						const end = this.pasteBuffer.indexOf(PASTE_END);
+						this.smartPasteBuffer = data.slice(start + PASTE_START.length);
+						const end = this.smartPasteBuffer.indexOf(PASTE_END);
 						if (end >= 0) {
-							const pasted = this.pasteBuffer.slice(0, end);
-							const remainder = this.pasteBuffer.slice(end + PASTE_END.length);
-							this.pasteBuffer = undefined;
+							const pasted = this.smartPasteBuffer.slice(0, end);
+							const remainder = this.smartPasteBuffer.slice(end + PASTE_END.length);
+							this.smartPasteBuffer = undefined;
 							this.insertPastedValue(pasted);
 							if (remainder) super.handleInput(remainder);
 						}
@@ -109,7 +152,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 				}
 			}
 
-			return new SmartEditor(tui, theme, keybindings);
+			return new SmartEditor();
 		});
 	});
 
