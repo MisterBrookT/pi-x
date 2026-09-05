@@ -54,6 +54,7 @@ test("TUI journey renders a visible history ghost and accepts it with Tab", () =
       list.push(handler);
       handlers.set(event, list);
     },
+    registerCommand() {},
   };
   smartEditor(pi);
   let factory;

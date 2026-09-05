@@ -3,8 +3,6 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { CURSOR_MARKER, matchesKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import registerHistoryCompletion from "./history-completion.ts";
-import { WordCompletion } from "../src/word-completion.ts";
 import {
 	continuedListMarker,
 	createImageLabel,
@@ -15,6 +13,9 @@ import {
 	pastedImagePath,
 	shouldCompactPaste,
 } from "../src/smart-editor.ts";
+import { WordCompletion } from "../src/word-completion.ts";
+import registerAiCompletion, { type CompletionService } from "./ai-completion.ts";
+import registerHistoryCompletion from "./history-completion.ts";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -28,13 +29,17 @@ export function completionSuggestion(
 	text: string,
 	historySuggestion: (prefix: string) => string | undefined,
 	wordCompletion: Pick<WordCompletion, "suffix">,
+	ai?: Pick<CompletionService, "completion" | "isEnabled">,
 ): string | undefined {
 	if (text.trimStart().startsWith("/")) return undefined;
+	if (ai?.isEnabled()) return ai.completion.suffix(text);
+	if (!text) return undefined;
 	return historySuggestion(text) ?? wordCompletion.suffix(text);
 }
 
 export default function smartEditor(pi: ExtensionAPI) {
 	const historySuggestion = registerHistoryCompletion(pi);
+	const ai = registerAiCompletion(pi);
 	const images = new Map<number, ImageReference>();
 	const pastes = new Map<number, PasteReference>();
 	let nextImageId = 1;
@@ -51,6 +56,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 				constructor() {
 					super(tui, editorTheme, keybindings);
 					this.wordCompletion.onUpdate = () => tui.requestRender();
+					ai.completion.onUpdate = () => tui.requestRender();
 				}
 
 				private inlineSuggestion(): string | undefined {
@@ -58,7 +64,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 					const cursor = this.getCursor();
 					if (cursor.line !== lines.length - 1 || cursor.col !== (lines.at(-1)?.length ?? 0)) return undefined;
 					const text = this.getText();
-					return completionSuggestion(text, historySuggestion, this.wordCompletion);
+					return completionSuggestion(text, historySuggestion, this.wordCompletion, ai);
 				}
 
 				override render(width: number): string[] {

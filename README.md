@@ -15,7 +15,7 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 - optional language-server diagnostics;
 - prompt and startup-overhead inspection.
 
-In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. Pix commands still use menus to complete supported arguments such as `/subagent config`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
+In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. `/complete on` adds AI completion: a small cloud model (Haiku 4.5 through `pix-anthropic` by default; `/complete model` picks another) finishes the sentence you are typing from the recent conversation, and proposes a likely next request when the editor is empty. While it is on, the history and dictionary suggestions step aside so the ghost text always comes from the model. Requests are debounced and cancelled on every keystroke, send only the last few turns, and the feature stays off until you enable it. Pix commands still use menus to complete supported arguments such as `/subagent config`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
 
 Pix deliberately does not include unevaluated complexity: autonomous memory, an MCP umbrella, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
 
@@ -64,7 +64,7 @@ Restart Pi.
 - `web_search` and content fetching through `pi-web-access`
 - `subagent` through `pi-subagents`
 - `todo` plus the `/todo` terminal view
-- inline local-history and macOS word completion, plus a restrained smart editor that continues lists and compacts pasted images
+- inline local-history and macOS word completion, optional AI completion via `/complete`, plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/bench` for health, startup-speed, and prompt-overhead checks
@@ -92,6 +92,7 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 
 | Command | Purpose |
 | --- | --- |
+| `/complete [on\|off\|model\|status]` | Toggle AI inline completion or pick its model; persists across sessions |
 | `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
@@ -126,7 +127,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 
 - Delegate only genuinely independent or context-heavy work.
 - Default limits: 4 concurrent children, 8 per run, 24 per session, and one level of delegation.
-- Use todo for meaningful multi-step work, not every response.
+- Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG without acting as an automatic scheduler.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
 - Dependency administration commands are hidden; Pix keeps seven user-facing commands.
