@@ -28,7 +28,7 @@ test("subagent arguments render and complete in Pi's editor", async () => {
   await new Promise(resolve => setTimeout(resolve, 30));
   const rendered = editor.render(80).join("\n");
   assert.match(rendered, /config/);
-  assert.match(rendered, /Configure role models and thinking/);
+  assert.match(rendered, /Configure role models, thinking, and fallback/);
   editor.handleInput("\t");
   assert.equal(editor.getText(), "/subagent config");
 });

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 
-const agents = ["worker", "scout"];
+const agents = ["worker", "scout", "reviewer", "researcher"];
 const thinkingLevels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 async function configureSubagent(ctx: ExtensionContext) {
@@ -22,6 +22,15 @@ async function configureSubagent(ctx: ExtensionContext) {
   if (!model) return;
   const thinking = await ctx.ui.select(`${agent} thinking`, thinkingLevels);
   if (!thinking) return;
+  const fallback = await ctx.ui.select(`${agent} fallback model`, ["none", ...models.filter((candidate) => candidate !== "inherit" && candidate !== model)]);
+  if (!fallback) return;
+  let fallbackThinking = "default";
+  if (fallback !== "none") {
+    const chosen = await ctx.ui.select(`${agent} fallback thinking`, thinkingLevels);
+    if (!chosen) return;
+    fallbackThinking = chosen;
+  }
+  const fallbackModels = fallback === "none" ? undefined : [fallbackThinking === "default" ? fallback : `${fallback}:${fallbackThinking}`];
 
   const path = join(homedir(), ".pi/agent/settings.json");
   let text = "{}\n";
@@ -34,11 +43,12 @@ async function configureSubagent(ctx: ExtensionContext) {
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" } as const;
   text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "model"], model, { formattingOptions }));
   text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "thinking"], thinking === "default" ? undefined : thinking === "off" ? false : thinking, { formattingOptions }));
+  text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "fallbackModels"], fallbackModels, { formattingOptions }));
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.pix-${process.pid}`;
   await writeFile(temporary, text.endsWith("\n") ? text : `${text}\n`, "utf8");
   await rename(temporary, path);
-  ctx.ui.notify(`${agent}: ${model}, thinking ${thinking}. Run /reload to apply.`, "info");
+  ctx.ui.notify(`${agent}: ${model}, thinking ${thinking}, fallback ${fallbackModels?.[0] ?? "none"}. Run /reload to apply.`, "info");
 }
 
 const commandOptions = {
@@ -49,7 +59,7 @@ const commandOptions = {
   subagent: [
     { value: "on", label: "on", description: "Enable subagents" },
     { value: "off", label: "off", description: "Disable subagents" },
-    { value: "config", label: "config", description: "Configure role models and thinking" },
+    { value: "config", label: "config", description: "Configure role models, thinking, and fallback" },
   ],
 } as const;
 

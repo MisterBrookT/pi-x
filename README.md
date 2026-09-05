@@ -99,11 +99,11 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/prompt [path]` | Export the exact effective Pix system prompt |
 | `/bench` | Check Pix health, startup speed, and prompt overhead |
 | `/websearch [on\|off]` | Show or toggle web access for this session |
-| `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models |
+| `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models, thinking, and fallback |
 
 Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
-Pix focuses on two built-in roles from `pi-subagents`: `worker` for implementation and `scout` for fast codebase discovery. Each can use a different model and thinking level through `/subagent config`.
+Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent config`.
 
 Todo can create a whole plan in one call with `replace`, rather than adding each step separately:
 
