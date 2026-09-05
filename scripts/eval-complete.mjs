@@ -46,7 +46,7 @@ function ask(model, system, user) {
   return (r.stdout || "").trim();
 }
 
-const JUDGE_SYSTEM = "You grade an autocomplete prediction for a terminal chat. Compare the prediction with what the user actually typed. Reply with one digit only: 2 = same intent and close wording, 1 = same intent, different wording or partial, 0 = different intent or unusable.";
+const JUDGE_SYSTEM = "You grade an autocomplete prediction for a terminal chat with a coding agent. You see the recent conversation, the message the user actually sent (a style reference, not the answer key), and the prediction. Judge whether the prediction is a sensible, natural thing for this user to send at that point: right voice (terse, casual, same language), plausible content given the agent's last message, correct continuation of any structure the user started. Reply with one digit only: 2 = would happily accept it, 1 = plausible but a bit off in voice or length, 0 = unnatural, agent-voiced, or wrong.";
 
 const pairs = (await loadPairs()).sort(() => rand() - 0.5).slice(0, SAMPLES);
 if (!pairs.length) { console.error("no session pairs found"); process.exit(1); }
@@ -59,7 +59,8 @@ for (const pair of pairs) {
   const c = buildPrompt({ kind: "continue", text: typed }, pair.context);
   const suggest = normalizeSuggestion(ask(MODEL, s.system, s.user)) ?? "";
   const cont = normalizeContinuation(ask(MODEL, c.system, c.user), typed) ?? "";
-  const grade = (pred, full) => Number(ask(JUDGE, JUDGE_SYSTEM, `Actual message:\n${pair.target}\n\nPrediction:\n${full}`).match(/[012]/)?.[0] ?? 0);
+  const excerpt = pair.context.map(t => `${t.role === "user" ? "User" : "Agent"}: ${t.text.slice(-600)}`).join("\n\n");
+  const grade = (pred, full) => (pred ? Number(ask(JUDGE, JUDGE_SYSTEM, `Conversation:\n${excerpt}\n\nActual message (style reference):\n${pair.target}\n\nPrediction:\n${full}`).match(/[012]/)?.[0] ?? 0) : 1);
   const row = { source: pair.source, actual: pair.target, suggest, sScore: grade(suggest, suggest), typed, cont, cScore: grade(cont, typed + cont) };
   rows.push(row);
   console.log(`\n[${rows.length}/${pairs.length}] ${row.source}\n  actual : ${row.actual.replace(/\n/g, " ⏎ ")}\n  empty  : ${row.suggest}   (${row.sScore})\n  typed  : ${row.typed.replace(/\n/g, " ⏎ ")}▏${row.cont}   (${row.cScore})`);

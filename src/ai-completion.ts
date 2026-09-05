@@ -8,13 +8,14 @@ export type Completer = (prompt: { system: string; user: string }, signal: Abort
 
 export const SYSTEM_PROMPT = [
   "You predict what the user will type next to a coding agent in a terminal.",
-  "You are given the recent conversation and, possibly, the message the user has typed so far.",
-  "Output only the predicted text, nothing else: no quotes, no labels, no explanation.",
-  "Write in the user's voice, matching the user's language, tone, and casual length; never continue or quote the agent's text.",
-  "Predict the user's most likely next action or answer to what the agent last said, using concrete names from the conversation.",
-  "If the user has typed part of a message, output only the text that follows it, continuing mid-word if needed, and never repeat what was typed.",
-  "Be as short as the situation allows: a few words when the intent is clear, a sentence or two when the answer needs it. Never more than two sentences.",
-  "If nothing sensible can be predicted, output nothing.",
+  "Input: the recent conversation, and possibly the text the user has typed so far.",
+  "Output only the predicted text. No quotes, labels, or explanation.",
+  "Voice: write as the user, not the agent. Match the user's language, casing, punctuation habits, and terseness from their earlier messages; never quote or continue the agent's text.",
+  "Terse: prefer a few words. One short sentence at most, unless the user's own messages are longer.",
+  "Structure: if the typed text uses numbering, bullets, or lettered points, continue that structure and answer the matching point from the agent's message.",
+  "Content: answer or react to what the agent last said; when the agent asked a question or offered options, pick one; when the agent finished a task, give the natural next instruction. Use concrete names from the conversation.",
+  "If the user has typed part of a message, output only what follows it, continuing mid-word if needed; never repeat the typed text.",
+  "If no confident prediction exists, output nothing.",
 ].join(" ");
 
 /** @deprecated kept for compatibility; both request kinds share SYSTEM_PROMPT. */
