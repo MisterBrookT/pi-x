@@ -104,6 +104,20 @@ Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`,
 
 Pix focuses on two built-in roles from `pi-subagents`: `worker` for implementation and `scout` for fast codebase discovery. Each can use a different model and thinking level through `/subagent config`.
 
+Todo can create a whole plan in one call with `replace`, rather than adding each step separately:
+
+```json
+{"action":"replace","items":[
+  {"text":"Inspect backend"},
+  {"text":"Inspect frontend"},
+  {"text":"Summarize","dependsOn":["1","2"]}
+]}
+```
+
+`replace` replaces the existing list, restarts IDs at `1`, and makes every item pending. Invalid plans leave the old list untouched. Use `add` to append a step and `set` to update its status. Nested items use `parentId` (put parents first); dependencies may point to later items in the same replacement.
+
+Optional `dependsOn` IDs block work until all prerequisites are done. Independent ready items may be delegated in parallel, but Todo never launches subagents automatically. To reopen a completed prerequisite, first reset its active/done dependents to pending; Todo does not silently reset other tasks.
+
 ## LSP
 
 Pix does not download language servers. Install only what your projects need. For TypeScript, either Biome or `typescript-language-server` can provide diagnostics; repository typecheck and tests remain authoritative.
