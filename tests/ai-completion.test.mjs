@@ -13,11 +13,11 @@ class FakeScheduler {
 
 test("continuation replies are normalized into ghost suffixes", () => {
     assert.equal(normalizeContinuation("please run the tests", "please run"), " the tests");
-  assert.equal(normalizeContinuation("\"  the tests\"\nsecond line", "please run "), "the tests");
+  assert.equal(normalizeContinuation("\"  the tests\"\nsecond line", "please run "), "the tests second line");
   assert.equal(normalizeContinuation("mit this change", "com"), "mit this change");
   assert.equal(normalizeContinuation("", "anything"), undefined);
   assert.equal(normalizeContinuation("please run", "please run"), undefined);
-  assert.equal(normalizeSuggestion("1. \"Run the tests\"\nor commit"), "Run the tests");
+  assert.equal(normalizeSuggestion("1. \"Run the tests\"\nor commit"), "Run the tests or commit");
 });
 
 test("only prose prompts of some length trigger requests", () => {
@@ -31,11 +31,11 @@ test("only prose prompts of some length trigger requests", () => {
 test("prompts include a bounded excerpt of the recent conversation", () => {
   const turns = Array.from({ length: 6 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `turn ${i} ${"x".repeat(2000)}` }));
   const { system, user } = buildPrompt({ kind: "continue", text: "now ru" }, turns);
-  assert.match(system, /autocomplete/);
+  assert.match(system, /predict what the user will type/);
   assert.doesNotMatch(user, /turn 0|turn 1/);
   assert.match(user, /turn 5/);
-  assert.match(user, /Partial message:\nnow ru/);
-  assert.ok(user.length < 4 * 1300 + 200);
+  assert.match(user, /Typed so far:\nnow ru/);
+  assert.ok(user.length < 800 * 3 + 2500 + 400);
   assert.match(buildPrompt({ kind: "suggest" }, []).user, /no prior conversation/);
 });
 
@@ -74,7 +74,7 @@ test("empty editor proposes the next prompt once per conversation state", async 
   let replies = 0;
   const completion = new AiCompletion(async prompt => {
     replies++;
-    assert.match(prompt.system, /next message/);
+    assert.match(prompt.system, /predict what the user will type/);
     return "Run npm test";
   }, { scheduler });
   assert.equal(completion.suffix(""), undefined, "no conversation, no suggestion");

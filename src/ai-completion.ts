@@ -6,25 +6,37 @@ export interface ConversationTurn { role: "user" | "assistant"; text: string }
 export type CompletionRequest = { kind: "continue"; text: string } | { kind: "suggest" };
 export type Completer = (prompt: { system: string; user: string }, signal: AbortSignal) => Promise<string>;
 
-export const CONTINUE_SYSTEM_PROMPT =
-  "You autocomplete the user's next message to a coding agent in a terminal. " +
-  "Given the recent conversation and the partial message, output only the text that should follow the partial message so it becomes one complete, natural request. " +
-  "Continue mid-word if the partial ends mid-word. Keep it short: at most one sentence. Never repeat the partial text, never add quotes or explanations. " +
-  "If there is no sensible continuation, output nothing.";
+export const SYSTEM_PROMPT = [
+  "You predict what the user will type next to a coding agent in a terminal.",
+  "You are given the recent conversation and, possibly, the message the user has typed so far.",
+  "Output only the predicted text, nothing else: no quotes, no labels, no explanation.",
+  "Write in the user's voice, matching the user's language, tone, and casual length; never continue or quote the agent's text.",
+  "Predict the user's most likely next action or answer to what the agent last said, using concrete names from the conversation.",
+  "If the user has typed part of a message, output only the text that follows it, continuing mid-word if needed, and never repeat what was typed.",
+  "Be as short as the situation allows: a few words when the intent is clear, a sentence or two when the answer needs it. Never more than two sentences.",
+  "If nothing sensible can be predicted, output nothing.",
+].join(" ");
 
-export const SUGGEST_SYSTEM_PROMPT =
-  "You suggest the user's most likely next message to a coding agent in a terminal, based on the recent conversation. " +
-  "Output exactly one short imperative request, under 12 words, with no quotes or explanation. " +
-  "Prefer concrete follow-ups such as running checks, committing, fixing the reported problem, or continuing the stated next step.";
+/** @deprecated kept for compatibility; both request kinds share SYSTEM_PROMPT. */
+export const CONTINUE_SYSTEM_PROMPT = SYSTEM_PROMPT;
+export const SUGGEST_SYSTEM_PROMPT = SYSTEM_PROMPT;
 
-const MAX_TURN_CHARS = 1200;
 const MAX_TURNS = 4;
+const MAX_TURN_CHARS = 800;
+const MAX_LAST_AGENT_CHARS = 2500;
 
+function tail(text: string, max: number): string {
+  return text.length > max ? `…${text.slice(-max)}` : text;
+}
+
+/** Last few turns; agent replies keep their tail (where conclusions and next steps live), the latest one kept longer. */
 export function conversationExcerpt(turns: readonly ConversationTurn[]): string {
-  return turns
-    .slice(-MAX_TURNS)
-    .map(turn => {
-      const text = turn.text.length > MAX_TURN_CHARS ? `${turn.text.slice(0, MAX_TURN_CHARS)}…` : turn.text;
+  const recent = turns.slice(-MAX_TURNS);
+  const lastAgent = recent.map(turn => turn.role).lastIndexOf("assistant");
+  return recent
+    .map((turn, index) => {
+      const limit = index === lastAgent ? MAX_LAST_AGENT_CHARS : MAX_TURN_CHARS;
+      const text = turn.role === "assistant" ? tail(turn.text, limit) : turn.text.length > limit ? `${turn.text.slice(0, limit)}…` : turn.text;
       return `${turn.role === "user" ? "User" : "Agent"}: ${text}`;
     })
     .join("\n\n");
@@ -33,18 +45,17 @@ export function conversationExcerpt(turns: readonly ConversationTurn[]): string 
 export function buildPrompt(request: CompletionRequest, turns: readonly ConversationTurn[]): { system: string; user: string } {
   const excerpt = conversationExcerpt(turns) || "(no prior conversation)";
   if (request.kind === "suggest") {
-    return { system: SUGGEST_SYSTEM_PROMPT, user: `Recent conversation:\n\n${excerpt}\n\nNext message:` };
+    return { system: SYSTEM_PROMPT, user: `Recent conversation:\n\n${excerpt}\n\nThe user has not typed anything yet. Predicted next message:` };
   }
   return {
-    system: CONTINUE_SYSTEM_PROMPT,
-    user: `Recent conversation:\n\n${excerpt}\n\nPartial message:\n${request.text}\n\nContinuation:`,
+    system: SYSTEM_PROMPT,
+    user: `Recent conversation:\n\n${excerpt}\n\nTyped so far:\n${request.text}\n\nText that follows:`,
   };
 }
 
 /** Normalize a model reply into a ghost-text suffix for the given partial text. */
 export function normalizeContinuation(reply: string, partial: string): string | undefined {
-  let text = reply.replace(/\r/g, "").split("\n").map(line => line.trim()).filter(Boolean)[0] ?? "";
-  text = text.replace(/^["'`]+|["'`]+$/g, "");
+  let text = collapseReply(reply).replace(/^["'`]+|["'`]+$/g, "");
   if (!text) return undefined;
   const trimmedPartial = partial.trimEnd();
   if (trimmedPartial && text.toLowerCase().startsWith(trimmedPartial.toLowerCase())) text = text.slice(trimmedPartial.length);
@@ -57,9 +68,13 @@ export function normalizeContinuation(reply: string, partial: string): string | 
 }
 
 export function normalizeSuggestion(reply: string): string | undefined {
-  const first = reply.replace(/\r/g, "").split("\n").map(line => line.trim()).filter(Boolean)[0] ?? "";
-  const text = first.replace(/^[-*\d.)\s]+/, "").replace(/^["'`]+|["'`]+$/g, "").trim();
+  const text = collapseReply(reply).replace(/^[-*\d.)\s]+/, "").replace(/^["'`]+|["'`]+$/g, "").trim();
   return text || undefined;
+}
+
+/** Whole reply as one line: the editor renders ghost text inline and wraps it itself. */
+function collapseReply(reply: string): string {
+  return reply.replace(/\r/g, "").split("\n").map(line => line.trim().replace(/^["'`]+|["'`]+$/g, "")).filter(Boolean).join(" ");
 }
 
 export function shouldRequestCompletion(text: string): boolean {

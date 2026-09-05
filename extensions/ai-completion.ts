@@ -70,7 +70,7 @@ export default function registerAiCompletion(pi: ExtensionAPI): CompletionServic
     const message = await context.modelRegistry.complete(model, {
       systemPrompt: prompt.system,
       messages: [{ role: "user", content: [{ type: "text", text: prompt.user }], timestamp: Date.now() }],
-    }, { signal, maxTokens: 60, temperature: 0.2, cacheRetention: "none" } as never);
+    }, { signal, maxTokens: 120, temperature: 0.2, cacheRetention: "none" } as never);
     if (message.stopReason === "error" || message.stopReason === "aborted") throw new Error(message.errorMessage ?? message.stopReason);
     return messageText(message.content);
   };

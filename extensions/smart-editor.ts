@@ -17,6 +17,30 @@ import { WordCompletion } from "../src/word-completion.ts";
 import registerAiCompletion, { type CompletionService } from "./ai-completion.ts";
 import registerHistoryCompletion from "./history-completion.ts";
 
+const MAX_GHOST_LINES = 3;
+
+/** Wrap ghost text by words: the first line has `firstWidth` columns, later lines `width`; ends with … when cut. */
+export function wrapGhost(text: string, firstWidth: number, width: number, maxLines: number): string[] {
+	const lines: string[] = [];
+	let current = /^\s/.test(text) ? " " : "";
+	let room = firstWidth;
+	const flush = () => { lines.push(current); current = ""; room = width; };
+	for (const word of text.split(/\s+/).filter(Boolean)) {
+		const candidate = current && current !== " " ? `${current} ${word}` : `${current}${word}`;
+		if (visibleWidth(candidate) <= room) { current = candidate; continue; }
+		if (current) flush();
+		if (lines.length >= maxLines) { current = word; break; }
+		current = visibleWidth(word) <= room ? word : sliceByColumn(word, 0, room, true);
+	}
+	if (current && lines.length < maxLines) { lines.push(current); current = ""; }
+	if (current && lines.length) {
+		const last = lines[lines.length - 1];
+		const lastWidth = lines.length === 1 ? firstWidth : width;
+		lines[lines.length - 1] = visibleWidth(last) < lastWidth ? `${last}…` : `${sliceByColumn(last, 0, lastWidth - 1, true)}…`;
+	}
+	return lines;
+}
+
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 const isNewline = (data: string): boolean =>
@@ -68,16 +92,19 @@ export default function smartEditor(pi: ExtensionAPI) {
 				}
 
 				override render(width: number): string[] {
-					const suggestion = this.inlineSuggestion()?.split("\n", 1)[0];
-					return super.render(width).map((line) => {
-						if (!suggestion || !line.includes(CURSOR_MARKER)) return truncateToWidth(line, width, "");
-						const markerAt = line.indexOf(CURSOR_MARKER);
-						const beforeCursor = line.slice(0, markerAt);
-						const available = Math.max(0, width - visibleWidth(beforeCursor));
-						const visibleGhost = sliceByColumn(suggestion, 0, available, true);
-						const ghost = editorTheme.selectList.description(visibleGhost);
-						return `${beforeCursor}${CURSOR_MARKER}${ghost}${" ".repeat(Math.max(0, available - visibleWidth(visibleGhost)))}`;
-					});
+					const suggestion = this.inlineSuggestion();
+					const lines = super.render(width);
+					const cursorAt = suggestion ? lines.findIndex((line) => line.includes(CURSOR_MARKER)) : -1;
+					if (!suggestion || cursorAt < 0) return lines.map((line) => truncateToWidth(line, width, ""));
+
+					const beforeCursor = lines[cursorAt].slice(0, lines[cursorAt].indexOf(CURSOR_MARKER));
+					const available = Math.max(0, width - visibleWidth(beforeCursor));
+					const [first = "", ...rest] = wrapGhost(suggestion, available, Math.max(1, width), MAX_GHOST_LINES);
+					const ghost = (text: string, room: number) => `${editorTheme.selectList.description(text)}${" ".repeat(Math.max(0, room - visibleWidth(text)))}`;
+					const out = lines.map((line, index) => (index === cursorAt ? `${beforeCursor}${CURSOR_MARKER}${ghost(first, available)}` : truncateToWidth(line, width, "")));
+					// Longer predictions continue on the lines right below the cursor.
+					out.splice(cursorAt + 1, 0, ...rest.map((text) => ghost(text, width)));
+					return out;
 				}
 
 				private insertPastedValue(text: string): void {

@@ -73,7 +73,7 @@ test("AI completion is off by default and /complete on persists the preference",
 });
 
 test("AI ghost text renders from conversation context and is accepted with Tab", async () => {
-  const h = createHarness({ replies: text => (text.includes("Partial message") ? "the full suite" : "Commit the fix") });
+  const h = createHarness({ replies: text => (text.includes("Typed so far") ? "the full suite" : "Commit the fix") });
   await h.start();
   const editor = h.editor();
 
@@ -106,7 +106,7 @@ test("enabled AI completion replaces history and dictionary suggestions entirely
   let resolveReply;
   const h = createHarness({ replies: () => "unused" });
   h.ctx.modelRegistry.complete = (_model, context) => new Promise(resolve => {
-    if (context.messages[0].content[0].text.includes("Partial message")) resolveReply = resolve;
+    if (context.messages[0].content[0].text.includes("Typed so far")) resolveReply = resolve;
   });
   await h.start();
   await h.command("on");
@@ -141,4 +141,24 @@ test("/complete model picks from the registry and an unavailable model falls bac
   assert.deepEqual(JSON.parse(await readFile(process.env.PIX_COMPLETE_CONFIG, "utf8")), { enabled: true, model: { provider: "openai", id: "gpt-5-mini" } });
   await h.command("off");
   assert.match(h.notifications.at(-1).message, /is off/);
+});
+
+test("long predictions wrap onto the lines below the cursor and Tab accepts all of it", async () => {
+  const long = "yes, and after that also update the README section about completion so it explains the new behaviour to readers, then bump the version and publish it to npm once more";
+  const h = createHarness({ replies: () => long });
+  await h.start();
+  h.select("pix-anthropic/claude-haiku-4-5");
+  await h.command("model");
+  if (!/is on/.test(h.notifications.at(-1).message)) await h.command("on");
+  const editor = h.editor();
+  editor.setText("sure ");
+  editor.render(40);
+  await tick(400);
+  const lines = editor.render(40).map(stripCursor);
+  assert.match(lines[1], /^sure <g>yes, and after that also update/);
+  assert.match(lines[2], /^<g>README section about completion/);
+  assert.ok(lines.filter(line => line.includes("<g>")).length <= 3);
+  assert.match(lines.filter(line => line.includes("<g>")).at(-1), /…<\/g>/, "cut predictions end with an ellipsis");
+  editor.handleInput("\t");
+  assert.equal(editor.getText(), `sure ${long}`);
 });
