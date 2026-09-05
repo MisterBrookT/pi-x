@@ -59,7 +59,7 @@ const commandOptions = {
   subagent: [
     { value: "on", label: "on", description: "Enable subagents" },
     { value: "off", label: "off", description: "Disable subagents" },
-    { value: "config", label: "config", description: "Configure role models, thinking, and fallback" },
+    { value: "config", label: "config", description: "Configure role models, thinking, fallback" },
   ],
 } as const;
 

@@ -28,7 +28,7 @@ test("slash commands stay minimal", async () => {
   assert.match(capabilities, /getArgumentCompletions/);
   assert.match(capabilities, /ctx\.scopedModels\.length/);
   assert.match(capabilities, /ctx\.scopedModels\.map/);
-  assert.match(capabilities, /const agents = \["worker", "scout"\]/);
+  assert.match(capabilities, /const agents = \["worker", "scout", "reviewer", "researcher"\]/);
   assert.doesNotMatch(capabilities, /critic/);
   assert.match(todo, /registerCommand\("todo"/);
   assert.doesNotMatch(todo, /registerCommand\("todos"/);
