@@ -28,7 +28,7 @@ Pix deliberately does not include unevaluated complexity: autonomous memory, an 
 | Todo tracking | Example only | Yes | Yes |
 | Structured questions | Example only | Yes | Yes |
 | LSP diagnostics | No | Optional | Yes |
-| User-facing surface | Small | Seven Pix commands | Broad |
+| User-facing surface | Small | Nine Pix commands | Broad |
 
 Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's design, excluding personal and project `AGENTS.md`, skills, and conversation context. Provider tokenizers and OMP's conditional configuration can produce different totals. `docs/system-prompts.html` contains the full public-safe naive-Pi → Pix comparison.
 
@@ -66,6 +66,7 @@ Restart Pi.
 - `todo` plus the `/todo` terminal view
 - inline local-history and macOS word completion, optional AI completion via `/complete`, plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
+- `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/bench` for health, startup-speed, and prompt-overhead checks
 - `/fast` for persistent priority-processing control on supported providers
@@ -100,10 +101,44 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/bench` | Check Pix health, startup speed, and prompt overhead |
 | `/websearch [on\|off]` | Show or toggle web access for this session |
 | `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models, thinking, and fallback |
+| `/computer-check` | Report computer-use backend and permission state |
 
 Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
 Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent config`.
+
+## Computer use
+
+When a task can only be done through a graphical interface, `computer` drives
+desktop apps and browser pages. The model writes one JavaScript program against
+a small `cua` API rather than one tool call per click, so a multi-step flow or a
+loop costs a single round trip.
+
+It is optional. Install the backend to enable it:
+
+```bash
+pi install npm:@injaneity/pi-computer-use
+```
+
+On macOS the helper needs **Accessibility** and **Screen & System Audio
+Recording** in System Settings. These cannot be granted programmatically, so
+`/computer-check` reports what is missing and links to the exact settings pane.
+
+```js
+await cua.roots({ app: "Notes" });
+const state = await cua.observe({ root: "@r1" });
+await state.act(
+  { action: "setText", ref: "@e7", text: "hello" },
+  { text: "hello", until: "present" },   // verify the result, do not assume it
+);
+```
+
+Actions are counted against a budget, every backend call is traced back to the
+model, and actions on irreversible controls such as Send or Delete require
+confirmation before they run. Prefer a CLI, an API, or `osascript` first;
+`computer` is for interfaces that expose nothing else. See
+[`docs/adr/0001-computer-use.md`](docs/adr/0001-computer-use.md) for the design
+and its tradeoffs.
 
 Todo can create a whole plan in one call with `replace`, rather than adding each step separately:
 
