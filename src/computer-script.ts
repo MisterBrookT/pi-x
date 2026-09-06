@@ -1,0 +1,326 @@
+/**
+ * Codex-style script surface for computer use.
+ *
+ * The model writes one JavaScript program against a `cua` API instead of
+ * emitting one tool call per UI step. Loops, branches, and extraction run
+ * inside a single call; only the script's return value and its log come back.
+ *
+ * This module is deliberately free of any Pi or backend imports so the whole
+ * contract can be tested against fake operations.
+ */
+
+export interface ToolResultLike {
+	content?: Array<{ type?: string; text?: string }>;
+	details?: unknown;
+}
+
+/** The subset of the computer-use backend this surface needs. */
+export interface ComputerOperations {
+	find(params: { text?: string; app?: string; bundleId?: string; pid?: number; kind?: string }): Promise<ToolResultLike>;
+	observe(params: { root?: string; mode?: string }): Promise<ToolResultLike>;
+	search(params: { stateId?: string; text?: string; role?: string; capability?: string }): Promise<ToolResultLike>;
+	expand(params: { stateId?: string; ref: string; depth?: number }): Promise<ToolResultLike>;
+	inspect(params: { stateId?: string; ref: string }): Promise<ToolResultLike>;
+	act(params: { stateId?: string; actions: UiAction[]; expect?: UiCondition }): Promise<ToolResultLike>;
+	readText(params: { stateId?: string; ref: string; offset?: number }): Promise<ToolResultLike>;
+	waitFor(params: Record<string, unknown>): Promise<ToolResultLike>;
+	launchBrowser(params: { url?: string }): Promise<ToolResultLike>;
+	navigateBrowser(params: { stateId?: string; url: string }): Promise<ToolResultLike>;
+	evaluateBrowser(params: { stateId: string; expression: string }): Promise<ToolResultLike>;
+}
+
+export interface UiAction {
+	action: "press" | "click" | "setText" | "typeText" | "keypress" | "scroll" | "drag" | "moveMouse";
+	ref?: string;
+	x?: number;
+	y?: number;
+	text?: string;
+	keys?: string[];
+	scrollX?: number;
+	scrollY?: number;
+	path?: Array<{ x: number; y: number }>;
+	button?: "left" | "right" | "middle";
+	clickCount?: number;
+}
+
+export interface UiCondition {
+	ref?: string;
+	scopeRef?: string;
+	text?: string;
+	role?: string;
+	value?: string;
+	until?: "present" | "absent";
+	timeoutMs?: number;
+}
+
+/** Actions that change the world. Everything else is a read. */
+const MUTATING = new Set(["press", "click", "setText", "typeText", "keypress", "drag"]);
+
+/** Verbs whose consequences a user cannot undo by looking away. */
+const IRREVERSIBLE = /\b(send|submit|delete|remove|discard|pay|purchase|buy|checkout|publish|post|confirm|transfer|withdraw|archive|unsend|revoke)\b/i;
+
+export interface ScriptBudget {
+	/** Hard cap on mutating actions per script run. */
+	maxActions: number;
+	/** Hard cap on backend calls of any kind per script run. */
+	maxCalls: number;
+}
+
+export const DEFAULT_BUDGET: ScriptBudget = { maxActions: 40, maxCalls: 200 };
+
+export interface ScriptEvent {
+	kind: "call" | "action" | "log";
+	name: string;
+	detail?: string;
+}
+
+export class BudgetExceededError extends Error {}
+export class ConfirmationRequiredError extends Error {}
+
+export interface CuaApiOptions {
+	operations: ComputerOperations;
+	budget?: ScriptBudget;
+	/** Called for every backend call and every log line, in order. */
+	onEvent?: (event: ScriptEvent) => void;
+	/**
+	 * Gate for irreversible actions. Return true to allow. When omitted,
+	 * irreversible actions are refused so a missing gate can never mean
+	 * "allowed by default".
+	 */
+	confirm?: (summary: string) => Promise<boolean>;
+	/** Set of already-approved summaries, so a loop asks once, not N times. */
+	approved?: Set<string>;
+}
+
+const textOf = (result: ToolResultLike | undefined): string =>
+	(result?.content ?? [])
+		.filter((part) => part?.type !== "image")
+		.map((part) => part?.text ?? "")
+		.filter(Boolean)
+		.join("\n");
+
+/** Backend results carry the successor state id in details.stateId. */
+const stateIdOf = (result: ToolResultLike | undefined, fallback?: string): string | undefined => {
+	const details = result?.details as { stateId?: unknown } | undefined;
+	const next = typeof details?.stateId === "string" ? details.stateId : undefined;
+	return next ?? fallback;
+};
+
+export const summarizeActions = (actions: UiAction[]): string =>
+	actions
+		.map((a) => {
+			const target = a.ref ?? (a.x !== undefined ? `(${a.x},${a.y})` : "focus");
+			const payload = a.text !== undefined ? ` ${JSON.stringify(a.text)}` : a.keys ? ` ${a.keys.join("+")}` : "";
+			return `${a.action} ${target}${payload}`.trim();
+		})
+		.join("; ");
+
+/** True when an action batch reads as irreversible from its own description. */
+export const isIrreversible = (actions: UiAction[], stateText: string): boolean =>
+	actions.some((action) => {
+		if (!MUTATING.has(action.action)) return false;
+		if (action.action !== "press" && action.action !== "click") return false;
+		const label = labelForRef(stateText, action.ref);
+		return label !== undefined && IRREVERSIBLE.test(label);
+	});
+
+/** Find the outline label for a ref, e.g. `@e9 button "Send"` -> `button "Send"`. */
+export const labelForRef = (stateText: string, ref: string | undefined): string | undefined => {
+	if (!ref) return undefined;
+	const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = new RegExp(`${escaped}\\b([^\\n]*)`).exec(stateText);
+	return match ? match[1].trim() : undefined;
+};
+
+/** A saved UI state. Every read is answered from the cached outline. */
+export interface CuaState {
+	readonly id: string;
+	readonly text: string;
+	search(query: { text?: string; role?: string; capability?: string }): Promise<string>;
+	expand(ref: string, depth?: number): Promise<string>;
+	inspect(ref: string): Promise<string>;
+	read(ref: string, offset?: number): Promise<string>;
+	act(actions: UiAction | UiAction[], expect?: UiCondition): Promise<CuaState>;
+	waitFor(condition: UiCondition): Promise<string>;
+	navigate(url: string): Promise<CuaState>;
+	eval(expression: string): Promise<unknown>;
+}
+
+export interface CuaApi {
+	roots(query?: { text?: string; app?: string; bundleId?: string; pid?: number; kind?: string }): Promise<string>;
+	observe(target?: { root?: string; mode?: "semantic" | "visual" | "fused" }): Promise<CuaState>;
+	launchBrowser(url?: string): Promise<CuaState>;
+}
+
+export interface CuaRuntime {
+	cua: CuaApi;
+	log: (...values: unknown[]) => void;
+	/** Ordered record of everything the script did. */
+	events: ScriptEvent[];
+	/** Mutating actions performed so far. */
+	actionCount: () => number;
+}
+
+export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
+	const { operations } = options;
+	const budget = options.budget ?? DEFAULT_BUDGET;
+	const approved = options.approved ?? new Set<string>();
+	const events: ScriptEvent[] = [];
+	let calls = 0;
+	let actions = 0;
+
+	const record = (event: ScriptEvent) => {
+		events.push(event);
+		options.onEvent?.(event);
+	};
+
+	const spend = (name: string, detail?: string) => {
+		calls += 1;
+		if (calls > budget.maxCalls) {
+			throw new BudgetExceededError(`Script exceeded ${budget.maxCalls} backend calls. Narrow the script and run it again.`);
+		}
+		record({ kind: "call", name, detail });
+	};
+
+	const makeState = (result: ToolResultLike, previousId?: string): CuaState => {
+		const id = stateIdOf(result, previousId);
+		if (!id) throw new Error("Backend returned no stateId; the observation cannot be used.");
+		const text = textOf(result);
+
+		const state: CuaState = {
+			id,
+			text,
+			async search(query) {
+				spend("search_ui", JSON.stringify(query));
+				return textOf(await operations.search({ stateId: id, ...query }));
+			},
+			async expand(ref, depth) {
+				spend("expand_ui", ref);
+				return textOf(await operations.expand({ stateId: id, ref, depth }));
+			},
+			async inspect(ref) {
+				spend("inspect_ui", ref);
+				return textOf(await operations.inspect({ stateId: id, ref }));
+			},
+			async read(ref, offset) {
+				spend("read_text", ref);
+				return textOf(await operations.readText({ stateId: id, ref, offset }));
+			},
+			async waitFor(condition) {
+				spend("wait_for", JSON.stringify(condition));
+				return textOf(await operations.waitFor({ stateId: id, ...condition }));
+			},
+			async act(input, expect) {
+				const list = Array.isArray(input) ? input : [input];
+				if (list.length === 0) throw new Error("act requires at least one action.");
+				const mutations = list.filter((a) => MUTATING.has(a.action)).length;
+				if (actions + mutations > budget.maxActions) {
+					throw new BudgetExceededError(
+						`Script exceeded ${budget.maxActions} UI actions. Report progress instead of continuing to act.`,
+					);
+				}
+				const summary = summarizeActions(list);
+				if (isIrreversible(list, text) && !approved.has(summary)) {
+					if (!options.confirm) {
+						throw new ConfirmationRequiredError(
+							`Refusing an irreversible action without a confirmation gate: ${summary}`,
+						);
+					}
+					const ok = await options.confirm(summary);
+					if (!ok) throw new ConfirmationRequiredError(`User declined: ${summary}`);
+					approved.add(summary);
+				}
+				spend("act_ui", summary);
+				actions += mutations;
+				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
+				const result = await operations.act({ stateId: id, actions: list, expect });
+				return makeState(result, id);
+			},
+			async navigate(url) {
+				spend("navigate_browser", url);
+				return makeState(await operations.navigateBrowser({ stateId: id, url }), id);
+			},
+			async eval(expression) {
+				spend("evaluate_browser", expression.slice(0, 120));
+				const result = await operations.evaluateBrowser({ stateId: id, expression });
+				return extractEvaluationValue(textOf(result));
+			},
+		};
+		return state;
+	};
+
+	const cua: CuaApi = {
+		async roots(query) {
+			spend("find_roots", query ? JSON.stringify(query) : undefined);
+			return textOf(await operations.find(query ?? {}));
+		},
+		async observe(target) {
+			spend("observe_ui", target?.root);
+			return makeState(await operations.observe(target ?? {}));
+		},
+		async launchBrowser(url) {
+			spend("launch_browser", url);
+			return makeState(await operations.launchBrowser({ url }));
+		},
+	};
+
+	return {
+		cua,
+		log: (...values) => record({ kind: "log", name: values.map(stringify).join(" ") }),
+		events,
+		actionCount: () => actions,
+	};
+};
+
+const stringify = (value: unknown): string => {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
+};
+
+/** The backend appends `Evaluation value: <json>`; recover the value. */
+export const extractEvaluationValue = (text: string): unknown => {
+	const marker = "Evaluation value: ";
+	const index = text.lastIndexOf(marker);
+	if (index === -1) return undefined;
+	const raw = text.slice(index + marker.length).trim();
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return raw;
+	}
+};
+
+export interface ScriptOutcome {
+	value: unknown;
+	events: ScriptEvent[];
+	actions: number;
+	error?: Error;
+}
+
+/**
+ * Render a script run for the model: the returned value, the log, and a
+ * compact trace so a failure is diagnosable without a second round trip.
+ */
+export const renderOutcome = (outcome: ScriptOutcome): string => {
+	const lines: string[] = [];
+	const logs = outcome.events.filter((event) => event.kind === "log");
+	if (logs.length > 0) {
+		lines.push("Log:");
+		for (const entry of logs) lines.push(`  ${entry.name}`);
+	}
+	const trace = outcome.events.filter((event) => event.kind === "call");
+	if (trace.length > 0) {
+		lines.push(`Trace (${trace.length} calls, ${outcome.actions} actions):`);
+		for (const entry of trace) lines.push(`  ${entry.name}${entry.detail ? ` ${entry.detail}` : ""}`);
+	}
+	if (outcome.error) {
+		lines.push(`Error: ${outcome.error.message}`);
+	} else {
+		lines.push(`Result: ${outcome.value === undefined ? "undefined" : stringify(outcome.value)}`);
+	}
+	return lines.join("\n");
+};
