@@ -15,7 +15,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
-import { groupByOrigin, inventory, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { groupByOrigin, inventory, pickerLabel, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
 
 const ENTRY = "pix-tool-overrides";
 
@@ -34,10 +36,27 @@ const readOverrides = (ctx: ExtensionContext): Overrides => {
 	return merged;
 };
 
+/**
+ * Name a package from its directory, so a local checkout of pix reports the
+ * same name as the published package instead of its folder name.
+ */
+const packageNames = new Map<string, string | undefined>();
+const packageName = (baseDir: string): string | undefined => {
+	if (packageNames.has(baseDir)) return packageNames.get(baseDir);
+	let name: string | undefined;
+	try {
+		name = JSON.parse(readFileSync(join(baseDir, "package.json"), "utf8")).name;
+	} catch {
+		// Not a package directory, or unreadable; fall back to the directory name.
+	}
+	packageNames.set(baseDir, name);
+	return name;
+};
+
 export default function tool(pi: ExtensionAPI) {
 	let overrides: Overrides = {};
 
-	const rows = (): ToolCost[] => inventory(pi.getAllTools(), pi.getActiveTools());
+	const rows = (): ToolCost[] => inventory(pi.getAllTools(), pi.getActiveTools(), packageName);
 
 	/** Apply saved choices over whatever the rest of the session decided. */
 	const apply = () => {
@@ -108,13 +127,15 @@ export default function tool(pi: ExtensionAPI) {
 			}
 
 			await ctx.ui.custom((tui, theme, _keybindings, done) => {
-				// Grouped by origin, so the list reads as Pi's built-ins versus what
-				// each package added. SettingsList has no heading row, so the group is
-				// carried in each label instead of as a separate unselectable item.
-				const items: SettingItem[] = groupByOrigin(rows()).flatMap((group) =>
+				// Grouped by origin, but the tool name leads each row: the name is what
+				// is being chosen, and a repeated package prefix in front turns the list
+				// into a column of identical text with the names pushed out of view.
+				const groups = groupByOrigin(rows());
+				const nameWidth = Math.max(0, ...groups.flatMap((group) => group.rows.map((row) => row.name.length)));
+				const items: SettingItem[] = groups.flatMap((group) =>
 					group.rows.map((row) => ({
 						id: row.name,
-						label: `${group.origin} · ${row.name}`,
+						label: pickerLabel(row, nameWidth),
 						description: `~${row.tokens} tokens per request · ${group.origin} contributes ~${group.tokens.toLocaleString()} in total`,
 						currentValue: row.active ? "on" : "off",
 						values: ["on", "off"],

@@ -11,8 +11,11 @@ export interface ToolInfoLike {
 	name: string;
 	description?: string;
 	parameters?: unknown;
-	sourceInfo?: { source?: string; path?: string };
+	sourceInfo?: { source?: string; path?: string; baseDir?: string; origin?: string };
 }
+
+/** Reads a package name from a package root, so a local checkout is named like a published one. */
+export type PackageNamer = (baseDir: string) => string | undefined;
 
 export interface ToolCost {
 	name: string;
@@ -44,25 +47,52 @@ export const toolChars = (tool: ToolInfoLike): number =>
 		input_schema: tool.parameters ?? {},
 	}).length;
 
-/** Human-readable provenance, preferring a package name over a long path. */
-export const originOf = (tool: ToolInfoLike): string => {
-	const source = tool.sourceInfo?.source;
+/** Drop the scope, so `@brooktang/pi-x` reads as `pi-x` in a narrow list. */
+const unscope = (name: string): string => (name.startsWith("@") ? (name.split("/")[1] ?? name) : name);
+
+/**
+ * Human-readable provenance.
+ *
+ * `sourceInfo.source` is the package spec pi was configured with, which is
+ * `npm:@injaneity/pi-computer-use` for an installed package but a relative path
+ * such as `../../workspace/tools/pix` for a local checkout. Naming a package
+ * after its directory would call the same package different things depending on
+ * how it was installed, so a local checkout is resolved to the name in its
+ * package.json and both end up as the published name.
+ */
+export const originOf = (tool: ToolInfoLike, packageName?: PackageNamer): string => {
+	const source = tool.sourceInfo?.source ?? "";
 	if (source === "builtin") return "builtin";
 	if (source === "sdk") return "sdk";
-	const path = tool.sourceInfo?.path ?? "";
-	const scoped = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(path)?.[1];
-	if (scoped) return scoped;
-	const file = /([^/]+)\.[cm]?[jt]s$/.exec(path)?.[1];
-	return file ?? source ?? "extension";
+
+	if (source.startsWith("npm:")) return unscope(source.slice(4));
+
+	const baseDir = tool.sourceInfo?.baseDir;
+	if (baseDir) {
+		const declared = packageName?.(baseDir);
+		if (declared) return unscope(declared);
+		const dir = baseDir.replace(/\/+$/, "").split("/").pop();
+		if (dir) return dir;
+	}
+
+	const scoped = /node_modules\/((?:@[^/]+\/)?[^/]+)/.exec(tool.sourceInfo?.path ?? "")?.[1];
+	if (scoped) return unscope(scoped);
+	return source ? unscope(source) : "extension";
 };
 
 /** Cost rows, heaviest first, so the expensive tools are the visible ones. */
-export const inventory = (tools: ToolInfoLike[], active: Iterable<string>): ToolCost[] => {
+export const inventory = (tools: ToolInfoLike[], active: Iterable<string>, packageName?: PackageNamer): ToolCost[] => {
 	const enabled = new Set(active);
 	return tools
 		.map((tool) => {
 			const chars = toolChars(tool);
-			return { name: tool.name, chars, tokens: estimateTokens(chars), origin: originOf(tool), active: enabled.has(tool.name) };
+			return {
+				name: tool.name,
+				chars,
+				tokens: estimateTokens(chars),
+				origin: originOf(tool, packageName),
+				active: enabled.has(tool.name),
+			};
 		})
 		.sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name));
 };
@@ -127,3 +157,13 @@ export const renderTable = (rows: ToolCost[]): string => {
 	});
 	return [summarize(rows), "", ...sections].join("\n");
 };
+
+/**
+ * Picker label: the tool name leads, with its origin as trailing context.
+ *
+ * The name is what is being chosen, so it must be readable at a glance; a long
+ * package prefix in front pushes every name past the eye and makes a column of
+ * identical prefixes. Names are padded to a shared width so the origins line up.
+ */
+export const pickerLabel = (row: ToolCost, nameWidth: number): string =>
+	`${row.name.padEnd(nameWidth)}  ${row.origin}`;

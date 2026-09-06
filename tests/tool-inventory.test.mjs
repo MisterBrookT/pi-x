@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateTokens, groupByOrigin, inventory, originOf, renderTable, summarize, toolChars, totals } from "../src/tool-inventory.ts";
+import { estimateTokens, groupByOrigin, inventory, originOf, pickerLabel, renderTable, summarize, toolChars, totals } from "../src/tool-inventory.ts";
 
 const tool = (name, extra = {}) => ({
 	name,
@@ -31,12 +31,14 @@ test("rows are ordered by cost so the expensive tools are visible first", () => 
 	assert.deepEqual(rows.map((row) => row.active), [false, false, true]);
 });
 
-test("origin prefers a package name over a long path", () => {
+test("builtin and sdk tools are labelled plainly", () => {
 	assert.equal(originOf(tool("a", { sourceInfo: { source: "builtin" } })), "builtin");
-	assert.equal(originOf(tool("a", { sourceInfo: { source: "ext", path: "/x/node_modules/@injaneity/pi-computer-use/e.ts" } })), "@injaneity/pi-computer-use");
-	assert.equal(originOf(tool("a", { sourceInfo: { source: "ext", path: "/x/node_modules/pi-web-access/i.ts" } })), "pi-web-access");
-	assert.equal(originOf(tool("a", { sourceInfo: { source: "ext", path: "/w/pix/extensions/computer.ts" } })), "computer");
+	assert.equal(originOf(tool("a", { sourceInfo: { source: "sdk" } })), "sdk");
 	assert.equal(originOf(tool("a", {})), "extension");
+});
+
+test("a node_modules path is used when no spec or baseDir is available", () => {
+	assert.equal(originOf(tool("a", { sourceInfo: { source: "ext", path: "/x/node_modules/pi-web-access/i.ts" } })), "pi-web-access");
 });
 
 test("totals count only what is actually sent", () => {
@@ -87,4 +89,57 @@ test("an empty inventory does not divide by zero or crash", () => {
 	assert.deepEqual(inventory([], []), []);
 	assert.match(summarize([]), /0 of 0 tools active/);
 	assert.equal(typeof renderTable([]), "string");
+});
+
+test("an installed package is named by its npm spec, not its directory", () => {
+	// Real shape from pi: source is the configured spec, baseDir the package root.
+	const info = { source: "npm:@injaneity/pi-computer-use", baseDir: "/Users/x/.pi/agent/npm/node_modules/@injaneity/pi-computer-use" };
+	assert.equal(originOf({ ...tool("act_ui"), sourceInfo: info }), "pi-computer-use");
+});
+
+test("a local checkout reports the package name, not the folder name", () => {
+	// pix loaded from a working copy has source "../../workspace/tools/pix",
+	// which must not make the same package look different from the installed one.
+	const info = { source: "../../workspace/tools/pix", origin: "package", baseDir: "/Users/x/workspace/tools/pix" };
+	const namer = (dir) => (dir === "/Users/x/workspace/tools/pix" ? "@brooktang/pi-x" : undefined);
+	assert.equal(originOf({ ...tool("todo"), sourceInfo: info }, namer), "pi-x");
+});
+
+test("an unreadable package directory falls back to the directory name", () => {
+	const info = { source: "../local/thing", origin: "package", baseDir: "/tmp/some-extension" };
+	assert.equal(originOf({ ...tool("x"), sourceInfo: info }, () => undefined), "some-extension");
+});
+
+test("the scope is dropped so names stay short in a narrow list", () => {
+	assert.equal(originOf({ ...tool("a"), sourceInfo: { source: "npm:@scope/pkg" } }), "pkg");
+	assert.equal(originOf({ ...tool("a"), sourceInfo: { source: "npm:plain" } }), "plain");
+});
+
+test("tools from one package group together regardless of install style", () => {
+	const namer = () => "@brooktang/pi-x";
+	const rows = inventory(
+		[
+			{ ...tool("todo"), sourceInfo: { source: "../../workspace/tools/pix", baseDir: "/w/pix" } },
+			{ ...tool("computer"), sourceInfo: { source: "npm:@brooktang/pi-x", baseDir: "/n/pi-x" } },
+		],
+		[],
+		namer,
+	);
+	assert.deepEqual(groupByOrigin(rows).map((g) => g.origin), ["pi-x"], "one package, one group");
+});
+
+test("the picker label leads with the tool name and aligns the origin", () => {
+	const rows = inventory(
+		[
+			{ ...tool("act_ui"), sourceInfo: { source: "npm:@injaneity/pi-computer-use" } },
+			{ ...tool("a_very_long_tool_name"), sourceInfo: { source: "builtin" } },
+		],
+		[],
+	);
+	const width = Math.max(...rows.map((r) => r.name.length));
+	const labels = rows.map((r) => pickerLabel(r, width));
+	assert.ok(labels.every((label) => !label.startsWith("pi-") && !label.startsWith("builtin")), "the name comes first");
+	assert.ok(labels[0].startsWith(rows[0].name));
+	const originColumns = labels.map((label, i) => label.length - rows[i].origin.length);
+	assert.equal(new Set(originColumns).size, 1, "origins start at one shared column");
 });
