@@ -18,6 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { callTitle, resultLines, scriptSummary } from "../src/computer-render.ts";
+import { CHROME_CANDIDATES, installWrapper } from "../src/chrome-wrapper.ts";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "../src/computer-script.ts";
 import { renderOutcome, runScript } from "../src/computer-runner.ts";
 import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
@@ -200,6 +201,28 @@ const tccOperations = (pi: ExtensionAPI) => ({
 	},
 });
 
+/**
+ * Point the backend at a Chrome shim that adds `--use-mock-keychain`.
+ *
+ * Without it, the managed browser's throwaway profile makes macOS show a
+ * "Keychain Not Found" dialog over whatever the user is doing. Done once per
+ * process, and never overrides an executable the user set themselves.
+ */
+let chromeWrapperInstalled = false;
+const suppressChromeKeychainPrompt = () => {
+	if (chromeWrapperInstalled || process.platform !== "darwin") return;
+	chromeWrapperInstalled = true;
+	if (process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE) return;
+	try {
+		const executable = CHROME_CANDIDATES.find((candidate) => existsSync(candidate));
+		if (!executable) return;
+		process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE = installWrapper({ executable });
+	} catch {
+		// A missing temp directory or read-only filesystem only means the prompt
+		// may appear; it must never stop the tool from running.
+	}
+};
+
 export default function computer(pi: ExtensionAPI, options?: { backend?: BackendModule }) {
 	let backendPromise: Promise<BackendModule | undefined> | undefined;
 	const backendOnce = () => {
@@ -283,6 +306,7 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 				};
 			}
 
+			suppressChromeKeychainPrompt();
 			await backend.ensureComputerUseSetup(ctx, signal);
 
 			const runtime = createCuaRuntime({

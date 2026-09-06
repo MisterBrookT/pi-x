@@ -292,3 +292,37 @@ test("stopping is safe when the backend cannot release anything", async () => {
 test("both computer commands are registered", () => {
 	assert.deepEqual(harness().commandNames().sort(), ["computer-check", "computer-stop"]);
 });
+
+test("running a script points the backend at the keychain-safe Chrome shim", async () => {
+	// The managed browser's throwaway profile otherwise makes macOS show a modal
+	// "Keychain Not Found" dialog over whatever the user is doing.
+	if (process.platform !== "darwin") return;
+	const previous = process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+	delete process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+	try {
+		const backend = createFakeBackend();
+		const h = harness({ backend: backend.module });
+		await h.tool.execute("t", { script: "return 1;" }, undefined, undefined, h.ctx);
+		const shim = process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+		if (shim === undefined) return; // No Chrome installed on this machine.
+		const { readFileSync } = await import("node:fs");
+		assert.match(readFileSync(shim, "utf8"), /--use-mock-keychain/);
+	} finally {
+		if (previous === undefined) delete process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+		else process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE = previous;
+	}
+});
+
+test("an executable the user set themselves is left alone", async () => {
+	const previous = process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+	process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE = "/my/own/chrome";
+	try {
+		const backend = createFakeBackend();
+		const h = harness({ backend: backend.module });
+		await h.tool.execute("t", { script: "return 1;" }, undefined, undefined, h.ctx);
+		assert.equal(process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE, "/my/own/chrome");
+	} finally {
+		if (previous === undefined) delete process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE;
+		else process.env.PI_COMPUTER_USE_CHROME_EXECUTABLE = previous;
+	}
+});
