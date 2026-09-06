@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateTokens, inventory, originOf, renderTable, summarize, toolChars, totals } from "../src/tool-inventory.ts";
+import { estimateTokens, groupByOrigin, inventory, originOf, renderTable, summarize, toolChars, totals } from "../src/tool-inventory.ts";
 
 const tool = (name, extra = {}) => ({
 	name,
@@ -54,12 +54,33 @@ test("the summary states the active count and the per-request cost", () => {
 	assert.match(text, /tokens per request/);
 });
 
-test("the plain table aligns and marks state, for use without a TUI", () => {
-	const table = renderTable(inventory([tool("short"), tool("a_much_longer_name")], ["short"]));
-	const lines = table.split("\n").slice(2);
-	assert.match(lines[0], /^(on |off) /);
-	assert.equal(new Set(lines.map((line) => line.indexOf(" tok"))).size, 1, "columns line up");
-	assert.ok(lines.some((line) => line.startsWith("on  short")));
+test("the table groups tools by origin, built-ins first", () => {
+	// A flat list of thirty tools hides which package is responsible for the weight.
+	const rows = inventory(
+		[
+			{ ...tool("read"), sourceInfo: { source: "builtin" } },
+			{ ...tool("computer", { description: "x".repeat(3000) }), sourceInfo: { source: "ext", path: "/n/node_modules/pi-computer/e.ts" } },
+			{ ...tool("web_search"), sourceInfo: { source: "ext", path: "/n/node_modules/pi-web-access/i.ts" } },
+		],
+		["read", "computer"],
+	);
+	const groups = groupByOrigin(rows);
+	assert.equal(groups[0].origin, "builtin", "built-ins lead as the stable baseline");
+	assert.deepEqual(groups.slice(1).map((g) => g.origin), ["pi-computer", "pi-web-access"], "heavier packages first");
+	assert.equal(groups[1].tokens, rows.find((r) => r.name === "computer").tokens);
+
+	const table = renderTable(rows);
+	assert.match(table, /^builtin {2}\(1\/1 active · ~\d+ tok\)$/m);
+	assert.match(table, /^pi-computer {2}\(1\/1 active · ~\d+ tok\)$/m);
+	assert.match(table, /^pi-web-access {2}\(0\/1 active · ~\d+ tok\)$/m);
+	assert.match(table, /^ {2}on {2}computer/m);
+	assert.match(table, /^ {2}off web_search/m);
+});
+
+test("grouping keeps every tool exactly once", () => {
+	const rows = inventory([tool("a"), tool("b"), tool("c")], ["a"]);
+	const grouped = groupByOrigin(rows).flatMap((g) => g.rows.map((r) => r.name));
+	assert.deepEqual(grouped.sort(), ["a", "b", "c"]);
 });
 
 test("an empty inventory does not divide by zero or crash", () => {

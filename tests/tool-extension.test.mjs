@@ -51,15 +51,16 @@ test("/tool registers one command", () => {
 	assert.deepEqual(harness().commandNames(), ["tool"]);
 });
 
-test("/tool list shows every tool with its cost and state", async () => {
+test("/tool list shows every tool with its cost, grouped by origin", async () => {
 	const h = harness({ active: ["read"] });
 	await h.run("list");
 	const text = h.notices.at(-1).message;
 	assert.match(text, /1 of 3 tools active/);
-	assert.match(text, /on  read/);
-	assert.match(text, /off computer/);
-	// The heaviest tool is listed first so the cost is obvious.
-	const body = text.split("\n").slice(2);
+	assert.match(text, /^builtin {2}\(1\/3 active · ~\d+ tok\)$/m, "the group states its own share");
+	assert.match(text, /^ {2}on {2}read/m);
+	assert.match(text, /^ {2}off computer/m);
+	// Within a group the heaviest tool leads, so the cost is obvious.
+	const body = text.split("\n").filter((line) => line.startsWith("  "));
 	assert.ok(body[0].includes("computer"), "the most expensive tool leads");
 });
 

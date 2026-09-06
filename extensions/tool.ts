@@ -15,7 +15,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
-import { inventory, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
+import { groupByOrigin, inventory, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
 
 const ENTRY = "pix-tool-overrides";
 
@@ -108,14 +108,18 @@ export default function tool(pi: ExtensionAPI) {
 			}
 
 			await ctx.ui.custom((tui, theme, _keybindings, done) => {
-				const current = rows();
-				const items: SettingItem[] = current.map((row) => ({
-					id: row.name,
-					label: row.name,
-					description: `~${row.tokens} tokens per request · from ${row.origin}`,
-					currentValue: row.active ? "on" : "off",
-					values: ["on", "off"],
-				}));
+				// Grouped by origin, so the list reads as Pi's built-ins versus what
+				// each package added. SettingsList has no heading row, so the group is
+				// carried in each label instead of as a separate unselectable item.
+				const items: SettingItem[] = groupByOrigin(rows()).flatMap((group) =>
+					group.rows.map((row) => ({
+						id: row.name,
+						label: `${group.origin} · ${row.name}`,
+						description: `~${row.tokens} tokens per request · ${group.origin} contributes ~${group.tokens.toLocaleString()} in total`,
+						currentValue: row.active ? "on" : "off",
+						values: ["on", "off"],
+					})),
+				);
 
 				const container = new Container();
 				const header = {

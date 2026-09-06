@@ -87,12 +87,43 @@ export const summarize = (rows: ToolCost[]): string => {
 	return `${activeCount} of ${totalCount} tools active · ~${activeTokens.toLocaleString()} tokens per request`;
 };
 
+export interface ToolGroup {
+	origin: string;
+	rows: ToolCost[];
+	tokens: number;
+}
+
+/**
+ * Group by origin so the list reads as "what Pi gives me" versus "what each
+ * package added". A flat list of thirty tools hides which package is
+ * responsible for the weight, which is the decision the list has to support.
+ * Built-ins come first as the stable baseline; packages follow by total cost.
+ */
+export const groupByOrigin = (rows: ToolCost[]): ToolGroup[] => {
+	const groups = new Map<string, ToolCost[]>();
+	for (const row of rows) {
+		const existing = groups.get(row.origin);
+		if (existing) existing.push(row);
+		else groups.set(row.origin, [row]);
+	}
+	return [...groups.entries()]
+		.map(([origin, group]) => ({ origin, rows: group, tokens: group.reduce((sum, row) => sum + row.tokens, 0) }))
+		.sort((a, b) => {
+			if (a.origin === "builtin" !== (b.origin === "builtin")) return a.origin === "builtin" ? -1 : 1;
+			return b.tokens - a.tokens || a.origin.localeCompare(b.origin);
+		});
+};
+
 /** Plain-text table for non-TUI callers, where an interactive picker is unavailable. */
 export const renderTable = (rows: ToolCost[]): string => {
 	const width = Math.max(4, ...rows.map((row) => row.name.length));
-	const lines = rows.map(
-		(row) =>
-			`${row.active ? "on " : "off"} ${row.name.padEnd(width)}  ${String(row.tokens).padStart(5)} tok  ${row.origin}`,
-	);
-	return [summarize(rows), "", ...lines].join("\n");
+	const sections = groupByOrigin(rows).map((group) => {
+		const active = group.rows.filter((row) => row.active).length;
+		const heading = `${group.origin}  (${active}/${group.rows.length} active · ~${group.tokens.toLocaleString()} tok)`;
+		const lines = group.rows.map(
+			(row) => `  ${row.active ? "on " : "off"} ${row.name.padEnd(width)}  ${String(row.tokens).padStart(5)} tok`,
+		);
+		return [heading, ...lines].join("\n");
+	});
+	return [summarize(rows), "", ...sections].join("\n");
 };
