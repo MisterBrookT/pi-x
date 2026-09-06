@@ -1,5 +1,5 @@
 /**
- * `/tools` — see what every tool costs, and turn tools on or off.
+ * `/tool` — see what every tool costs, and turn tools on or off.
  *
  * Tool schemas are re-sent on every request, so the active set is a standing
  * charge on both the context window and the model's attention. Pix otherwise
@@ -17,7 +17,7 @@ import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { inventory, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
 
-const ENTRY = "pix-tools-overrides";
+const ENTRY = "pix-tool-overrides";
 
 /** Explicit per-tool choices; absent tools keep whatever default applies. */
 interface Overrides {
@@ -34,7 +34,7 @@ const readOverrides = (ctx: ExtensionContext): Overrides => {
 	return merged;
 };
 
-export default function tools(pi: ExtensionAPI) {
+export default function tool(pi: ExtensionAPI) {
 	let overrides: Overrides = {};
 
 	const rows = (): ToolCost[] => inventory(pi.getAllTools(), pi.getActiveTools());
@@ -67,7 +67,7 @@ export default function tools(pi: ExtensionAPI) {
 		pi.appendEntry(ENTRY, { overrides: { [name]: enabled } });
 	};
 
-	pi.registerCommand("tools", {
+	pi.registerCommand("tool", {
 		description: "Show what each tool costs per request, and enable or disable tools",
 		getArgumentCompletions: (prefix) => {
 			const matches = rows()
@@ -84,12 +84,12 @@ export default function tools(pi: ExtensionAPI) {
 		handler: async (rawArgs, ctx) => {
 			const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 
-			// `/tools <name> [on|off]` stays scriptable and works without a TUI.
+			// `/tool <name> [on|off]` stays scriptable and works without a TUI.
 			if (args.length && args[0] !== "list") {
 				const [name, verb] = args;
 				const row = rows().find((candidate) => candidate.name === name);
 				if (!row) {
-					ctx.ui.notify(`No tool named ${name}. Use /tools list to see them.`, "error");
+					ctx.ui.notify(`No tool named ${name}. Use /tool list to see them.`, "error");
 					return;
 				}
 				if (verb !== "on" && verb !== "off") {

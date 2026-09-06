@@ -81,7 +81,7 @@ export const totals = (rows: ToolCost[]): InventoryTotals => ({
 	totalCount: rows.length,
 });
 
-/** One-line summary of the current cost, used as the picker header and by /tools with no arguments. */
+/** One-line summary of the current cost, used as the picker header and by `/tool` with no arguments. */
 export const summarize = (rows: ToolCost[]): string => {
 	const { activeTokens, activeCount, totalCount } = totals(rows);
 	return `${activeCount} of ${totalCount} tools active · ~${activeTokens.toLocaleString()} tokens per request`;

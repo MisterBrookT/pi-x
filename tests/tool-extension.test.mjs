@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import registerTools from "../extensions/tools.ts";
+import registerTool from "../extensions/tool.ts";
 
 const tool = (name, description = "d") => ({
 	name,
@@ -26,7 +26,7 @@ const harness = ({ all = ["read", "bash", "computer"], active = ["read", "bash",
 			sessionManager.appendCustomEntry(customType, data);
 		},
 	};
-	registerTools(pi);
+	registerTool(pi);
 	const notices = [];
 	const custom = [];
 	const ctx = {
@@ -40,18 +40,18 @@ const harness = ({ all = ["read", "bash", "computer"], active = ["read", "bash",
 	return {
 		ctx, notices, entries, sessionManager,
 		activeTools: () => activeTools,
-		run: (args = "") => commands.get("tools").handler(args, ctx),
-		completions: (prefix) => commands.get("tools").getArgumentCompletions(prefix),
+		run: (args = "") => commands.get("tool").handler(args, ctx),
+		completions: (prefix) => commands.get("tool").getArgumentCompletions(prefix),
 		emit: (event) => handlers.get(event)?.({}, ctx),
 		commandNames: () => [...commands.keys()],
 	};
 };
 
-test("/tools registers one command", () => {
-	assert.deepEqual(harness().commandNames(), ["tools"]);
+test("/tool registers one command", () => {
+	assert.deepEqual(harness().commandNames(), ["tool"]);
 });
 
-test("/tools list shows every tool with its cost and state", async () => {
+test("/tool list shows every tool with its cost and state", async () => {
 	const h = harness({ active: ["read"] });
 	await h.run("list");
 	const text = h.notices.at(-1).message;
@@ -92,7 +92,7 @@ test("only explicit choices persist, so new tools are not silently withheld", as
 	// a tool added afterwards would be missing from the list and stay off.
 	const h = harness();
 	await h.run("computer off");
-	assert.deepEqual(h.entries.at(-1), { customType: "pix-tools-overrides", data: { overrides: { computer: false } } });
+	assert.deepEqual(h.entries.at(-1), { customType: "pix-tool-overrides", data: { overrides: { computer: false } } });
 
 	const upgraded = harness({
 		sessionManager: h.sessionManager,

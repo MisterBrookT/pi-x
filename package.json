@@ -63,7 +63,7 @@
       "./extensions/smart-editor.ts",
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
-      "./extensions/tools.ts"
+      "./extensions/tool.ts"
     ]
   },
   "engines": {
