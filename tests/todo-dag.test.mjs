@@ -271,3 +271,38 @@ test("widget stays bounded and clear resets the whole plan", async () => {
   assert.equal(text(await h.call({ action: "list" })), "No todos");
   assert.equal(text(await h.call({ action: "add", text: "Fresh" })), "Added #1");
 });
+
+test("a failed todo call does not break restore or discard the plan", async () => {
+  // Pi records a thrown tool error with empty details, so a todo result entry
+  // can be a truthy object with no items. Restoring from it crashed /reload.
+  const harness = createTodoHarness();
+  await harness.call({ action: "replace", items: [{ text: "Prerequisite" }, { text: "Blocked", dependsOn: ["1"] }] });
+  const plan = (await harness.call({ action: "list" })).details.items;
+
+  await assert.rejects(() => harness.call({ action: "set", id: "2", status: "done" }), /blocked by #1/);
+  harness.sessionManager.appendMessage({
+    role: "toolResult", toolCallId: "test", toolName: "todo",
+    content: [{ type: "text", text: "#2 is blocked by #1" }],
+    details: {}, isError: true, timestamp: 0,
+  });
+
+  const restored = createTodoHarness(harness.sessionManager);
+  restored.event("session_start");
+  assert.deepEqual((await restored.call({ action: "list" })).details.items, plan,
+    "the last successful snapshot survives a later failed call");
+});
+
+test("restore ignores todo results whose details lack a usable snapshot", async () => {
+  const harness = createTodoHarness();
+  await harness.call({ action: "add", text: "Real item" });
+  const plan = (await harness.call({ action: "list" })).details.items;
+  for (const details of [{}, { action: "add" }, { items: null }, { items: "nope" }, undefined]) {
+    harness.sessionManager.appendMessage({
+      role: "toolResult", toolCallId: "test", toolName: "todo",
+      content: [], details, isError: true, timestamp: 0,
+    });
+  }
+  const restored = createTodoHarness(harness.sessionManager);
+  restored.event("session_start");
+  assert.deepEqual((await restored.call({ action: "list" })).details.items, plan);
+});

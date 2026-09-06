@@ -62,7 +62,9 @@ export default function (pi: ExtensionAPI) {
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "todo") continue;
       const d = entry.message.details as Details | undefined;
-      if (d) state = {
+      // A thrown tool error is recorded with empty details, so `d` can be a
+      // truthy object with no items. Restore only from a complete snapshot.
+      if (d && Array.isArray(d.items)) state = {
         items: d.items.map(item => ({
           ...item,
           id: String(item.id),
