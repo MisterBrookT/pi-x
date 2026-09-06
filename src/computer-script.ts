@@ -110,11 +110,19 @@ const textOf = (result: ToolResultLike | undefined): string =>
 		.filter(Boolean)
 		.join("\n");
 
-/** Backend results carry the successor state id in details.stateId. */
-const stateIdOf = (result: ToolResultLike | undefined, fallback?: string): string | undefined => {
-	const details = result?.details as { stateId?: unknown } | undefined;
-	const next = typeof details?.stateId === "string" ? details.stateId : undefined;
-	return next ?? fallback;
+/**
+ * Locate the successor state id in a backend result.
+ *
+ * Desktop observations report it as `details.capture.stateId` while browser
+ * observations use a top-level `details.stateId`. Both shapes are real and both
+ * are checked; falling back to the previous id would silently act against a
+ * stale state, so a missing id is an error at the call site instead.
+ */
+export const stateIdOf = (result: ToolResultLike | undefined): string | undefined => {
+	const details = result?.details as { stateId?: unknown; capture?: { stateId?: unknown } } | undefined;
+	if (typeof details?.stateId === "string") return details.stateId;
+	if (typeof details?.capture?.stateId === "string") return details.capture.stateId;
+	return undefined;
 };
 
 export const summarizeActions = (actions: UiAction[]): string =>
@@ -200,9 +208,11 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	};
 
 	const makeState = (result: ToolResultLike, previousId?: string): CuaState => {
-		const id = stateIdOf(result, previousId);
+		const id = stateIdOf(result) ?? previousId;
 		if (!id) throw new Error("Backend returned no stateId; the observation cannot be used.");
 		const text = textOf(result);
+		// Advanced by operations that bump the backend's epoch for this resource.
+		let current = id;
 
 		const state: CuaState = {
 			id,
@@ -255,11 +265,20 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			},
 			async navigate(url) {
 				spend("navigate_browser", url);
-				return makeState(await operations.navigateBrowser({ stateId: id, url }), id);
+				const result = await operations.navigateBrowser({ stateId: current, url });
+				current = stateIdOf(result) ?? current;
+				return makeState(result, current);
 			},
+			/**
+			 * Evaluating in a page advances the backend's epoch for that page, so the
+			 * state this was called on becomes stale. Track the successor internally
+			 * and use it for the next call, so a script can evaluate repeatedly
+			 * against the same binding without a stale-state error.
+			 */
 			async eval(expression) {
 				spend("evaluate_browser", expression.slice(0, 120));
-				const result = await operations.evaluateBrowser({ stateId: id, expression });
+				const result = await operations.evaluateBrowser({ stateId: current, expression });
+				current = stateIdOf(result) ?? current;
 				return extractEvaluationValue(textOf(result));
 			},
 		};

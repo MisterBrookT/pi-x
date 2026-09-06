@@ -18,6 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "../src/computer-script.ts";
 import { renderOutcome, runScript } from "../src/computer-runner.ts";
+import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
 
 const BACKEND = "@injaneity/pi-computer-use";
 
@@ -162,12 +163,39 @@ const bindOperations = (
 	} as ComputerOperations;
 };
 
+const helperPath = () => join(homedir(), "Applications", "pi-computer-use.app");
+
+/** Reads the SIP-protected system TCC database. Read-only by construction. */
+const tccOperations = (pi: ExtensionAPI) => ({
+	platform: process.platform,
+	async query(sql: string) {
+		const result = await pi.exec("sqlite3", ["/Library/Application Support/com.apple.TCC/TCC.db", sql], {
+			timeout: 5000,
+		});
+		if (result.code !== 0) throw new Error(result.stderr.trim() || `sqlite3 exited ${result.code}`);
+		return result.stdout;
+	},
+});
+
 export default function computer(pi: ExtensionAPI, options?: { backend?: BackendModule }) {
 	let backendPromise: Promise<BackendModule | undefined> | undefined;
 	const backendOnce = () => {
 		backendPromise ??= options?.backend ? Promise.resolve(options.backend) : loadBackend();
 		return backendPromise;
 	};
+
+	pi.registerCommand("computer-check", {
+		description: "Check computer-use permissions and show what is missing",
+		async handler(_args, ctx) {
+			const report = await checkPermissions(tccOperations(pi));
+			const backend = await backendOnce();
+			const text = [
+				backend ? `\u2713 Backend ${BACKEND} loaded` : `\u2717 Backend ${BACKEND} not found`,
+				renderReport(report, helperPath()),
+			].join("\n");
+			ctx.ui.notify(text, report.ready && backend ? "info" : "warn");
+		},
+	});
 
 	pi.registerTool({
 		name: "computer",
@@ -195,6 +223,14 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 							text: `${BACKEND} is not installed. Run: pi install npm:${BACKEND}`,
 						},
 					],
+					isError: true,
+				};
+			}
+
+			const report = await checkPermissions(tccOperations(pi));
+			if (!report.ready) {
+				return {
+					content: [{ type: "text", text: renderReport(report, helperPath()) }],
 					isError: true,
 				};
 			}

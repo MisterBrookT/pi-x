@@ -215,3 +215,40 @@ loader rather than the test harness:
 - `validateToolArguments(schema, args)` is the wrong signature; it takes
   `(tool, toolCall)` and returns parsed arguments, throwing on invalid input.
   The test was corrected rather than the code.
+
+## Addendum — first live run
+
+Both TCC permissions granted; the tool was exercised against real applications.
+Two bugs surfaced that no fake backend would have caught, which is the argument
+for testing against the real interface rather than a permissive mock:
+
+1. **State ids live in two places.** Desktop observations return the successor
+   id as `details.capture.stateId`; browser observations use a top-level
+   `details.stateId`. The original code read only the latter, so every desktop
+   observation failed with "Backend returned no stateId". `stateIdOf` now checks
+   both shapes and returns undefined rather than silently falling back to the
+   previous id, which would have acted against a stale state.
+
+2. **Evaluating in a page advances its epoch.** A second `eval` against the same
+   binding failed with `State is stale ... expected epoch 0, current epoch 1`.
+   A `CuaState` now tracks the advancing id internally for `eval` and
+   `navigate`, so a script can evaluate repeatedly against one binding.
+
+Verified working end to end:
+
+- desktop observation of Notes: 150 refs, a real AX outline with roles and
+  exposed actions (`AXWindow`, `AXOutline`, `AXCell`, `{AXShowMenu}`)
+- `search_ui` against the cached state
+- browser launch, `waitFor` a load condition, then repeated `eval` extraction:
+  `{ title: "Example Domain", links: ["Learn more"], h: "Example Domain" }`
+- the confirmation gate firing on a genuine irreversible control in Notes:
+  the prompt appeared, declining aborted before the backend was called
+
+Known rough edges, all reported clearly by the backend rather than failing
+silently: role-only wait conditions require `ref` or `scopeRef`; a browser page
+and a desktop root are separate resources, so `cua.observe({root})` cannot be
+used to re-target an open browser page; and a browser `press` needs an
+actionable ref owned by that page's state.
+
+Timing: a three-call desktop script completes in about 1 second, a five-call
+browser script in about 2 seconds.

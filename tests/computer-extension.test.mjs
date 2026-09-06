@@ -46,9 +46,13 @@ const createFakeBackend = () => {
 	};
 };
 
-const harness = ({ backend, mode = "tui", confirmAnswer = true } = {}) => {
+const harness = ({ backend, mode = "tui", confirmAnswer = true, tcc = "kTCCServiceAccessibility|2\nkTCCServiceScreenCapture|2" } = {}) => {
 	let tool;
-	const pi = { registerTool: (value) => { tool = value; } };
+	const pi = {
+		registerTool: (value) => { tool = value; },
+		registerCommand: () => {},
+		exec: async () => ({ code: 0, stdout: tcc, stderr: "" }),
+	};
 	registerComputer(pi, backend ? { backend } : undefined);
 	const confirms = [];
 	const ctx = {
@@ -215,4 +219,43 @@ test("a failing script still returns the trace of what already ran", async () =>
 	assert.match(result.content[0].text, /observe_ui/);
 	assert.match(result.content[0].text, /find_roots/);
 	assert.match(result.content[0].text, /Error: late failure/);
+});
+
+test("a missing permission blocks the script before the backend is touched", async () => {
+	const backend = createFakeBackend();
+	let tool;
+	registerComputer(
+		{
+			registerTool: (v) => { tool = v; },
+			registerCommand: () => {},
+			exec: async () => ({ code: 0, stdout: "kTCCServiceAccessibility|0", stderr: "" }),
+		},
+		{ backend: backend.module },
+	);
+	const result = await tool.execute("c1", { script: "return 1;" }, undefined, undefined, { mode: "tui", ui: {} });
+	assert.equal(result.isError, true);
+	assert.match(result.content[0].text, /Accessibility — denied/);
+	assert.equal(backend.setupCalls(), 0, "setup is not attempted without permissions");
+	assert.equal(backend.seen.length, 0);
+});
+
+test("/computer-check reports backend and permission state together", async () => {
+	const backend = createFakeBackend();
+	let command;
+	registerComputer(
+		{
+			registerTool: () => {},
+			registerCommand: (name, value) => {
+				assert.equal(name, "computer-check");
+				command = value;
+			},
+			exec: async () => ({ code: 0, stdout: "kTCCServiceAccessibility|2\nkTCCServiceScreenCapture|2", stderr: "" }),
+		},
+		{ backend: backend.module },
+	);
+	const notices = [];
+	await command.handler("", { ui: { notify: (text, level) => notices.push({ text, level }) } });
+	assert.equal(notices[0].level, "info");
+	assert.match(notices[0].text, /Backend @injaneity\/pi-computer-use loaded/);
+	assert.match(notices[0].text, /Computer use is ready/);
 });

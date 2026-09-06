@@ -8,6 +8,7 @@ import {
 	isIrreversible,
 	labelForRef,
 	renderOutcome,
+	stateIdOf,
 	summarizeActions,
 } from "../src/computer-script.ts";
 import { ScriptCompileError, compileScript, runScript } from "../src/computer-runner.ts";
@@ -341,4 +342,99 @@ test("irreversible labels cover the policy categories, not just send", () => {
 	for (const ref of ["@e7", "@e8"]) {
 		assert.equal(isIrreversible([{ action: "press", ref }], outline), false, `${ref} should not prompt`);
 	}
+});
+
+test("desktop observations report the state id under details.capture", () => {
+	assert.equal(stateIdOf({ details: { capture: { stateId: "uuid-1" } } }), "uuid-1");
+});
+
+test("browser observations report the state id at the top level", () => {
+	assert.equal(stateIdOf({ details: { stateId: "S3" } }), "S3");
+});
+
+test("a result carrying no state id yields undefined rather than a stale guess", () => {
+	assert.equal(stateIdOf({ details: { tool: "observe_ui" } }), undefined);
+	assert.equal(stateIdOf(undefined), undefined);
+});
+
+test("a desktop-shaped observation drives the loop end to end", async () => {
+	// Shapes copied from a real backend response: desktop results nest the id
+	// under `capture`, which an earlier version of this module missed.
+	const seen = [];
+	let n = 0;
+	const { runtime } = runtimeFor({
+		operations: {
+			observe: (params) => {
+				seen.push({ name: "observe", params });
+				return Promise.resolve({
+					content: [{ type: "text", text: '@e1 AXWindow "Notes"\n@e9 AXButton "Save draft"' }],
+					details: { tool: "observe_ui", capture: { stateId: "uuid-a" } },
+				});
+			},
+			act: (params) => {
+				seen.push({ name: "act", params });
+				n += 1;
+				return Promise.resolve({
+					content: [{ type: "text", text: "Successor diff" }],
+					details: { tool: "act_ui", capture: { stateId: `uuid-${n}` } },
+				});
+			},
+		},
+	});
+	const state = await runtime.cua.observe({ root: "@r1" });
+	assert.equal(state.id, "uuid-a");
+	const next = await state.act({ action: "setText", ref: "@e1", text: "hi" });
+	assert.equal(next.id, "uuid-1", "the successor id comes from the act result");
+	assert.equal(seen.find((c) => c.name === "act").params.stateId, "uuid-a");
+});
+
+test("repeated eval on one binding follows the advancing epoch", async () => {
+	// The backend advances a page's epoch on every evaluation, so a second call
+	// using the original id fails with a stale-state error. The binding must
+	// track the successor internally.
+	const seen = [];
+	let n = 0;
+	const { runtime } = runtimeFor({
+		operations: {
+			launchBrowser: () => Promise.resolve({
+				content: [{ type: "text", text: "@e1 page" }],
+				details: { tool: "launch_browser", stateId: "P0" },
+			}),
+			evaluateBrowser: (params) => {
+				seen.push(params.stateId);
+				if (params.stateId !== `P${n}`) {
+					return Promise.reject(new Error(`State is stale: expected epoch ${n}`));
+				}
+				n += 1;
+				return Promise.resolve({
+					content: [{ type: "text", text: `Evaluation value: ${n}` }],
+					details: { tool: "evaluate_browser", stateId: `P${n}` },
+				});
+			},
+		},
+	});
+	const page = await runtime.cua.launchBrowser("https://example.com");
+	assert.equal(await page.eval("1"), 1);
+	assert.equal(await page.eval("2"), 2, "a second eval must not reuse the original id");
+	assert.equal(await page.eval("3"), 3);
+	assert.deepEqual(seen, ["P0", "P1", "P2"]);
+});
+
+test("navigate also advances the binding so a following eval works", async () => {
+	const seen = [];
+	const { runtime } = runtimeFor({
+		operations: {
+			launchBrowser: () => Promise.resolve({ content: [], details: { stateId: "P0" } }),
+			navigateBrowser: () => Promise.resolve({ content: [{ type: "text", text: "@e1 page" }], details: { stateId: "P1" } }),
+			evaluateBrowser: (params) => {
+				seen.push(params.stateId);
+				return Promise.resolve({ content: [{ type: "text", text: "Evaluation value: true" }], details: { stateId: "P2" } });
+			},
+		},
+	});
+	const page = await runtime.cua.launchBrowser();
+	const next = await page.navigate("https://example.org");
+	assert.equal(next.id, "P1");
+	await next.eval("document.title");
+	assert.deepEqual(seen, ["P1"], "eval runs against the post-navigation state");
 });
