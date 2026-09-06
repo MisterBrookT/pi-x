@@ -48,9 +48,14 @@ const createFakeOperations = (overrides = {}) => {
 	return { operations, calls };
 };
 
-const runtimeFor = (options = {}) => {
-	const { operations, calls } = createFakeOperations(options.operations);
-	return { runtime: createCuaRuntime({ operations, ...options }), calls };
+/**
+ * `options.operations` overrides individual backend methods; everything else is
+ * passed to the runtime. Spreading options last would put the raw override
+ * object back on the `operations` key and drop the fake, so it is removed here.
+ */
+const runtimeFor = ({ operations: overrides, ...rest } = {}) => {
+	const { operations, calls } = createFakeOperations(overrides);
+	return { runtime: createCuaRuntime({ ...rest, operations }), calls };
 };
 
 test("observe returns a state carrying the backend stateId and outline", async () => {
@@ -437,4 +442,30 @@ test("navigate also advances the binding so a following eval works", async () =>
 	assert.equal(next.id, "P1");
 	await next.eval("document.title");
 	assert.deepEqual(seen, ["P1"], "eval runs against the post-navigation state");
+});
+
+test("an occluded act failure is rewritten before the script sees it", async () => {
+	// Payload shape taken from a real failure: a macOS permission dialog on top.
+	const raw =
+		'Target is occluded by ["role": "AXStaticText", ' +
+		'"value": "“Otty” wants access to control “Google Chrome”.", "canPress": false]';
+	const { runtime } = runtimeFor({ operations: { act: () => Promise.reject(new Error(raw)) } });
+	const state = await runtime.cua.observe();
+	await assert.rejects(
+		() => state.act({ action: "click", ref: "@e1" }),
+		(error) => {
+			assert.match(error.message, /covered on screen by/);
+			assert.match(error.message, /wants access to control/);
+			assert.doesNotMatch(error.message, /canPress/, "the raw property dump is hidden");
+			return true;
+		},
+	);
+});
+
+test("a non-occlusion act failure keeps its original message", async () => {
+	const { runtime } = runtimeFor({
+		operations: { act: () => Promise.reject(new Error("Outline ref '@e9' is stale or not available.")) },
+	});
+	const state = await runtime.cua.observe();
+	await assert.rejects(() => state.act({ action: "click", ref: "@e1" }), /is stale or not available/);
 });

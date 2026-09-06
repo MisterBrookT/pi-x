@@ -15,7 +15,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { callTitle, resultLines, scriptSummary } from "../src/computer-render.ts";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "../src/computer-script.ts";
 import { renderOutcome, runScript } from "../src/computer-runner.ts";
 import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
@@ -47,8 +49,18 @@ CuaState:
 Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse.
   { action: "press", ref: "@e9" }
   { action: "setText", ref: "@e7", text: "hello" }
-  { action: "keypress", keys: ["cmd", "s"] }
+  { action: "keypress", ref: "@e7", keys: ["cmd", "s"] }
   { action: "click", x: 420, y: 300 }           // only when a ref does not exist
+
+\`keypress\` and \`typeText\` need a ref, coordinates, or a click earlier in the
+same \`act\` array that established focus. A bare \`{ action: "keypress", keys }\`
+is rejected:
+
+  await state.act([
+    { action: "click", ref: "@e7" },
+    { action: "typeText", text: "hello" },      // follows the click's focus
+    { action: "keypress", keys: ["Return"] },
+  ]);
 
 Rules:
 - \`act\` returns the next state. Use it directly; do not observe again unless
@@ -258,6 +270,24 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 				},
 				isError: outcome.error !== undefined,
 			};
+		},
+
+		renderCall(args, theme) {
+			const lines = [
+				theme.fg("toolTitle", theme.bold(callTitle(args.script ?? ""))),
+				...scriptSummary(args.script ?? "").map((line) => theme.fg("muted", `  ${line}`)),
+			];
+			return new Text(lines.join("\n"), 0, 0);
+		},
+
+		renderResult(result, _options, theme, context) {
+			const text = result.content?.[0]?.type === "text" ? result.content[0].text : "";
+			const { title, body } = resultLines(text, result.details, context.isError);
+			const lines = [
+				theme.fg(context.isError ? "error" : "muted", title),
+				...body.map((line) => theme.fg(context.isError ? "error" : "text", `  ${line}`)),
+			];
+			return new Text(lines.join("\n"), 0, 0);
 		},
 	});
 }

@@ -88,6 +88,29 @@ export interface ScriptEvent {
 export class BudgetExceededError extends Error {}
 export class ConfirmationRequiredError extends Error {}
 
+/**
+ * Turn a backend occlusion error into one actionable line.
+ *
+ * The backend refuses to press an element that something else covers on screen,
+ * which is the right call: the click would otherwise land on the overlay. It
+ * reports the blocker as a serialized property dictionary, so the useful part —
+ * what is actually in the way — is buried in a few hundred characters of noise.
+ * Observed blockers include macOS permission dialogs and open menus.
+ */
+export const describeOcclusion = (message: string): string | undefined => {
+	if (!/Target is occluded/i.test(message)) return undefined;
+	const value = /"value":\s*"([^"]+)"/.exec(message)?.[1]?.trim();
+	const role = /"role":\s*"([^"]+)"/.exec(message)?.[1]?.trim();
+	const title = /"title":\s*"([^"]+)"/.exec(message)?.[1]?.trim();
+	const text = value || title;
+	const blocker = text ? `"${text.length > 160 ? `${text.slice(0, 157)}...` : text}"` : role ? `a ${role}` : "another element";
+	return [
+		`Blocked: the target is covered on screen by ${blocker}.`,
+		"Dismiss or handle what is on top, then observe again and retry.",
+		"A dialog, menu, or permission prompt is the usual cause; scrolling the target into view helps when it is merely out of the visible area.",
+	].join("\n");
+};
+
 export interface CuaApiOptions {
 	operations: ComputerOperations;
 	budget?: ScriptBudget;
@@ -260,8 +283,15 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				spend("act_ui", summary);
 				actions += mutations;
 				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
-				const result = await operations.act({ stateId: id, actions: list, expect });
-				return makeState(result, id);
+				try {
+					const result = await operations.act({ stateId: id, actions: list, expect });
+					return makeState(result, id);
+				} catch (error) {
+					const raw = error instanceof Error ? error.message : String(error);
+					const explained = describeOcclusion(raw);
+					if (!explained) throw error;
+					throw new Error(explained);
+				}
 			},
 			async navigate(url) {
 				spend("navigate_browser", url);
