@@ -3,6 +3,8 @@ import test from "node:test";
 import {
 	BudgetExceededError,
 	ConfirmationRequiredError,
+	DEFAULT_BUDGET,
+	ScriptHaltedError,
 	createCuaRuntime,
 	extractEvaluationValue,
 	isIrreversible,
@@ -468,4 +470,55 @@ test("a non-occlusion act failure keeps its original message", async () => {
 	});
 	const state = await runtime.cua.observe();
 	await assert.rejects(() => state.act({ action: "click", ref: "@e1" }), /is stale or not available/);
+});
+
+test("a script may launch only one browser", async () => {
+	// Each launch spawns a real Chrome with a throwaway profile, and the backend
+	// only kills the most recent one, so repeats leave orphaned windows behind.
+	const { runtime, calls } = runtimeFor();
+	await runtime.cua.launchBrowser("https://example.com");
+	await assert.rejects(
+		() => runtime.cua.launchBrowser("https://other.example"),
+		(error) => {
+			assert.match(error.message, /already launched a browser/);
+			assert.match(error.message, /state\.navigate\(url\)/, "the message names the alternative");
+			return true;
+		},
+	);
+	assert.equal(calls.filter((call) => call.name === "launchBrowser").length, 1, "the second launch never reaches the backend");
+});
+
+test("a script is stopped once it outruns its wall-clock budget", async () => {
+	let now = 0;
+	const { runtime } = runtimeFor({
+		budget: { ...DEFAULT_BUDGET, maxDurationMs: 5_000 },
+		now: () => now,
+	});
+	await runtime.cua.observe();
+	now = 4_000;
+	await runtime.cua.observe();
+	now = 5_001;
+	await assert.rejects(() => runtime.cua.observe(), (error) => {
+		assert.ok(error instanceof ScriptHaltedError);
+		assert.match(error.message, /ran longer than 5s/);
+		assert.match(error.message, /hold the pointer and keyboard/);
+		return true;
+	});
+});
+
+test("cancelling stops the script at the next backend call", async () => {
+	const controller = new AbortController();
+	const { runtime, calls } = runtimeFor({ signal: controller.signal });
+	await runtime.cua.observe();
+	controller.abort();
+	await assert.rejects(() => runtime.cua.observe(), (error) => {
+		assert.ok(error instanceof ScriptHaltedError);
+		assert.match(error.message, /cancelled/);
+		return true;
+	});
+	assert.equal(calls.filter((call) => call.name === "observe").length, 1, "no further work is sent to the backend");
+});
+
+test("the default budget bounds duration as well as calls and actions", () => {
+	assert.ok(DEFAULT_BUDGET.maxDurationMs > 0, "a script cannot run unbounded by default");
 });

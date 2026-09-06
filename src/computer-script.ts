@@ -75,9 +75,32 @@ export interface ScriptBudget {
 	maxActions: number;
 	/** Hard cap on backend calls of any kind per script run. */
 	maxCalls: number;
+	/**
+	 * Wall-clock limit for one script.
+	 *
+	 * UI actions take over the pointer, the keyboard, and window focus, so a
+	 * script that waits or loops for a long time makes the machine unusable and
+	 * looks like a hang. Backend calls are cheap to count but say nothing about
+	 * elapsed time: a single `waitFor` can block for a minute on its own.
+	 */
+	maxDurationMs?: number;
 }
 
-export const DEFAULT_BUDGET: ScriptBudget = { maxActions: 40, maxCalls: 200 };
+export const DEFAULT_BUDGET: ScriptBudget = { maxActions: 40, maxCalls: 200, maxDurationMs: 120_000 };
+
+/** Raised when a script runs past its wall-clock budget or is cancelled. */
+export class ScriptHaltedError extends Error {}
+
+/**
+ * Cap on managed browsers a single script may start.
+ *
+ * Each `launchBrowser` spawns a real Chrome with a fresh throwaway profile in
+ * the temp directory. The backend only kills the browser it launched *last*, so
+ * repeated launches leave orphaned windows behind and pile up profile
+ * directories on disk. One browser per script is almost always what is meant;
+ * a script that needs to revisit a page should navigate instead of relaunching.
+ */
+const MAX_BROWSER_LAUNCHES = 1;
 
 export interface ScriptEvent {
 	kind: "call" | "action" | "log";
@@ -124,6 +147,10 @@ export interface CuaApiOptions {
 	confirm?: (summary: string) => Promise<boolean>;
 	/** Set of already-approved summaries, so a loop asks once, not N times. */
 	approved?: Set<string>;
+	/** Cancellation from the host, checked before every backend call. */
+	signal?: AbortSignal;
+	/** Clock seam for tests. */
+	now?: () => number;
 }
 
 const textOf = (result: ToolResultLike | undefined): string =>
@@ -214,8 +241,10 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	const budget = options.budget ?? DEFAULT_BUDGET;
 	const approved = options.approved ?? new Set<string>();
 	const events: ScriptEvent[] = [];
+	const startedAt = options.now?.() ?? Date.now();
 	let calls = 0;
 	let actions = 0;
+	let launches = 0;
 
 	const record = (event: ScriptEvent) => {
 		events.push(event);
@@ -223,6 +252,18 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	};
 
 	const spend = (name: string, detail?: string) => {
+		// Checked before every backend call, so cancelling or running out of time
+		// stops the script at the next boundary instead of after all its work.
+		if (options.signal?.aborted) {
+			throw new ScriptHaltedError("Script was cancelled. The interface is left as-is; observe before acting again.");
+		}
+		const limit = budget.maxDurationMs;
+		if (limit !== undefined && (options.now?.() ?? Date.now()) - startedAt > limit) {
+			throw new ScriptHaltedError(
+				`Script ran longer than ${Math.round(limit / 1000)}s and was stopped so it could not hold the pointer and keyboard. ` +
+					"Do less per call: observe, return what you found, and continue in the next call.",
+			);
+		}
 		calls += 1;
 		if (calls > budget.maxCalls) {
 			throw new BudgetExceededError(`Script exceeded ${budget.maxCalls} backend calls. Narrow the script and run it again.`);
@@ -325,6 +366,16 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			return makeState(await operations.observe(target ?? {}));
 		},
 		async launchBrowser(url) {
+			if (launches >= MAX_BROWSER_LAUNCHES) {
+				throw new Error(
+					[
+						"This script already launched a browser, and each launch starts another Chrome window that is left running.",
+						"Reuse the page you have: keep the state returned by the first launch and call state.navigate(url) to go elsewhere,",
+						"or cua.state(id) to pick it up again in a later call.",
+					].join(" "),
+				);
+			}
+			launches += 1;
 			spend("launch_browser", url);
 			return makeState(await operations.launchBrowser({ url }));
 		},

@@ -31,6 +31,15 @@ Write JavaScript. Available: \`cua\`, \`log(...)\`, \`signal\`. Use \`return\` f
   const state = await cua.observe({ root: "@r1" });  // -> CuaState
   const page  = await cua.launchBrowser("https://example.com");
 
+Launch at most one browser per script; each launch opens another Chrome window
+that stays open. To visit another page, reuse the one you have with
+\`page.navigate(url)\`, or \`cua.state(id)\` in a later call.
+
+Keep a script short. It holds the pointer, the keyboard, and window focus while
+it runs, so long waits and long loops make the machine unusable. Observe, return
+what you found, and continue in the next call. Scripts are stopped after two
+minutes.
+
 State persists across calls: a stateId returned by an earlier call can be picked
 up with \`await cua.state("S3")\` instead of observing the root again.
 
@@ -103,6 +112,8 @@ interface BackendModule {
 	executeNavigateBrowser: BackendExecutor;
 	executeEvaluateBrowser: BackendExecutor;
 	ensureComputerUseSetup: (ctx: ExtensionContext, signal?: AbortSignal) => Promise<void>;
+	/** Kills the managed browser and clears cached state; absent in older backends. */
+	shutdownComputerUseSession?: () => Promise<void>;
 }
 
 type BackendExecutor = (
@@ -196,6 +207,31 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 		return backendPromise;
 	};
 
+	/**
+	 * Shut the backend down when the session ends.
+	 *
+	 * A managed browser is spawned detached, and the backend only tracks the most
+	 * recent one, so without this a quit leaves Chrome windows and their
+	 * throwaway profile directories behind.
+	 */
+	pi.on("session_shutdown", async () => {
+		const backend = await backendOnce().catch(() => undefined);
+		await backend?.shutdownComputerUseSession?.().catch(() => {});
+	});
+
+	pi.registerCommand("computer-stop", {
+		description: "Close the managed browser and release computer-use resources",
+		async handler(_args, ctx) {
+			const backend = await backendOnce().catch(() => undefined);
+			if (!backend?.shutdownComputerUseSession) {
+				ctx.ui.notify("No computer-use session to stop.", "info");
+				return;
+			}
+			await backend.shutdownComputerUseSession();
+			ctx.ui.notify("Stopped: managed browser closed and cached UI state cleared.", "info");
+		},
+	});
+
 	pi.registerCommand("computer-check", {
 		description: "Check computer-use permissions and show what is missing",
 		async handler(_args, ctx) {
@@ -251,6 +287,7 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 
 			const runtime = createCuaRuntime({
 				operations: bindOperations(backend, toolCallId, signal, ctx),
+				signal,
 				budget: { ...DEFAULT_BUDGET, maxActions: params.maxActions ?? DEFAULT_BUDGET.maxActions },
 				confirm:
 					ctx.mode === "tui"

@@ -48,9 +48,12 @@ const createFakeBackend = () => {
 
 const harness = ({ backend, mode = "tui", confirmAnswer = true, tcc = "kTCCServiceAccessibility|2\nkTCCServiceScreenCapture|2" } = {}) => {
 	let tool;
+	const commands = new Map();
+	const handlers = new Map();
 	const pi = {
 		registerTool: (value) => { tool = value; },
-		registerCommand: () => {},
+		registerCommand: (name, value) => commands.set(name, value),
+		on: (event, handler) => handlers.set(event, handler),
 		exec: async () => ({ code: 0, stdout: tcc, stderr: "" }),
 	};
 	registerComputer(pi, backend ? { backend } : undefined);
@@ -64,7 +67,14 @@ const harness = ({ backend, mode = "tui", confirmAnswer = true, tcc = "kTCCServi
 			},
 		},
 	};
-	return { tool, ctx, confirms };
+	const notices = [];
+	ctx.ui.notify = (message, level) => notices.push({ message, level });
+	return {
+		tool, ctx, confirms, notices,
+		command: (name, args = "") => commands.get(name)?.handler(args, ctx),
+		commandNames: () => [...commands.keys()],
+		emit: (event) => handlers.get(event)?.({}, ctx),
+	};
 };
 
 /** Returns the parsed arguments; throws when the call does not match the schema. */
@@ -228,6 +238,7 @@ test("a missing permission blocks the script before the backend is touched", asy
 		{
 			registerTool: (v) => { tool = v; },
 			registerCommand: () => {},
+			on: () => {},
 			exec: async () => ({ code: 0, stdout: "kTCCServiceAccessibility|0", stderr: "" }),
 		},
 		{ backend: backend.module },
@@ -241,21 +252,43 @@ test("a missing permission blocks the script before the backend is touched", asy
 
 test("/computer-check reports backend and permission state together", async () => {
 	const backend = createFakeBackend();
-	let command;
-	registerComputer(
-		{
-			registerTool: () => {},
-			registerCommand: (name, value) => {
-				assert.equal(name, "computer-check");
-				command = value;
-			},
-			exec: async () => ({ code: 0, stdout: "kTCCServiceAccessibility|2\nkTCCServiceScreenCapture|2", stderr: "" }),
-		},
-		{ backend: backend.module },
-	);
-	const notices = [];
-	await command.handler("", { ui: { notify: (text, level) => notices.push({ text, level }) } });
-	assert.equal(notices[0].level, "info");
-	assert.match(notices[0].text, /Backend @injaneity\/pi-computer-use loaded/);
-	assert.match(notices[0].text, /Computer use is ready/);
+	const h = harness({ backend: backend.module });
+	await h.command("computer-check");
+	assert.equal(h.notices[0].level, "info");
+	assert.match(h.notices[0].message, /Backend @injaneity\/pi-computer-use loaded/);
+	assert.match(h.notices[0].message, /Computer use is ready/);
+});
+
+test("/computer-stop releases the managed browser", async () => {
+	// A managed browser is spawned detached, so without an explicit release a
+	// Chrome window and its throwaway profile directory outlive the work.
+	const backend = createFakeBackend();
+	let shutdowns = 0;
+	backend.module.shutdownComputerUseSession = async () => { shutdowns += 1; };
+	const h = harness({ backend: backend.module });
+	await h.command("computer-stop");
+	assert.equal(shutdowns, 1);
+	assert.match(h.notices.at(-1).message, /managed browser closed/);
+});
+
+test("ending the session releases the managed browser too", async () => {
+	const backend = createFakeBackend();
+	let shutdowns = 0;
+	backend.module.shutdownComputerUseSession = async () => { shutdowns += 1; };
+	const h = harness({ backend: backend.module });
+	await h.emit("session_shutdown");
+	assert.equal(shutdowns, 1, "quitting does not leak a browser process");
+});
+
+test("stopping is safe when the backend cannot release anything", async () => {
+	const backend = createFakeBackend();
+	delete backend.module.shutdownComputerUseSession;
+	const h = harness({ backend: backend.module });
+	await h.command("computer-stop");
+	await h.emit("session_shutdown");
+	assert.match(h.notices.at(-1).message, /No computer-use session/);
+});
+
+test("both computer commands are registered", () => {
+	assert.deepEqual(harness().commandNames().sort(), ["computer-check", "computer-stop"]);
 });
