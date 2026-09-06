@@ -53,6 +53,7 @@
       "./extensions/capabilities.ts",
       "./extensions/pix-anthropic/index.ts",
       "./extensions/benchmark.ts",
+      "./extensions/computer.ts",
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
       "./extensions/prompt-compact.ts",

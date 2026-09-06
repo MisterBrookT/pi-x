@@ -82,12 +82,18 @@ function generatePKCE(): { verifier: string; challenge: string } {
 	return { verifier, challenge };
 }
 
-async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<string> {
+async function postJson(
+	url: string,
+	body: unknown,
+	headers: Record<string, string> = {},
+	signal?: AbortSignal,
+): Promise<string> {
+	const timeout = AbortSignal.timeout(30_000);
 	const response = await fetch(url, {
 		method: "POST",
 		headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
 		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(30_000),
+		signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
 	});
 	const text = await response.text();
 	if (!response.ok) {
@@ -277,8 +283,18 @@ export async function loginAnthropic(callbacks: OAuthLoginCallbacks): Promise<Pi
 	};
 }
 
+/**
+ * `signal` must be honoured. Anthropic rotates the refresh token on every
+ * successful refresh, and pi runs this inside `AuthStorage.modify`, which skips
+ * its write when the caller's signal aborts while the request is in flight. An
+ * unabortable request can therefore consume the stored token server-side while
+ * the rotated replacement is discarded, leaving the credential permanently
+ * un-refreshable ("invalid_grant: Refresh token not found or invalid").
+ * Cancelling the request instead keeps the stored token valid.
+ */
 export async function refreshAnthropicToken(
 	credentials: PixAnthropicOAuthCredentials,
+	signal?: AbortSignal,
 ): Promise<PixAnthropicOAuthCredentials> {
 	const responseBody = await postJson(TOKEN_URL, {
 		grant_type: "refresh_token",
@@ -287,7 +303,7 @@ export async function refreshAnthropicToken(
 	}, {
 		"anthropic-beta": "oauth-2025-04-20",
 		"User-Agent": "anthropic-sdk-typescript/0.112.1 userOAuthProvider",
-	});
+	}, signal);
 	const data = parseTokenResponse(responseBody, "token refresh");
 
 	// Identity is captured at login and deliberately not rewritten on refresh.

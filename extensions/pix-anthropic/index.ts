@@ -183,8 +183,8 @@ export default function (pi: ExtensionAPI) {
 		oauth: {
 			name: "Anthropic Subscription (Claude Pro/Max)",
 			login: loginAnthropic,
-			refreshToken: (credentials) =>
-				refreshAnthropicToken(credentials as PixAnthropicOAuthCredentials),
+			refreshToken: (credentials, signal) =>
+				refreshAnthropicToken(credentials as PixAnthropicOAuthCredentials, signal),
 			getApiKey: (credentials) => credentials.access,
 		},
 

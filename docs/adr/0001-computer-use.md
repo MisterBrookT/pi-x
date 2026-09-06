@@ -159,3 +159,59 @@ event was delivered.
   permissions **not yet granted**, so no desktop flow has been executed.
 - The script surface is implemented in `src/computer-script.ts` and
   `src/computer-runner.ts`; tests and the pix extension wiring are outstanding.
+
+## Addendum — cross-checked against Codex's shipped implementation
+
+After the initial implementation, the bundled Codex sources at
+`/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules/@oai/cua/docs/`
+were read directly. Four things were adopted:
+
+1. **A written confirmation policy, not a verb list.** Codex ships a 78-line
+   `tinysky-alt-confirmations.md` with a four-tier taxonomy: hand-off required,
+   always confirm at action time, pre-approval works, and always allowed. It is
+   scoped explicitly to GUI actions and excludes ordinary terminal commands.
+   Several rules would not have been derived from first principles: typing
+   sensitive data into a form counts as transmission; "go to xyz.com" implies
+   consent to log into xyz.com; content read from a page is never permission;
+   confirm at the point of impact rather than early, except for data
+   transmission, where the confirmation must come before typing. This is now the
+   `## Confirmation policy` section of the skill. The regex in
+   `computer-script.ts` was broadened to match the policy's categories but is
+   demoted to a backstop: a label cannot distinguish a draft "Send" from a real
+   one, so judgement belongs in the policy and the regex only ensures a model
+   ignoring the policy still cannot silently transmit or destroy.
+
+2. **Persistent state across calls.** Codex states `cua_repl` state is
+   persistent across calls. The backend likewise keeps saved states between tool
+   calls, so `cua.state(stateId)` was added to rebind an id from an earlier call
+   instead of paying for a fresh observation.
+
+3. **Batch, then observe.** Codex's guidance is to batch deterministic actions
+   and the resulting state read into one call. `act` already accepts an array;
+   the tool description now says so explicitly, with the condition under which a
+   step must be sent alone.
+
+4. **Completion is visible, not attempted.** Codex closes with "attempting an
+   action is not completion: verify that the returned UI state visibly shows the
+   requested result." Added to both the tool description and the skill.
+
+One Codex feature was noted and **not** adopted: accessibility-tree diffing
+between observations, where the tree is returned as a delta by default with
+`{ disableDiffing: true }` to force a full read. The chosen backend already
+returns a successor diff after actions, so the remaining gap is narrower than it
+first appeared. Left as an open question.
+
+### Runtime findings from wiring
+
+Two real compatibility failures surfaced only when testing against pi's actual
+loader rather than the test harness:
+
+- `import("@injaneity/pi-computer-use/src/bridge.ts")` fails from a pix working
+  copy outside the tree holding the backend, and plain Node additionally refuses
+  to type-strip `.ts` files under `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Absolute-path imports do work
+  inside pi's loader, which strips types. `loadBackend()` therefore falls back to
+  explicit roots, and the tool is only usable inside pi.
+- `validateToolArguments(schema, args)` is the wrong signature; it takes
+  `(tool, toolCall)` and returns parsed arguments, throwing on invalid input.
+  The test was corrected rather than the code.

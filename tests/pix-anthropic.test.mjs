@@ -268,3 +268,39 @@ test("subscription transport does not retry unrelated server errors", async () =
   assert.match(events.at(-1).error.errorMessage, /Anthropic API error 500/);
   setFastModeEnabled(false);
 });
+
+test("OAuth refresh is cancellable so a rotated token is never lost", async () => {
+  let registration;
+  registerPixAnthropic({
+    registerProvider(id, config) {
+      registration = { id, config };
+    },
+  });
+
+  // Anthropic rotates the refresh token on every successful refresh, and Pi
+  // skips its auth.json write when the caller aborts mid-refresh. An
+  // unabortable request would consume the stored token server-side while the
+  // replacement is discarded, bricking the credential with `invalid_grant`.
+  const originalFetch = globalThis.fetch;
+  let requestSignal;
+  globalThis.fetch = (_url, init) => {
+    requestSignal = init.signal;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+    });
+  };
+
+  try {
+    const controller = new AbortController();
+    const pending = registration.config.oauth.refreshToken(
+      { type: "oauth", access: "access", refresh: "refresh", expires: 0 },
+      controller.signal,
+    );
+    controller.abort(new Error("cancelled by keystroke"));
+    await assert.rejects(pending, /cancelled by keystroke/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.ok(requestSignal?.aborted, "refresh request must observe the caller's abort");
+});

@@ -11,8 +11,13 @@ import { type CuaRuntime, type ScriptOutcome, renderOutcome } from "./computer-s
 
 export class ScriptCompileError extends Error {}
 
-/** Names shadowed inside the script so a stray reference fails loudly. */
-const DENIED = ["require", "process", "globalThis", "eval", "Function", "fetch", "import"];
+/**
+ * Names shadowed inside the script so a stray reference reads as undefined
+ * instead of silently reaching the host. `import` cannot be shadowed because it
+ * is a reserved word, so dynamic `import()` stays reachable — one concrete
+ * reason this is a capability boundary and not a security sandbox.
+ */
+const DENIED = ["require", "process", "globalThis", "eval", "Function", "fetch"];
 
 export const compileScript = (source: string): ((runtime: CuaRuntime, signal?: AbortSignal) => Promise<unknown>) => {
 	const body = source.trim();

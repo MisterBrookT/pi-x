@@ -56,8 +56,19 @@ export interface UiCondition {
 /** Actions that change the world. Everything else is a read. */
 const MUTATING = new Set(["press", "click", "setText", "typeText", "keypress", "drag"]);
 
-/** Verbs whose consequences a user cannot undo by looking away. */
-const IRREVERSIBLE = /\b(send|submit|delete|remove|discard|pay|purchase|buy|checkout|publish|post|confirm|transfer|withdraw|archive|unsend|revoke)\b/i;
+/**
+ * Labels whose activation causes an external side effect the user cannot take
+ * back. Grouped after the categories in Codex's Computer Use confirmations
+ * policy: deletion, third-party communication, financial action, permission and
+ * credential changes, subscription changes, and software installation.
+ *
+ * This is a backstop, not the primary control. The judgement of when an action
+ * is risky lives in the skill's policy, because a label alone cannot tell a
+ * draft "Send" from a real one. The regex exists so a model that ignores the
+ * policy still cannot silently transmit or destroy something.
+ */
+const IRREVERSIBLE =
+	/\b(send|reply|submit|post|publish|share|tweet|delet\w*|remove|discard|trash|erase|archive|unsend|revoke|cancel|pay|paying|payment|purchase|buy|checkout|order|transfer|withdraw|subscribe|unsubscribe|install\w*|uninstall\w*|sign\s?up|log\s?out|allow|grant|deny)\b/i;
 
 export interface ScriptBudget {
 	/** Hard cap on mutating actions per script run. */
@@ -150,6 +161,12 @@ export interface CuaApi {
 	roots(query?: { text?: string; app?: string; bundleId?: string; pid?: number; kind?: string }): Promise<string>;
 	observe(target?: { root?: string; mode?: "semantic" | "visual" | "fused" }): Promise<CuaState>;
 	launchBrowser(url?: string): Promise<CuaState>;
+	/**
+	 * Rebind a stateId seen in an earlier call. The backend keeps saved states
+	 * across tool calls, so a later script can continue from one without paying
+	 * for a fresh observation.
+	 */
+	state(stateId: string): Promise<CuaState>;
 }
 
 export interface CuaRuntime {
@@ -261,6 +278,14 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		async launchBrowser(url) {
 			spend("launch_browser", url);
 			return makeState(await operations.launchBrowser({ url }));
+		},
+		async state(stateId) {
+			if (!stateId) throw new Error("cua.state requires a stateId from an earlier call.");
+			// A scoped query is the cheapest way to prove the state is still live and
+			// recover its outline; the backend rejects an evicted id.
+			spend("search_ui", `rebind ${stateId}`);
+			const result = await operations.search({ stateId, capability: "actionable" });
+			return makeState({ ...result, details: { ...(result.details as object), stateId } }, stateId);
 		},
 	};
 
