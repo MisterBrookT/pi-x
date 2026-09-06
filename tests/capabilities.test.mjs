@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import registerCapabilities from "../extensions/capabilities.ts";
 
 const ALL = [
@@ -10,7 +11,7 @@ const ALL = [
 	"mcp", "mcpScript", "mcp__excalidraw",
 ];
 
-const harness = ({ all = ALL, active = ["read", "bash"] } = {}) => {
+const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory() } = {}) => {
 	let activeTools = [...active];
 	const handlers = new Map();
 	const commands = new Map();
@@ -20,15 +21,18 @@ const harness = ({ all = ALL, active = ["read", "bash"] } = {}) => {
 		setActiveTools: (names) => { activeTools = [...names]; },
 		registerCommand: (name, value) => commands.set(name, value),
 		on: (event, handler) => handlers.set(event, handler),
+		appendEntry: (customType, data) => sessionManager.appendCustomEntry(customType, data),
 	};
 	registerCapabilities(pi);
 	const notices = [];
-	const ctx = { ui: { notify: (message, level) => notices.push({ message, level }) } };
+	const ctx = { sessionManager, ui: { notify: (message, level) => notices.push({ message, level }) } };
 	return {
 		notices,
 		active: () => activeTools,
 		start: () => handlers.get("session_start")({}, ctx),
 		turn: () => handlers.get("before_agent_start")?.({}, ctx),
+		branch: () => handlers.get("session_tree")?.({}, ctx),
+		sessionManager,
 		run: (name, args = "") => commands.get(name).handler(args, ctx),
 		commandNames: () => [...commands.keys()].sort(),
 		setActive: (names) => { activeTools = [...names]; },
@@ -130,4 +134,61 @@ test("a family the user enabled stays enabled across turns", () => {
 	h.run("computer", "off");
 	h.turn();
 	assert.ok(!h.active().includes("computer"));
+});
+
+test("a family turned on stays on after reload", () => {
+	// Losing this silently withholds tools the user explicitly asked for.
+	const first = harness();
+	first.start();
+	first.run("computer", "on");
+	assert.ok(first.active().includes("act_ui"));
+
+	const reloaded = harness({ sessionManager: first.sessionManager });
+	reloaded.start();
+	assert.ok(reloaded.active().includes("computer"), "the choice survives");
+	assert.ok(reloaded.active().includes("act_ui"));
+	reloaded.turn();
+	assert.ok(reloaded.active().includes("computer"), "and is not withheld on the next turn");
+});
+
+test("turning a family back off is remembered too", () => {
+	const first = harness();
+	first.start();
+	first.run("mcp", "on");
+	first.run("mcp", "off");
+
+	const reloaded = harness({ sessionManager: first.sessionManager });
+	reloaded.start();
+	assert.ok(!reloaded.active().includes("mcp"));
+	assert.ok(!reloaded.active().includes("mcp__excalidraw"));
+});
+
+test("only the family is recorded, so a later release can add tools to it", () => {
+	const first = harness({ all: ALL.filter((n) => n !== "evaluate_browser") });
+	first.start();
+	first.run("computer", "on");
+
+	// A newer pix ships one more tool in the same family.
+	const upgraded = harness({ sessionManager: first.sessionManager, all: ALL });
+	upgraded.start();
+	assert.ok(upgraded.active().includes("evaluate_browser"), "a newly shipped tool follows the family");
+});
+
+test("a fresh session is unaffected by another session's choices", () => {
+	const first = harness();
+	first.start();
+	first.run("computer", "on");
+
+	const other = harness();
+	other.start();
+	assert.ok(!other.active().includes("computer"), "choices are per session, not global");
+});
+
+test("branch navigation restores the choices of that branch", () => {
+	const h = harness();
+	h.start();
+	h.run("computer", "on");
+	assert.ok(h.active().includes("computer"));
+	h.branch();
+	assert.ok(h.active().includes("computer"), "the branch still holds the choice");
 });

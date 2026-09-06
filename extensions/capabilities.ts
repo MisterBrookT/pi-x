@@ -105,24 +105,71 @@ const offByDefault = [
 /** MCP registers one tool per server, which cannot be listed ahead of time. */
 const isMcpServerTool = (name: string): boolean => name.startsWith("mcp__");
 
+/** Families that stay off until enabled, and whose choice is remembered. */
+const withheldFamilies = { computer: true, mcp: true } as const;
+
+/** Session entry recording one family being turned on or off. */
+const ENABLED_ENTRY = "pix-capability-enabled";
+
 export default function (pi: ExtensionAPI) {
   /**
-   * Families the user turned on for this session.
+   * Families the user turned on, restored from the session on reload.
    *
    * Needed because withheld tools are re-checked before every turn: an owning
    * package may re-enable its own tool at any time. pi-mcp-adapter does exactly
    * this, re-adding `mcp` after session start, so a single pass at startup is
    * not enough to keep it off.
+   *
+   * Turning a family on is a deliberate choice, so losing it on /reload would
+   * silently withhold tools the user asked for. Only the choice is recorded,
+   * never the resolved tool list, so a family that gains a tool in a later
+   * release still gets it.
    */
   const enabled = new Set<string>();
 
+  const restore = (ctx: ExtensionContext) => {
+    enabled.clear();
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type !== "custom" || entry.customType !== ENABLED_ENTRY) continue;
+      const data = entry.data as { family?: string; on?: boolean } | undefined;
+      if (!data?.family) continue;
+      if (data.on) enabled.add(data.family);
+      else enabled.delete(data.family);
+    }
+  };
+
+  /** Tool names belonging to a family the user enabled. */
+  const enabledTools = (): Set<string> => {
+    const names = new Set<string>();
+    for (const family of enabled) {
+      for (const tool of capabilities[family as keyof typeof capabilities] ?? []) names.add(tool);
+      if (family === "mcp") for (const tool of pi.getAllTools()) if (isMcpServerTool(tool.name)) names.add(tool.name);
+    }
+    return names;
+  };
+
+  /** Withhold every off-by-default tool the user has not asked for. */
   const withhold = () => {
+    const allowed = enabledTools();
     const active = new Set(pi.getActiveTools());
     let changed = false;
     for (const tool of active) {
-      if (enabled.has(tool)) continue;
+      if (allowed.has(tool)) continue;
       if (!offByDefault.includes(tool) && !isMcpServerTool(tool)) continue;
       active.delete(tool);
+      changed = true;
+    }
+    if (changed) pi.setActiveTools([...active]);
+  };
+
+  /** Re-enable the families restored from the session. */
+  const applyEnabled = () => {
+    const available = new Set(pi.getAllTools().map((tool) => tool.name));
+    const active = new Set(pi.getActiveTools());
+    let changed = false;
+    for (const tool of enabledTools()) {
+      if (!available.has(tool) || active.has(tool)) continue;
+      active.add(tool);
       changed = true;
     }
     if (changed) pi.setActiveTools([...active]);
@@ -131,13 +178,23 @@ export default function (pi: ExtensionAPI) {
   // Re-applied every turn so a package cannot quietly re-enable its own tools.
   pi.on("before_agent_start", withhold);
 
-  pi.on("session_start", () => {
+  // Branch navigation can move to a point with different choices.
+  pi.on("session_tree", (_event, ctx) => {
+    restore(ctx);
+    applyEnabled();
+    withhold();
+  });
+
+  pi.on("session_start", (_event, ctx) => {
+    restore(ctx);
+    const allowed = enabledTools();
     const available = new Set(pi.getAllTools().map((tool) => tool.name));
     const active = new Set(pi.getActiveTools());
     for (const tool of defaultPixTools) if (available.has(tool)) active.add(tool);
+    for (const tool of allowed) if (available.has(tool)) active.add(tool);
     // Applied after the defaults so a family is off unless explicitly enabled.
     // The /tool command loads later still, so an explicit choice wins over this.
-    for (const tool of active) if (!enabled.has(tool) && (offByDefault.includes(tool) || isMcpServerTool(tool))) active.delete(tool);
+    for (const tool of active) if (!allowed.has(tool) && (offByDefault.includes(tool) || isMcpServerTool(tool))) active.delete(tool);
     pi.setActiveTools([...active].filter((tool) => process.platform === "win32" || tool !== "powershell"));
   });
 
@@ -179,8 +236,14 @@ export default function (pi: ExtensionAPI) {
         if (command === "mcp") targets.push(...[...available].filter(isMcpServerTool));
 
         for (const tool of targets) {
-          if (action === "on") { active.add(tool); enabled.add(tool); }
-          else { active.delete(tool); enabled.delete(tool); }
+          if (action === "on") active.add(tool);
+          else active.delete(tool);
+        }
+        // Only families that can be withheld need a remembered choice.
+        if (command in withheldFamilies) {
+          if (action === "on") enabled.add(command);
+          else enabled.delete(command);
+          pi.appendEntry(ENABLED_ENTRY, { family: command, on: action === "on" });
         }
         pi.setActiveTools([...active]);
         ctx.ui.notify(`${command} ${action}`, "info");
