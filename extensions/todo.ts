@@ -110,6 +110,18 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
   pi.on("session_tree", (_e, ctx) => restore(ctx));
+  pi.on("context", (event) => {
+    if (!enabled || !state.items.length) return;
+    return {
+      messages: [...event.messages, {
+        role: "custom",
+        customType: "pix-todo-state",
+        content: `[CURRENT TODO STATE]\n${state.items.map(item => formatItem(item, state.items)).join("\n")}`,
+        display: false,
+        timestamp: Date.now(),
+      }],
+    };
+  });
   pi.registerTool({
     name: "todo",
     label: "Todo",

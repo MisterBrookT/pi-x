@@ -43,7 +43,7 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   };
   return {
     call, tool, theme, sessionManager, notifications,
-    event: (name) => handlers.get(name)({}, ctx),
+    event: (name, payload = {}) => handlers.get(name)(payload, ctx),
     command: (args) => command.handler(args, ctx),
     activeTools: () => activeTools,
     widget: () => widget,
@@ -60,6 +60,33 @@ const rejectsWithoutChange = async (call, input, message) => {
   assert.deepEqual(after.items, before.items);
   assert.equal(after.nextId, before.nextId);
 };
+
+test("injects the current todo state into model context only when tracking has items", async () => {
+  const h = createTodoHarness();
+  const original = [{ role: "user", content: "continue", timestamp: 0 }];
+
+  assert.equal(h.event("context", { messages: original }), undefined);
+
+  await h.call({ action: "add", text: "Inspect backend" });
+  await h.call({ action: "add", text: "Run checks", dependsOn: ["1"] });
+  await h.call({ action: "set", id: "1", status: "done" });
+  const injected = h.event("context", { messages: original });
+
+  assert.equal(injected.messages.length, 2);
+  assert.equal(injected.messages[0], original[0]);
+  assert.deepEqual(injected.messages[1], {
+    role: "custom",
+    customType: "pix-todo-state",
+    content: "[CURRENT TODO STATE]\n[done] #1 Inspect backend\n[pending] #2 Run checks (depends on #1)",
+    display: false,
+    timestamp: injected.messages[1].timestamp,
+  });
+  assert.equal(typeof injected.messages[1].timestamp, "number");
+  assert.deepEqual(original, [{ role: "user", content: "continue", timestamp: 0 }]);
+
+  await h.command("off");
+  assert.equal(h.event("context", { messages: original }), undefined);
+});
 
 test("todo dependencies block work until every prerequisite is done", async () => {
   const { call } = createTodoHarness();
