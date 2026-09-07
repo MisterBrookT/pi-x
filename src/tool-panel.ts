@@ -56,8 +56,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
 		id: "web",
 		label: "Web",
 		summary: "Search the web and read pages",
-		primary: ["web_search", "fetch_content", "get_search_content", "source_check"],
-		secondary: [],
+		primary: ["web_search", "fetch_content", "get_search_content"],
+		secondary: ["source_check", "video_content"],
 		defaultOn: true,
 	},
 	{

@@ -62,6 +62,11 @@ Restart Pi.
 ## What it adds
 
 - `web_search` and content fetching through `pi-web-access`
+  - Normal Web exposes Search → Fetch → Retrieve, with a tested 1,000 estimated-token budget.
+  - Provider, proxy, and model selection use backend configuration rather than per-call overrides.
+  - `source_check` and `video_content` are optional and off by default; enable them under `/tool` → Web → Enter. Explicit saved choices still win.
+  - Video timestamp/frame controls are exposed only by `video_content`. This is an interface split, not a security restriction on which URLs the fetch backend can read.
+  - Ordinary fetching does not expose browser-cookie opt-in or forced large repository cloning.
 - `subagent` through `pi-subagents`
 - `todo` plus the `/todo` terminal view
 - inline local-history and macOS word completion, optional AI completion via `/complete`, plus a restrained smart editor that continues lists and compacts pasted images

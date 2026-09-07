@@ -3,12 +3,15 @@ import registerLsp from "../node_modules/@narumitw/pi-lsp/dist/index.ts";
 import registerSubagents from "pi-subagents";
 import registerWebAccess from "pi-web-access";
 import { simplifySubagent } from "../src/simple-subagent.ts";
-import { compactWebTool } from "../src/compact-web.ts";
+import { webProfiles } from "../src/web-profiles.ts";
 
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 
 function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
-  if (tool.name !== "subagent") return pi.registerTool(compactWebTool(tool));
+  if (tool.name !== "subagent") {
+    for (const profile of webProfiles(tool)) pi.registerTool(profile);
+    return;
+  }
   tool = simplifySubagent(tool);
   const execute = tool.execute.bind(tool);
   pi.registerTool({
