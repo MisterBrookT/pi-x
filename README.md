@@ -126,6 +126,23 @@ Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`,
 
 Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent-config`. Turning subagents on or off is done in `/tool`.
 
+The `subagent` tool exposes four actions: `start`, `status`, `steer`, and `stop`.
+For example, `{action:"start", tasks:[{agent:"scout", task:"Locate the parser"}]}`
+starts one asynchronous task. Multiple tasks start in parallel, capped at four
+concurrent agents and eight tasks. Parallel tasks use separate git worktrees;
+review and integrate their changes yourself. A single task uses the current
+working directory, so do not overlap writers there.
+
+Use the returned run ID with `status`, `steer` (plus `message`), or `stop`.
+Completion notifications arrive automatically. The main assistant and Todo
+handle dependencies such as A/B → C after reading the earlier results.
+Workflow scripting, scheduling, missions, and administrative actions are not
+exposed through this tool. Models and safety controls remain backend-configured.
+The full definition has a tested budget of 2,000 estimated tokens; estimates are
+character-based, not provider token counts. Supporting `bg_wait` and
+`subagent_supervisor` tools remain available for background jobs and child
+communication.
+
 ## Computer use
 
 When a task can only be done through a graphical interface, `computer` drives
