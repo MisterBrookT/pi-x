@@ -57,6 +57,31 @@ function createHarness({ replies, model = { provider: "pix-anthropic", id: "clau
   return { start, editor, requests, notifications, handlers, ctx, command: args => commands.get("complete").handler(args, ctx), select: value => { selection = value; } };
 }
 
+test("voice-size pastes stay editable through terminal and programmatic paste", async () => {
+  const h = createHarness({ replies: () => "" });
+  await h.start();
+  const text = Array(5).fill("This is a spoken paragraph that should remain visible and editable in the input box.").join("\n");
+  for (const mode of ["terminal", "programmatic"]) {
+    const editor = h.editor();
+    if (mode === "terminal") {
+      editor.handleInput("\x1b[200~" + text.slice(0, 40));
+      editor.handleInput(text.slice(40) + "\x1b[201~");
+    } else editor.insertTextAtCursor(text);
+    assert.equal(editor.getText(), text);
+    assert.doesNotMatch(editor.render(100).join("\n"), /▤ paste/);
+  }
+  const editor = h.editor();
+  const large = Array(21).fill("Large pasted content").join("\n");
+  editor.handleInput("\x1b[200~" + large + "\x1b[201~");
+  assert.match(editor.getText(), /▤ paste 1  21 lines/);
+  let submitted = editor.getText();
+  for (const handler of h.handlers.get("input") ?? []) {
+    const result = await handler({ text: submitted }, h.ctx);
+    if (result?.action === "transform") submitted = result.text;
+  }
+  assert.equal(submitted, large, "large paste labels expand losslessly on submit");
+});
+
 test("AI completion is off by default and /complete on persists the preference", async () => {
   const h = createHarness({ replies: () => "the full suite" });
   await h.start();

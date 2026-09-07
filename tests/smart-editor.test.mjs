@@ -31,10 +31,15 @@ test("detects pasted images without relying on a terminal filename", async () =>
 	assert.equal(pastedImagePath(path.replace(/\.png$/, ".txt")), undefined);
 });
 
-test("compacts substantial multiline or long text", () => {
-	assert.equal(shouldCompactPaste("one\ntwo\nthree\nfour"), true);
-	assert.equal(shouldCompactPaste("one\ntwo\nthree"), false);
-	assert.equal(shouldCompactPaste("x".repeat(501)), true);
+test("keeps ordinary dictation visible and compacts only large pastes", () => {
+	assert.equal(shouldCompactPaste("one\ntwo\nthree\nfour\nfive"), false);
+	assert.equal(shouldCompactPaste("x".repeat(501)), false);
+	assert.equal(shouldCompactPaste("x".repeat(4000)), false);
+	assert.equal(shouldCompactPaste("x".repeat(4001)), true);
+	for (const newline of ["\n", "\r\n", "\r"]) {
+		assert.equal(shouldCompactPaste(Array(20).fill("line").join(newline)), false);
+		assert.equal(shouldCompactPaste(Array(21).fill("line").join(newline)), true);
+	}
 	assert.equal(
 		createPasteLabel(1, "one\ntwo\nthree\nfour"),
 		"▤ paste 1  4 lines",

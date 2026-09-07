@@ -55,7 +55,8 @@ export function pastedImagePath(text: string): string | undefined {
 }
 
 export function shouldCompactPaste(text: string): boolean {
-	return text.split(/\r\n|\r|\n/).length >= 4 || text.length > 500;
+	// Dictation arrives as paste too; leave ordinary paragraphs editable inline.
+	return text.split(/\r\n|\r|\n/).length > 20 || text.length > 4000;
 }
 
 export function createImageLabel(id: number, path: string): string {

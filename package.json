@@ -1,6 +1,6 @@
 {
   "name": "@brooktang/pi-x",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, computer use, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",

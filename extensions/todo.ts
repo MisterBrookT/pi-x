@@ -1,6 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 type Status = "pending" | "active" | "done";
@@ -81,15 +81,24 @@ export default function (pi: ExtensionAPI) {
     const open = state.items.filter(i => i.status !== "done");
     if (!open.length) return ctx.ui.setWidget("pix-todo", undefined);
     ctx.ui.setWidget("pix-todo", (_tui, theme) => {
-      const lines = open.slice(0, 6).map(item => {
-        const unmet = unmetTodoDependencies(item, state.items);
-        const marker = theme.fg("accent", item.status === "active" ? "›" : unmet.length ? "×" : "○");
-        const indent = item.parentId ? "  " : "";
-        const waiting = unmet.length ? theme.fg("muted", ` ← ${unmet.map(id => `#${id}`).join(", ")}`) : "";
-        return `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg("text", item.text)}${waiting}`;
-      });
       return {
-        render: (width: number) => fitTodoWidgetLines(lines, width),
+        render: (width: number) => open.slice(0, 6).flatMap(item => {
+          const unmet = unmetTodoDependencies(item, state.items);
+          const marker = theme.fg("accent", item.status === "active" ? "›" : unmet.length ? "◌" : "○");
+          const indent = item.parentId ? "  " : "";
+          const lines = fitTodoWidgetLines([
+            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}`,
+          ], width);
+          if (!item.dependsOn?.length || width <= 0) return lines;
+          // Give prerequisites their own line: long titles must not hide blockers.
+          const dependencies = item.dependsOn.map(id => `#${id}${unmet.includes(id) ? "" : " ✓"}`).join(", ");
+          const label = unmet.length ? "waiting on" : item.status === "active" ? "after" : "ready · after";
+          const padding = `${indent}  `;
+          const detail = `└─ ${label} ${dependencies}`;
+          const available = Math.max(1, width - padding.length);
+          return [...lines, ...wrapTextWithAnsi(theme.fg("muted", detail), available)
+            .map(line => truncateToWidth(padding + line, width, ""))];
+        }),
         invalidate() {},
       };
     });

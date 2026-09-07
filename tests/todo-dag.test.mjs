@@ -219,7 +219,7 @@ test("restores legacy numeric IDs and todos without dependencies", async () => {
   const items = (await h.call({ action: "list" })).details.items;
   assert.deepEqual(items[1], { id: "1.1", parentId: "1", text: "Child", status: "pending", dependsOn: ["2"] });
   assert.equal(items[0].dependsOn, undefined);
-  assert.match(h.render().join("\n"), /× #1.1 Child ← #2/);
+  assert.match(h.render().join("\n"), /◌ #1.1 Child\n\s+└─ waiting on #2/);
 });
 
 test("widget and slash command show readiness, progress and toggling", async () => {
@@ -227,7 +227,7 @@ test("widget and slash command show readiness, progress and toggling", async () 
   await h.call({ action: "replace", items: [
     { text: "Inspect" }, { text: "Independent child", parentId: "1" }, { text: "Summarize", dependsOn: ["1"] },
   ] });
-  assert.deepEqual(h.render(), ["○ #1 Inspect", "  ○ #1.1 Independent child", "× #2 Summarize ← #1"]);
+  assert.deepEqual(h.render(), ["○ #1 Inspect", "  ○ #1.1 Independent child", "◌ #2 Summarize", "  └─ waiting on #1"]);
   await h.call({ action: "set", id: "1", status: "active" });
   assert.match(h.render()[0], /^› #1/);
   assert.ok(h.widget().render(12).every(line => visibleWidth(line) <= 12));
@@ -239,14 +239,36 @@ test("widget and slash command show readiness, progress and toggling", async () 
   assert.equal(h.widget(), undefined);
   await h.command("on");
   assert.deepEqual(h.activeTools(), ["read", "todo"]);
-  assert.equal(h.render().length, 3);
+  assert.equal(h.render().length, 4);
 
   await h.call({ action: "set", id: "1", status: "done" });
-  assert.deepEqual(h.render(), ["  ○ #1.1 Independent child", "○ #2 Summarize"]);
+  assert.deepEqual(h.render(), ["  ○ #1.1 Independent child", "○ #2 Summarize", "  └─ ready · after #1 ✓"]);
   await h.command("");
   assert.match(h.notifications.at(-1).message, /\[pending\] #2 Summarize/);
   for (const id of ["1.1", "2"]) await h.call({ action: "set", id, status: "done" });
   assert.equal(h.widget(), undefined);
+});
+
+test("long todo titles cannot hide fan-in dependencies, including after resize", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [
+    { text: "Backend" }, { text: "Frontend" },
+    { text: "Integrate " + "a long title ".repeat(20), dependsOn: ["1", "2"] },
+  ] });
+  for (const width of [32, 80, 18]) {
+    const lines = h.render(width);
+    assert.ok(lines.every(line => visibleWidth(line) <= width));
+    const detail = lines.slice(3).join(" ");
+    assert.match(detail, /waiting on/);
+    assert.match(detail, /#1/);
+    assert.match(detail, /#2/);
+  }
+  await h.call({ action: "set", id: "1", status: "done" });
+  assert.match(h.render().join("\n"), /waiting on #1 ✓, #2/);
+  await h.call({ action: "set", id: "2", status: "done" });
+  assert.match(h.render().join("\n"), /ready · after #1 ✓, #2 ✓/);
+  await h.call({ action: "set", id: "3", status: "active" });
+  assert.match(h.render().join("\n"), /└─ after #1 ✓, #2 ✓/);
 });
 
 test("tool result rendering reads failure status from Pi's renderer context", () => {

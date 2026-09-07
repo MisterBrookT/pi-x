@@ -3,6 +3,7 @@ import registerLsp from "../node_modules/@narumitw/pi-lsp/dist/index.ts";
 import registerSubagents from "pi-subagents";
 import registerWebAccess from "pi-web-access";
 import { simplifySubagent } from "../src/simple-subagent.ts";
+import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
 import { webProfiles } from "../src/web-profiles.ts";
 
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
@@ -16,7 +17,8 @@ function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
   const execute = tool.execute.bind(tool);
   pi.registerTool({
     ...tool,
-    execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal, onUpdate: unknown, ctx: unknown) {
+    execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal, onUpdate: unknown, rawCtx: unknown) {
+      const ctx = withAnimatedSubagentWidgets(rawCtx as Parameters<typeof withAnimatedSubagentWidgets>[0]);
       const isInlineWorkflow = typeof params.workflowScript === "string" || typeof params.workflowScriptPath === "string";
       if (!isInlineWorkflow) return execute(toolCallId, params, signal, onUpdate, ctx);
       const requestedConcurrency = typeof params.globalConcurrencyLimit === "number" ? params.globalConcurrencyLimit : 4;
@@ -35,6 +37,10 @@ function toolsOnly(pi: ExtensionAPI): ExtensionAPI {
     get(target, property, receiver) {
       if (property === "registerCommand") return () => {};
       if (property === "registerTool") return (tool: RegisteredTool) => boundedSubagentTool(target, tool);
+      // Upstream widgets cache rendered lines per 1s frame; animate them at pi's spinner cadence.
+      if (property === "on") return (event: string, handler: (e: unknown, ctx: unknown) => unknown) =>
+        target.on(event as Parameters<ExtensionAPI["on"]>[0], ((e: unknown, ctx: unknown) =>
+          handler(e, withAnimatedSubagentWidgets(ctx as Parameters<typeof withAnimatedSubagentWidgets>[0]))) as Parameters<ExtensionAPI["on"]>[1]);
       const value = Reflect.get(target, property, receiver);
       return typeof value === "function" ? value.bind(target) : value;
     },
