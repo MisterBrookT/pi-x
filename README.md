@@ -15,7 +15,7 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 - optional language-server diagnostics;
 - prompt and startup-overhead inspection.
 
-In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. `/complete on` adds AI completion: a small cloud model (Haiku 4.5 through `pix-anthropic` by default; `/complete model` picks another) predicts what you will type next from the last few turns, in your own voice, and proposes a likely next message when the editor is empty. Longer predictions wrap onto up to three lines below the cursor. While it is on, the history and dictionary suggestions step aside so the ghost text always comes from the model. Requests are debounced and cancelled on every keystroke, send only the last few turns, and the feature stays off until you enable it. Pix commands still use menus to complete supported arguments such as `/subagent config`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
+In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. `/complete on` adds AI completion: a small cloud model (Haiku 4.5 through `pix-anthropic` by default; `/complete model` picks another) predicts what you will type next from the last few turns, in your own voice, and proposes a likely next message when the editor is empty. Longer predictions wrap onto up to three lines below the cursor. While it is on, the history and dictionary suggestions step aside so the ghost text always comes from the model. Requests are debounced and cancelled on every keystroke, send only the last few turns, and the feature stays off until you enable it. Pix commands still use menus to complete supported arguments such as `/tool computer off`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
 
 Pix deliberately does not include unevaluated complexity: autonomous memory, an MCP umbrella, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
 
@@ -99,13 +99,32 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/prompt [path]` | Export the exact effective Pix system prompt |
 | `/bench` | Check Pix health, startup speed, and prompt overhead |
-| `/websearch [on\|off]` | Show or toggle web access for this session |
-| `/subagent [on\|off\|config]` | Show, toggle, or configure subagent role models, thinking, and fallback |
+| `/tool` | Open the tool panel; also `/tool list` and `/tool <name\|capability> [on\|off]` |
+| `/context` | Show what is filling the context window |
+| `/subagent-config` | Configure subagent role models, thinking level, and fallback |
 | `/computer-check` | Report computer-use backend and permission state |
+| `/computer-stop` | Stop a running computer-use script and close its browser |
+
+`/tool` is the single place tools are turned on and off. Everyday tools are
+listed individually; Web, Subagent, Computer, and MCP are one row each, because
+choosing what the assistant may do should not require knowing that computer use
+ships eleven backend primitives. `Space` toggles the row under the cursor,
+`Enter` opens a capability to reach its individual tools, and `Esc` goes back.
+
+Computer and MCP start off. Every active tool's schema is re-sent on every
+request, so a capability most sessions never touch is a standing charge on the
+context window and on the model's attention. Turning Computer on enables the
+`computer` script wrapper alone, which calls its primitives internally, so the
+capability costs one schema rather than twelve. Choices are recorded per session
+and survive `/reload` and branch navigation.
+
+Token figures in `/tool` and `/context` are estimates from serialized schema
+length, not counts from the provider's tokenizer. They are accurate enough to
+compare rows and decide what to disable.
 
 Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
-Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent config`.
+Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent-config`. Turning subagents on or off is done in `/tool`.
 
 ## Computer use
 

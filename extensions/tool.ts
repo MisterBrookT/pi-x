@@ -1,40 +1,31 @@
 /**
- * `/tool` — see what every tool costs, and turn tools on or off.
+ * `/tool` — the one place tools are configured.
  *
  * Tool schemas are re-sent on every request, so the active set is a standing
- * charge on both the context window and the model's attention. Pix otherwise
- * exposes this only through per-family commands like `/websearch`, which cannot
- * show a tool nobody wrote a command for, and shows no cost at all.
+ * charge on both the context window and the model's attention. This panel is
+ * the single control surface for it: everyday tools individually, and a knob
+ * per capability for the families whose internals nobody should have to learn.
  *
- * Only explicit user choices are persisted, never the resolved set. Saving the
- * whole set would freeze the session against a later pix release or a newly
- * installed package: tools added afterwards would be silently withheld because
- * they were absent when the list was written.
+ * Only explicit choices are persisted, never the resolved set. Saving the whole
+ * set would freeze the session against a later release: a tool shipped
+ * afterwards would be missing from the saved list and stay off with nothing
+ * explaining why.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { groupByOrigin, inventory, pickerLabel, renderTable, summarize, type ToolCost } from "../src/tool-inventory.ts";
-
-const ENTRY = "pix-tool-overrides";
-
-/** Explicit per-tool choices; absent tools keep whatever default applies. */
-interface Overrides {
-	[tool: string]: boolean;
-}
-
-const readOverrides = (ctx: ExtensionContext): Overrides => {
-	const merged: Overrides = {};
-	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type !== "custom" || entry.customType !== ENTRY) continue;
-		const data = (entry.data as { overrides?: Overrides } | undefined)?.overrides;
-		if (data) Object.assign(merged, data);
-	}
-	return merged;
-};
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { inventory, renderTable } from "../src/tool-inventory.ts";
+import {
+	buildPanel,
+	capabilityById,
+	capabilityTargets,
+	formatTokens,
+	panelSummary,
+	type PanelModel,
+} from "../src/tool-panel.ts";
+import { ToolPanelView } from "../src/tool-panel-view.ts";
+import { type Overrides, readOverrides, TOOL_ENTRY } from "../src/tool-overrides.ts";
 
 /**
  * Name a package from its directory, so a local checkout of pix reports the
@@ -56,15 +47,17 @@ const packageName = (baseDir: string): string | undefined => {
 export default function tool(pi: ExtensionAPI) {
 	let overrides: Overrides = {};
 
-	const rows = (): ToolCost[] => inventory(pi.getAllTools(), pi.getActiveTools(), packageName);
+	const knownNames = (): Set<string> => new Set(pi.getAllTools().map((entry) => entry.name));
+
+	const panel = (): PanelModel => buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName);
 
 	/** Apply saved choices over whatever the rest of the session decided. */
 	const apply = () => {
-		const known = new Set(pi.getAllTools().map((tool) => tool.name));
+		const known = knownNames();
 		const active = new Set(pi.getActiveTools());
-		for (const [name, enabled] of Object.entries(overrides)) {
+		for (const [name, on] of Object.entries(overrides)) {
 			if (!known.has(name)) continue;
-			if (enabled) active.add(name);
+			if (on) active.add(name);
 			else active.delete(name);
 		}
 		pi.setActiveTools([...active]);
@@ -75,104 +68,200 @@ export default function tool(pi: ExtensionAPI) {
 		apply();
 	};
 
-	// Runs after the capability defaults are seeded, so an explicit "off" is not
-	// undone by the session_start handler that turns pix's families back on.
+	// Runs after the capability defaults are seeded, so an explicit choice is not
+	// undone by the session_start handler that applies them.
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
 
-	const setTool = (name: string, enabled: boolean) => {
-		overrides[name] = enabled;
+	/** Record one or more choices as a single entry, so a capability is atomic. */
+	const setTools = (changes: Overrides) => {
+		if (!Object.keys(changes).length) return;
+		Object.assign(overrides, changes);
 		apply();
-		pi.appendEntry(ENTRY, { overrides: { [name]: enabled } });
+		pi.appendEntry(TOOL_ENTRY, { overrides: changes });
+	};
+
+	const setTool = (name: string, on: boolean) => setTools({ [name]: on });
+
+	const toggleCapability = (id: string, on: boolean): string[] => {
+		const capability = capabilityById(id);
+		if (!capability) return [];
+		const targets = capabilityTargets(capability, on, knownNames());
+		setTools(Object.fromEntries(targets.map((name) => [name, on])));
+		return targets;
 	};
 
 	pi.registerCommand("tool", {
-		description: "Show what each tool costs per request, and enable or disable tools",
+		description: "Configure which tools the assistant can use, and see what each costs",
 		getArgumentCompletions: (prefix) => {
-			const matches = rows()
-				.filter((row) => row.name.startsWith(prefix))
-				.map((row) => ({
-					value: row.name,
-					label: row.name,
-					description: `${row.active ? "on" : "off"} · ~${row.tokens} tok · ${row.origin}`,
-				}));
-			const list = [{ value: "list", label: "list", description: "Print every tool and its cost" }, ...matches];
-			const filtered = list.filter((option) => option.value.startsWith(prefix));
-			return filtered.length ? filtered : null;
+			const model = panel();
+			const options = [
+				{ value: "list", label: "list", description: "Print every tool and its estimated cost" },
+				...model.rows.map((row) =>
+					row.kind === "capability"
+						? {
+								value: row.id,
+								label: row.label,
+								description: `${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)}`,
+							}
+						: {
+								value: row.name,
+								label: row.name,
+								description: `${row.on ? "on" : "off"} · ${formatTokens(row.tokens)} · ${row.origin}`,
+							},
+				),
+				// Child tools are addressable by name even though the panel keeps them
+				// in the advanced view, so completion has to offer them too.
+				...model.rows
+					.flatMap((row) => (row.kind === "capability" ? row.tools : []))
+					.map((entry) => ({
+						value: entry.name,
+						label: entry.name,
+						description: `${entry.active ? "on" : "off"} · ${formatTokens(entry.tokens)} · ${entry.origin}`,
+					})),
+			];
+			const seen = new Set<string>();
+			const matches = options.filter(
+				(option) => option.value.startsWith(prefix) && !seen.has(option.value) && seen.add(option.value),
+			);
+			return matches.length ? matches : null;
 		},
 		handler: async (rawArgs, ctx) => {
 			const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 
-			// `/tool <name> [on|off]` stays scriptable and works without a TUI.
+			// `/tool <name|capability> [on|off]` stays scriptable and works headless.
 			if (args.length && args[0] !== "list") {
-				const [name, verb] = args;
-				const row = rows().find((candidate) => candidate.name === name);
-				if (!row) {
-					ctx.ui.notify(`No tool named ${name}. Use /tool list to see them.`, "error");
+				const [target, verb] = args;
+				const capability = capabilityById(target);
+				const model = panel();
+
+				if (capability) {
+					const row = model.rows.find((entry) => entry.kind === "capability" && entry.id === target);
+					if (!row || row.kind !== "capability") {
+						ctx.ui.notify(`${capability.label} is not available; its package is not installed.`, "error");
+						return;
+					}
+					if (verb !== "on" && verb !== "off") {
+						ctx.ui.notify(
+							`${row.label} is ${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)}`,
+							"info",
+						);
+						return;
+					}
+					const changed = toggleCapability(target, verb === "on");
+					ctx.ui.notify(`${row.label} ${verb} · ${changed.length} tool${changed.length === 1 ? "" : "s"}`, "info");
+					return;
+				}
+
+				// Also matches a tool inside a capability, which the panel only shows
+				// in the advanced view. Naming it directly must still work: the command
+				// form is what scripts and headless sessions have.
+				const row =
+					model.rows.find((entry) => entry.kind === "tool" && entry.name === target) ??
+					model.rows
+						.flatMap((entry) => (entry.kind === "capability" ? entry.tools : []))
+						.filter((entry) => entry.name === target)
+						.map((entry) => ({
+							kind: "tool" as const,
+							id: entry.name,
+							name: entry.name,
+							on: entry.active,
+							tokens: entry.tokens,
+							origin: entry.origin,
+						}))[0];
+				if (!row || row.kind !== "tool") {
+					ctx.ui.notify(`No tool or capability named ${target}. Use /tool list to see them.`, "error");
 					return;
 				}
 				if (verb !== "on" && verb !== "off") {
-					ctx.ui.notify(`${row.name} is ${row.active ? "on" : "off"} · ~${row.tokens} tokens · ${row.origin}`, "info");
+					ctx.ui.notify(`${row.name} is ${row.on ? "on" : "off"} · ${formatTokens(row.tokens)} · ${row.origin}`, "info");
 					return;
 				}
 				setTool(row.name, verb === "on");
-				const saved = verb === "off" ? ` · frees ~${row.tokens} tokens per request` : "";
+				const saved = verb === "off" ? ` · frees ${formatTokens(row.tokens)} per request` : "";
 				ctx.ui.notify(`${row.name} ${verb}${saved}`, "info");
 				return;
 			}
 
 			if (args[0] === "list" || ctx.mode !== "tui") {
-				ctx.ui.notify(renderTable(rows()), "info");
+				ctx.ui.notify(renderTable(inventory(pi.getAllTools(), pi.getActiveTools(), packageName)), "info");
 				return;
 			}
 
 			await ctx.ui.custom((tui, theme, _keybindings, done) => {
-				// Grouped by origin, but the tool name leads each row: the name is what
-				// is being chosen, and a repeated package prefix in front turns the list
-				// into a column of identical text with the names pushed out of view.
-				const groups = groupByOrigin(rows());
-				const nameWidth = Math.max(0, ...groups.flatMap((group) => group.rows.map((row) => row.name.length)));
-				const items: SettingItem[] = groups.flatMap((group) =>
-					group.rows.map((row) => ({
-						id: row.name,
-						label: pickerLabel(row, nameWidth),
-						description: `~${row.tokens} tokens per request · ${group.origin} contributes ~${group.tokens.toLocaleString()} in total`,
-						currentValue: row.active ? "on" : "off",
-						values: ["on", "off"],
-					})),
-				);
-
-				const container = new Container();
-				const header = {
-					render: () => [theme.fg("accent", theme.bold("Tools")), theme.fg("muted", summarize(rows())), ""],
-					invalidate() {},
+				const themed = {
+					title: (text: string) => theme.fg("accent", theme.bold(text)),
+					muted: (text: string) => theme.fg("muted", text),
+					label: (text: string, selected: boolean) => theme.fg(selected ? "accent" : "text", text),
+					value: (text: string, on: boolean) => theme.fg(on ? "success" : "muted", text),
+					cursor: "›",
 				};
-				container.addChild(header);
 
-				const list = new SettingsList(
-					items,
-					Math.min(items.length + 2, 16),
-					getSettingsListTheme(),
-					(id, value) => {
-						setTool(id, value === "on");
-						// Recompute so the header total reflects the change immediately.
-						tui.requestRender();
-					},
-					() => done(undefined),
-					{ enableSearch: true },
-				);
-				container.addChild(list);
+				// One view at a time: the top level, or a capability's tools.
+				let scopeId: string | undefined;
+				const advancedModel = (id: string): PanelModel => {
+					const row = panel().rows.find((entry) => entry.kind === "capability" && entry.id === id);
+					const tools = row?.kind === "capability" ? row.tools : [];
+					return {
+						rows: tools.map((entry) => ({
+							kind: "tool" as const,
+							id: entry.name,
+							name: entry.name,
+							on: entry.active,
+							tokens: entry.tokens,
+							origin: entry.origin,
+						})),
+						activeTokens: tools.filter((entry) => entry.active).reduce((sum, entry) => sum + entry.tokens, 0),
+						activeCount: tools.filter((entry) => entry.active).length,
+						totalCount: tools.length,
+					};
+				};
+
+				let view = new ToolPanelView({ model: panel(), theme: themed });
+
+				const refresh = () => {
+					view.setModel(scopeId ? advancedModel(scopeId) : panel());
+					tui.requestRender();
+				};
 
 				return {
-					render: (width: number) => container.render(width),
-					invalidate: () => container.invalidate(),
+					render: (width: number) => view.render(width),
+					invalidate() {},
 					handleInput: (data: string) => {
-						list.handleInput?.(data);
-						tui.requestRender();
+						const action = view.handleInput(data);
+						if (action.type === "toggle") {
+							const row = action.row;
+							if (row.kind === "capability") toggleCapability(row.id, !row.on);
+							else setTool(row.name, !row.on);
+							refresh();
+							return;
+						}
+						if (action.type === "enter" && action.row.kind === "capability") {
+							const capability = action.row;
+							scopeId = capability.id;
+							view = new ToolPanelView({
+								model: advancedModel(capability.id),
+								theme: themed,
+								scope: { label: capability.label, summary: capability.summary },
+							});
+							tui.requestRender();
+							return;
+						}
+						if (action.type === "back") {
+							scopeId = undefined;
+							view = new ToolPanelView({ model: panel(), theme: themed });
+							tui.requestRender();
+							return;
+						}
+						if (action.type === "close") {
+							done(undefined);
+							return;
+						}
+						if (action.type === "move") tui.requestRender();
 					},
 				};
 			});
-			ctx.ui.notify(summarize(rows()), "info");
+			ctx.ui.notify(panelSummary(panel()), "info");
 		},
 	});
 }

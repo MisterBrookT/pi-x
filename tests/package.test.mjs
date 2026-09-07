@@ -18,14 +18,18 @@ test("slash commands stay minimal", async () => {
   assert.match(upstream, /PI_SUBAGENT_MAX_DEPTH/);
   assert.match(upstream, /Math\.min\(requestedConcurrency, 4\)/);
   assert.match(upstream, /Math\.min\(requestedSpawns, 8\)/);
-  assert.match(capabilities, /websearch/);
-  assert.match(capabilities, /subagent/);
+  // Tool on/off lives in /tool alone. The per-family toggles were removed
+  // because they duplicated it and wrote to a record that could contradict it.
+  const toolPanel = await readFile(new URL("extensions/tool.ts", root), "utf8");
+  assert.match(toolPanel, /registerCommand\("tool"/);
+  for (const removed of ["websearch", "computer", "mcp"]) {
+    assert.doesNotMatch(capabilities, new RegExp(`registerCommand\\("${removed}"`));
+  }
+  assert.match(capabilities, /registerCommand\("subagent-config"/);
   assert.match(fast, /registerCommand\("fast"/);
   assert.match(fast, /Usage: \/fast \[on\|off\|status\]/);
   assert.match(fast, /getArgumentCompletions/);
-  assert.match(capabilities, /action !== "on" && action !== "off"/);
-  assert.match(capabilities, /action === "config"/);
-  assert.match(capabilities, /getArgumentCompletions/);
+  assert.match(toolPanel, /getArgumentCompletions/);
   assert.match(capabilities, /ctx\.scopedModels\.length/);
   assert.match(capabilities, /ctx\.scopedModels\.map/);
   assert.match(capabilities, /const agents = \["worker", "scout", "reviewer", "researcher"\]/);

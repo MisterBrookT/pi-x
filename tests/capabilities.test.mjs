@@ -1,3 +1,11 @@
+/**
+ * Session defaults: which tools a new session gets, and which stay withheld.
+ *
+ * Choices made through `/tool` are covered in tool-capability-integration.test.mjs,
+ * which loads both extensions the way pi does. This file covers the defaults
+ * alone, so a failure here points at the default policy rather than the panel.
+ */
+
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -33,7 +41,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 		turn: () => handlers.get("before_agent_start")?.({}, ctx),
 		branch: () => handlers.get("session_tree")?.({}, ctx),
 		sessionManager,
-		run: (name, args = "") => commands.get(name).handler(args, ctx),
+		choose: (overrides) => sessionManager.appendCustomEntry("pix-tool-overrides", { overrides }),
 		commandNames: () => [...commands.keys()].sort(),
 		setActive: (names) => { activeTools = [...names]; },
 	};
@@ -64,6 +72,14 @@ test("MCP is off by default, including per-server tools", () => {
 	assert.ok(!h.active().includes("mcp__excalidraw"), "server tools cannot be listed ahead of time");
 });
 
+test("subagent internals are on, because the family is on by default", () => {
+	const h = harness();
+	h.start();
+	for (const name of ["subagent", "bg_wait", "subagent_supervisor"]) {
+		assert.ok(h.active().includes(name), `${name} should be on`);
+	}
+});
+
 test("a tool active before session start is still turned off", () => {
 	// Another extension enabling the family must not defeat the default.
 	const h = harness({ active: ["read", "computer", "act_ui", "mcp__excalidraw"] });
@@ -71,45 +87,15 @@ test("a tool active before session start is still turned off", () => {
 	assert.deepEqual(h.active().filter((t) => /computer|act_ui|mcp/.test(t)), []);
 });
 
-test("/computer on enables the whole family, and off removes it", () => {
-	const h = harness();
-	h.start();
-	h.run("computer", "on");
-	for (const name of ["computer", "act_ui", "launch_browser"]) assert.ok(h.active().includes(name));
-	h.run("computer", "off");
-	for (const name of ["computer", "act_ui", "launch_browser"]) assert.ok(!h.active().includes(name));
+test("capabilities register no toggle commands; /tool owns that", () => {
+	// /computer, /mcp, and /websearch duplicated /tool and could contradict it.
+	assert.deepEqual(harness().commandNames(), ["subagent-config"]);
 });
 
-test("/mcp on also enables tools for each configured server", () => {
-	const h = harness();
-	h.start();
-	h.run("mcp", "on");
-	assert.ok(h.active().includes("mcp"));
-	assert.ok(h.active().includes("mcp__excalidraw"), "per-server tools follow the family");
-	h.run("mcp", "off");
-	assert.ok(!h.active().includes("mcp__excalidraw"));
-});
-
-test("a bare toggle command reports current state", () => {
-	const h = harness();
-	h.start();
-	h.run("computer", "");
-	assert.match(h.notices.at(-1).message, /computer is off/);
-	h.run("computer", "on");
-	h.run("computer", "");
-	assert.match(h.notices.at(-1).message, /computer is on/);
-});
-
-test("every family has a command, and each names its default", () => {
-	assert.deepEqual(harness().commandNames(), ["computer", "mcp", "subagent", "websearch"]);
-});
-
-test("families whose package is absent are skipped without error", () => {
+test("a missing package is skipped without error", () => {
 	const h = harness({ all: ["read", "bash", "todo"] });
 	assert.doesNotThrow(() => h.start());
 	assert.ok(h.active().includes("todo"));
-	h.run("computer", "on");
-	assert.deepEqual(h.active().filter((t) => t === "computer"), []);
 });
 
 test("a package cannot quietly re-enable a withheld tool", () => {
@@ -124,60 +110,64 @@ test("a package cannot quietly re-enable a withheld tool", () => {
 	assert.ok(!h.active().includes("mcp__excalidraw"));
 });
 
-test("a family the user enabled stays enabled across turns", () => {
+test("a recorded choice defeats the default and survives the next turn", () => {
 	const h = harness();
 	h.start();
-	h.run("computer", "on");
+	h.choose({ computer: true });
 	h.turn();
 	assert.ok(h.active().includes("computer"), "an explicit choice is not undone every turn");
-	assert.ok(h.active().includes("act_ui"));
-	h.run("computer", "off");
-	h.turn();
-	assert.ok(!h.active().includes("computer"));
+	assert.ok(!h.active().includes("act_ui"), "and only the tool that was chosen");
 });
 
-test("a family turned on stays on after reload", () => {
+test("a recorded choice survives reload", () => {
 	// Losing this silently withholds tools the user explicitly asked for.
 	const first = harness();
 	first.start();
-	first.run("computer", "on");
-	assert.ok(first.active().includes("act_ui"));
+	first.choose({ computer: true });
 
 	const reloaded = harness({ sessionManager: first.sessionManager });
 	reloaded.start();
 	assert.ok(reloaded.active().includes("computer"), "the choice survives");
-	assert.ok(reloaded.active().includes("act_ui"));
 	reloaded.turn();
 	assert.ok(reloaded.active().includes("computer"), "and is not withheld on the next turn");
 });
 
-test("turning a family back off is remembered too", () => {
+test("turning something back off is remembered too", () => {
 	const first = harness();
 	first.start();
-	first.run("mcp", "on");
-	first.run("mcp", "off");
+	first.choose({ mcp: true });
+	first.choose({ mcp: false });
 
 	const reloaded = harness({ sessionManager: first.sessionManager });
 	reloaded.start();
 	assert.ok(!reloaded.active().includes("mcp"));
-	assert.ok(!reloaded.active().includes("mcp__excalidraw"));
 });
 
-test("only the family is recorded, so a later release can add tools to it", () => {
+test("an on-by-default tool can be turned off explicitly", () => {
+	const h = harness();
+	h.start();
+	assert.ok(h.active().includes("web_search"));
+	h.choose({ web_search: false });
+	h.turn();
+	assert.ok(!h.active().includes("web_search"), "the choice overrides the default");
+});
+
+test("only explicit choices are stored, so a later release can add tools", () => {
 	const first = harness({ all: ALL.filter((n) => n !== "evaluate_browser") });
 	first.start();
-	first.run("computer", "on");
+	first.choose({ computer: true });
 
 	// A newer pix ships one more tool in the same family.
 	const upgraded = harness({ sessionManager: first.sessionManager, all: ALL });
 	upgraded.start();
-	assert.ok(upgraded.active().includes("evaluate_browser"), "a newly shipped tool follows the family");
+	assert.ok(upgraded.active().includes("computer"), "the chosen tool is still on");
+	assert.ok(!upgraded.active().includes("evaluate_browser"), "a new internal follows the default");
 });
 
 test("a fresh session is unaffected by another session's choices", () => {
 	const first = harness();
 	first.start();
-	first.run("computer", "on");
+	first.choose({ computer: true });
 
 	const other = harness();
 	other.start();
@@ -187,8 +177,25 @@ test("a fresh session is unaffected by another session's choices", () => {
 test("branch navigation restores the choices of that branch", () => {
 	const h = harness();
 	h.start();
-	h.run("computer", "on");
-	assert.ok(h.active().includes("computer"));
+	h.choose({ computer: true });
 	h.branch();
 	assert.ok(h.active().includes("computer"), "the branch still holds the choice");
+});
+
+test("a choice recorded by an older pix release is still honoured", () => {
+	// Sessions predate the removal of /computer and hold the old family entry.
+	const sessionManager = SessionManager.inMemory();
+	sessionManager.appendCustomEntry("pix-capability-enabled", { family: "computer", on: true });
+	const h = harness({ sessionManager });
+	h.start();
+	assert.ok(h.active().includes("computer"));
+});
+
+test("the last choice wins regardless of which record it came from", () => {
+	const sessionManager = SessionManager.inMemory();
+	sessionManager.appendCustomEntry("pix-tool-overrides", { overrides: { act_ui: true } });
+	sessionManager.appendCustomEntry("pix-capability-enabled", { family: "computer", on: false });
+	const h = harness({ sessionManager });
+	h.start();
+	assert.ok(!h.active().includes("act_ui"), "the later family choice clears its children");
 });

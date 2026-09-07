@@ -1,15 +1,31 @@
+/**
+ * Which tools a session starts with, and which stay off until asked for.
+ *
+ * Every active schema is re-sent on every request, so a family most sessions
+ * never touch is a standing charge on the context window and on the model's
+ * attention. Computer use and MCP are both large and both situational, so they
+ * are withheld until chosen through `/tool`.
+ *
+ * Choices live in one record owned by `/tool`. Earlier versions had a second
+ * record written by per-family commands like `/computer`, which let the two
+ * disagree: whichever ran last silently undid the other. Those commands are
+ * gone and this reads the single record.
+ */
+
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { type Overrides, readOverrides } from "../src/tool-overrides.ts";
+import { CAPABILITIES, isMcpServerTool } from "../src/tool-panel.ts";
 
 const agents = ["worker", "scout", "reviewer", "researcher"];
 const thinkingLevels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 async function configureSubagent(ctx: ExtensionContext) {
   if (!ctx.hasUI) {
-    ctx.ui.notify("/subagent config requires the interactive terminal", "error");
+    ctx.ui.notify("/subagent-config requires the interactive terminal", "error");
     return;
   }
   const agent = await ctx.ui.select("Configure subagent", agents);
@@ -51,203 +67,112 @@ async function configureSubagent(ctx: ExtensionContext) {
   ctx.ui.notify(`${agent}: ${model}, thinking ${thinking}, fallback ${fallbackModels?.[0] ?? "none"}. Run /reload to apply.`, "info");
 }
 
-const commandOptions = {
-  websearch: [
-    { value: "on", label: "on", description: "Enable web access" },
-    { value: "off", label: "off", description: "Disable web access" },
-  ],
-  subagent: [
-    { value: "on", label: "on", description: "Enable subagents" },
-    { value: "off", label: "off", description: "Disable subagents" },
-    { value: "config", label: "config", description: "Configure role models, thinking, fallback" },
-  ],
-  computer: [
-    { value: "on", label: "on", description: "Enable GUI control for this session" },
-    { value: "off", label: "off", description: "Disable GUI control" },
-  ],
-  mcp: [
-    { value: "on", label: "on", description: "Enable MCP tools for this session" },
-    { value: "off", label: "off", description: "Disable MCP tools" },
-  ],
-} as const;
-
-const capabilities = {
-  websearch: ["web_search", "source_check", "fetch_content", "get_search_content"],
-  subagent: ["subagent", "bg_wait", "subagent_supervisor"],
-  computer: [
-    "computer", "find_roots", "observe_ui", "search_ui", "expand_ui", "inspect_ui",
-    "act_ui", "read_text", "wait_for", "launch_browser", "navigate_browser", "evaluate_browser",
-  ],
-  mcp: ["mcp", "mcpScript"],
-} as const;
-const defaultPixTools = ["todo", "question", "lsp_diagnostics", "lsp_fix", ...capabilities.websearch, ...capabilities.subagent];
-
-/**
- * Tool families that stay off until asked for.
- *
- * Every active schema is re-sent on every request, so a family that most
- * sessions never touch is a standing charge on the context window and on the
- * model's attention. Computer use and MCP are both large, both situational, and
- * neither is discoverable as a cost. Enable them per session with /tool, or
- * permanently by listing them in the pix settings.
- *
- * Names are matched only when present, so this costs nothing when the backing
- * package is not installed.
- */
-const offByDefault = [
-  // @injaneity/pi-computer-use, roughly 2,100 tokens.
-  "computer", "find_roots", "observe_ui", "search_ui", "expand_ui", "inspect_ui",
-  "act_ui", "read_text", "wait_for", "launch_browser", "navigate_browser", "evaluate_browser",
-  // pi-mcp-adapter, roughly 1,200 tokens, plus one tool per configured server.
-  "mcp", "mcpScript",
+/** Tools pix enables for a new session, beyond Pi's own defaults. */
+const defaultPixTools = [
+  "todo",
+  "question",
+  "lsp_diagnostics",
+  "lsp_fix",
+  ...CAPABILITIES.filter((capability) => capability.defaultOn).flatMap((capability) => capability.primary),
 ];
 
-/** MCP registers one tool per server, which cannot be listed ahead of time. */
-const isMcpServerTool = (name: string): boolean => name.startsWith("mcp__");
+/**
+ * Tools withheld unless chosen.
+ *
+ * Derived from the capability definitions so the panel and the defaults cannot
+ * drift apart: a capability marked off-by-default withholds everything it owns,
+ * and one marked on-by-default still withholds its secondary tools, which are
+ * internals the primary tool calls without their schemas being sent.
+ */
+const offByDefault = new Set(
+  CAPABILITIES.flatMap((capability) =>
+    capability.defaultOn ? capability.secondary : [...capability.primary, ...capability.secondary],
+  ),
+);
 
-/** Families that stay off until enabled, and whose choice is remembered. */
-const withheldFamilies = { computer: true, mcp: true } as const;
-
-/** Session entry recording one family being turned on or off. */
-const ENABLED_ENTRY = "pix-capability-enabled";
+const isWithheld = (name: string): boolean => offByDefault.has(name) || isMcpServerTool(name);
 
 export default function (pi: ExtensionAPI) {
   /**
-   * Families the user turned on, restored from the session on reload.
+   * Explicit choices, replayed from the session record.
    *
    * Needed because withheld tools are re-checked before every turn: an owning
    * package may re-enable its own tool at any time. pi-mcp-adapter does exactly
    * this, re-adding `mcp` after session start, so a single pass at startup is
    * not enough to keep it off.
-   *
-   * Turning a family on is a deliberate choice, so losing it on /reload would
-   * silently withhold tools the user asked for. Only the choice is recorded,
-   * never the resolved tool list, so a family that gains a tool in a later
-   * release still gets it.
    */
-  const enabled = new Set<string>();
+  let overrides: Overrides = {};
 
   const restore = (ctx: ExtensionContext) => {
-    enabled.clear();
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type !== "custom" || entry.customType !== ENABLED_ENTRY) continue;
-      const data = entry.data as { family?: string; on?: boolean } | undefined;
-      if (!data?.family) continue;
-      if (data.on) enabled.add(data.family);
-      else enabled.delete(data.family);
-    }
-  };
-
-  /** Tool names belonging to a family the user enabled. */
-  const enabledTools = (): Set<string> => {
-    const names = new Set<string>();
-    for (const family of enabled) {
-      for (const tool of capabilities[family as keyof typeof capabilities] ?? []) names.add(tool);
-      if (family === "mcp") for (const tool of pi.getAllTools()) if (isMcpServerTool(tool.name)) names.add(tool.name);
-    }
-    return names;
+    overrides = readOverrides(ctx);
   };
 
   /** Withhold every off-by-default tool the user has not asked for. */
   const withhold = () => {
-    const allowed = enabledTools();
     const active = new Set(pi.getActiveTools());
     let changed = false;
-    for (const tool of active) {
-      if (allowed.has(tool)) continue;
-      if (!offByDefault.includes(tool) && !isMcpServerTool(tool)) continue;
-      active.delete(tool);
+    for (const name of active) {
+      if (overrides[name] === true) continue;
+      if (overrides[name] !== false && !isWithheld(name)) continue;
+      active.delete(name);
       changed = true;
     }
     if (changed) pi.setActiveTools([...active]);
   };
 
-  /** Re-enable the families restored from the session. */
-  const applyEnabled = () => {
-    const available = new Set(pi.getAllTools().map((tool) => tool.name));
+  /** Re-enable the tools the record says were chosen. */
+  const applyChosen = () => {
+    const available = new Set(pi.getAllTools().map((entry) => entry.name));
     const active = new Set(pi.getActiveTools());
     let changed = false;
-    for (const tool of enabledTools()) {
-      if (!available.has(tool) || active.has(tool)) continue;
-      active.add(tool);
+    for (const [name, on] of Object.entries(overrides)) {
+      if (!on || !available.has(name) || active.has(name)) continue;
+      active.add(name);
       changed = true;
     }
     if (changed) pi.setActiveTools([...active]);
   };
 
   // Re-applied every turn so a package cannot quietly re-enable its own tools.
-  pi.on("before_agent_start", withhold);
+  // The record is re-read first, so a choice made mid-session is honoured
+  // rather than withheld again on the next turn.
+  pi.on("before_agent_start", (_event, ctx) => {
+    restore(ctx);
+    applyChosen();
+    withhold();
+  });
 
   // Branch navigation can move to a point with different choices.
   pi.on("session_tree", (_event, ctx) => {
     restore(ctx);
-    applyEnabled();
+    applyChosen();
     withhold();
   });
 
   pi.on("session_start", (_event, ctx) => {
     restore(ctx);
-    const allowed = enabledTools();
-    const available = new Set(pi.getAllTools().map((tool) => tool.name));
+    const available = new Set(pi.getAllTools().map((entry) => entry.name));
     const active = new Set(pi.getActiveTools());
-    for (const tool of defaultPixTools) if (available.has(tool)) active.add(tool);
-    for (const tool of allowed) if (available.has(tool)) active.add(tool);
-    // Applied after the defaults so a family is off unless explicitly enabled.
-    // The /tool command loads later still, so an explicit choice wins over this.
-    for (const tool of active) if (!allowed.has(tool) && (offByDefault.includes(tool) || isMcpServerTool(tool))) active.delete(tool);
-    pi.setActiveTools([...active].filter((tool) => process.platform === "win32" || tool !== "powershell"));
+    for (const name of defaultPixTools) if (available.has(name)) active.add(name);
+    for (const [name, on] of Object.entries(overrides)) if (on && available.has(name)) active.add(name);
+    for (const name of [...active]) {
+      if (overrides[name] === true) continue;
+      if (overrides[name] === false || isWithheld(name)) active.delete(name);
+    }
+    pi.setActiveTools([...active].filter((name) => process.platform === "win32" || name !== "powershell"));
   });
 
-  for (const [command, tools] of Object.entries(capabilities)) {
-    pi.registerCommand(command, {
-      description: {
-        subagent: "Show, toggle, or configure subagents: /subagent [on|off|config]",
-        websearch: "Show or change web access: /websearch [on|off]",
-        computer: "Show or change GUI control, off by default: /computer [on|off]",
-        mcp: "Show or change MCP tools, off by default: /mcp [on|off]",
-      }[command] ?? `Show or change ${command}: /${command} [on|off]`,
-      getArgumentCompletions: (prefix) => {
-        const matches = commandOptions[command as keyof typeof commandOptions].filter(option => option.value.startsWith(prefix));
-        return matches.length ? [...matches] : null;
-      },
-      handler: async (rawArgs, ctx) => {
-        const action = rawArgs.trim().toLowerCase();
-        const available = new Set(pi.getAllTools().map((tool) => tool.name));
-        const active = new Set(pi.getActiveTools());
-        const family = tools.filter((tool) => available.has(tool));
-
-        if (!action) {
-          const enabled = family.length > 0 && family.every((tool) => active.has(tool));
-          ctx.ui.notify(`${command} is ${enabled ? "on" : "off"}`, "info");
-          return;
-        }
-        if (command === "subagent" && action === "config") {
-          await configureSubagent(ctx);
-          return;
-        }
-        if (action !== "on" && action !== "off") {
-          ctx.ui.notify(`Usage: /${command} [on|off${command === "subagent" ? "|config" : ""}]`, "error");
-          return;
-        }
-
-        const targets = [...family];
-        // MCP registers one tool per configured server, so the family list
-        // cannot name them; match them by prefix instead.
-        if (command === "mcp") targets.push(...[...available].filter(isMcpServerTool));
-
-        for (const tool of targets) {
-          if (action === "on") active.add(tool);
-          else active.delete(tool);
-        }
-        // Only families that can be withheld need a remembered choice.
-        if (command in withheldFamilies) {
-          if (action === "on") enabled.add(command);
-          else enabled.delete(command);
-          pi.appendEntry(ENABLED_ENTRY, { family: command, on: action === "on" });
-        }
-        pi.setActiveTools([...active]);
-        ctx.ui.notify(`${command} ${action}`, "info");
-      },
-    });
-  }
+  /**
+   * Subagent role configuration.
+   *
+   * This is not a tool toggle: it edits model, thinking level, and fallback in
+   * settings.json. `/tool` owns on/off, so this keeps its own command rather
+   * than hiding a settings editor inside a picker.
+   */
+  pi.registerCommand("subagent-config", {
+    description: "Configure subagent role models, thinking level, and fallback",
+    handler: async (_args, ctx) => {
+      await configureSubagent(ctx);
+    },
+  });
 }
