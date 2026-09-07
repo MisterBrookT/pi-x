@@ -162,7 +162,7 @@ export class ToolPanelView {
 		const rows = this.model.rows;
 		if (!rows.length) {
 			lines.push(this.theme.muted("  No tools available"));
-			return lines;
+			return lines.map((line) => truncate(line, width));
 		}
 
 		const labelWidth = Math.min(28, Math.max(...rows.map((row) => rowLabel(row).length)));
@@ -183,7 +183,9 @@ export class ToolPanelView {
 
 		lines.push("");
 		lines.push(this.theme.muted(this.hint()));
-		return lines;
+		// Pi validates every rendered line, including headers, hints and empty
+		// states. Row-only clipping still crashes when the terminal narrows.
+		return lines.map((line) => truncate(line, width));
 	}
 
 	private hint(): string {

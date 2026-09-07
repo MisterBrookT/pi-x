@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getKeybindings, setKittyProtocolActive } from "@earendil-works/pi-tui";
+import { visibleWidth, getKeybindings, setKittyProtocolActive } from "@earendil-works/pi-tui";
 import { buildPanel } from "../src/tool-panel.ts";
 import { ToolPanelView } from "../src/tool-panel-view.ts";
 
@@ -264,4 +264,18 @@ test("a long list scrolls rather than overflowing the terminal", () => {
 	const rows = screen(panel).split("\n").filter((l) => /tool_\d\d/.test(l));
 	assert.equal(rows.length, 8);
 	assert.match(screen(panel), /showing 1-8 of 40/);
+});
+
+test('every panel line fits after resizing, including the crash-log summary header', () => {
+ const model = { ...buildPanel(ALL, ['read']), activeCount:15, totalCount:34, activeTokens:5112 };
+ const color = text => `\x1b[38;2;108;108;108m${text}\x1b[39m`;
+ const theme = { title:color, muted:color, label:color, value:color, cursor:'›' };
+ const panels = [
+  new ToolPanelView({model,theme}),
+  new ToolPanelView({model,theme,scope:{label:'Web 文档'.repeat(20),summary:'Long description '.repeat(20)}}),
+  new ToolPanelView({model:{...model,rows:[]},theme}),
+ ];
+ for(const panel of panels) for(const width of [100,63,40,10,1,0,80,63]) {
+  for(const line of panel.render(width)) assert.ok(visibleWidth(line)<=width, `width ${width}: ${visibleWidth(line)} cells: ${line}`);
+ }
 });
