@@ -28,7 +28,7 @@ export function webProfiles(original: Tool): Tool[] {
   const compact = compactWebTool(original);
   if (!coreFields[original.name]) return [compact];
   const core = selectFields(compact, coreFields[original.name]);
-  if (original.name === "web_search") core.description = "Search the web using configured provider/network defaults. Returns summaries and source links. Use 2–4 distinct queries for research. Fetch important sources to inspect their evidence. The configured curator workflow may open a review interface.";
+  if (original.name === "web_search") core.description = "Search the web using configured provider/network defaults. Returns summaries and source links. Use 2–4 distinct queries for research. Fetch important sources to inspect their evidence.";
   if (original.name !== "fetch_content") return [core];
   core.description = "Read webpages, PDFs, images or repositories from URLs. readable (default) extracts text; raw returns textual HTTP content; answer answers prompt using only fetched content. Large content is stored; use get_search_content for more. Use video_content for video analysis.";
   const video = selectFields(compact, ["url", "prompt", "timestamp", "frames"]);

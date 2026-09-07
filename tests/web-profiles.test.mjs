@@ -19,6 +19,9 @@ test('normal Web enables three tools; source checking and video remain optional'
  assert.deepEqual(web.secondary,['source_check','video_content']);
  assert.equal(capabilityTargets(web,false,known).length,5);
 });
+test('web search does not advertise the interactive curator',()=>{
+ assert.doesNotMatch(byName.web_search.description,/curator|review interface|browser/i);
+});
 test('core Web meets the 1000 estimated token budget',()=>{
  const total=['web_search','fetch_content','get_search_content'].reduce((sum,name)=>sum+estimateTokens(toolChars(byName[name])),0);
  console.log('Core Web estimated tokens:',total);

@@ -3,6 +3,8 @@ import registerLsp from "../node_modules/@narumitw/pi-lsp/dist/index.ts";
 import registerSubagents from "pi-subagents";
 import registerWebAccess from "pi-web-access";
 import { simplifySubagent } from "../src/simple-subagent.ts";
+import { registerCapabilityAction } from "../src/capability-actions.ts";
+import { configureSubagentRoles } from "../src/subagent-roles.ts";
 import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
 import { webProfiles } from "../src/web-profiles.ts";
 
@@ -51,6 +53,12 @@ export default function (pi: ExtensionAPI) {
   process.env.PI_SUBAGENT_MAX_DEPTH ??= "1";
   process.env.PI_SUBAGENT_MAX_SPAWNS_PER_RUN ??= "8";
   process.env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION ??= "24";
+  registerCapabilityAction(pi, "subagent", {
+    verb: "roles",
+    description: "Set each role's model and effort",
+    shortcut: "r",
+    run: configureSubagentRoles,
+  });
   const api = toolsOnly(pi);
   registerSubagents(api);
   registerWebAccess(api);

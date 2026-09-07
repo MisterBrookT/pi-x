@@ -21,6 +21,7 @@ import { callTitle, resultLines, scriptSummary } from "../src/computer-render.ts
 import { CHROME_CANDIDATES, installWrapper } from "../src/chrome-wrapper.ts";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "../src/computer-script.ts";
 import { renderOutcome, runScript } from "../src/computer-runner.ts";
+import { registerCapabilityAction } from "../src/capability-actions.ts";
 import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
 
 const BACKEND = "@injaneity/pi-computer-use";
@@ -242,30 +243,39 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 		await backend?.shutdownComputerUseSession?.().catch(() => {});
 	});
 
-	pi.registerCommand("computer-stop", {
-		description: "Close the managed browser and release computer-use resources",
-		async handler(_args, ctx) {
-			const backend = await backendOnce().catch(() => undefined);
-			if (!backend?.shutdownComputerUseSession) {
-				ctx.ui.notify("No computer-use session to stop.", "info");
-				return;
-			}
-			await backend.shutdownComputerUseSession();
-			ctx.ui.notify("Stopped: managed browser closed and cached UI state cleared.", "info");
-		},
-	});
+	const stop = async (ctx: ExtensionContext) => {
+		const backend = await backendOnce().catch(() => undefined);
+		if (!backend?.shutdownComputerUseSession) {
+			ctx.ui.notify("No computer-use session to stop.", "info");
+			return;
+		}
+		await backend.shutdownComputerUseSession();
+		ctx.ui.notify("Stopped: managed browser closed and cached UI state cleared.", "info");
+	};
 
-	pi.registerCommand("computer-check", {
-		description: "Check computer-use permissions and show what is missing",
-		async handler(_args, ctx) {
-			const report = await checkPermissions(tccOperations(pi));
-			const backend = await backendOnce();
-			const text = [
-				backend ? `\u2713 Backend ${BACKEND} loaded` : `\u2717 Backend ${BACKEND} not found`,
-				renderReport(report, helperPath()),
-			].join("\n");
-			ctx.ui.notify(text, report.ready && backend ? "info" : "warn");
-		},
+	const check = async (ctx: ExtensionContext) => {
+		const report = await checkPermissions(tccOperations(pi));
+		const backend = await backendOnce();
+		const text = [
+			backend ? `\u2713 Backend ${BACKEND} loaded` : `\u2717 Backend ${BACKEND} not found`,
+			renderReport(report, helperPath()),
+		].join("\n");
+		ctx.ui.notify(text, report.ready && backend ? "info" : "warn");
+	};
+
+	/**
+	 * Computer use is a `/tool` capability, so its maintenance actions belong to
+	 * that row rather than to a top-level command of their own.
+	 */
+	registerCapabilityAction(pi, "computer", {
+		verb: "check",
+		description: "Check backend and permission state",
+		run: check,
+	});
+	registerCapabilityAction(pi, "computer", {
+		verb: "stop",
+		description: "Close the managed browser and release resources",
+		run: stop,
 	});
 
 	pi.registerTool({

@@ -10,12 +10,36 @@ test('full subagent definition fits the 2000 estimated token budget',()=>{
  assert.ok(estimateTokens(toolChars(tool)) <= 2000);
  console.log('Compact subagent estimated tokens:',estimateTokens(toolChars(tool)));
 });
+test('delegation guidance keeps the main assistant working on the critical path',()=>{
+ assert.match(tool.description, /Keep the critical path with the main assistant/);
+ assert.match(tool.description, /Do not hand the whole task to one child just to wait/);
+ assert.match(tool.description, /no useful independent work remains/);
+ assert.match(tool.promptGuidelines.join(' '), /not whole-task handoff followed by waiting/);
+});
+test('only worker and scout can be delegated, in both schema and executor',()=>{
+ for(const agent of ['worker', 'scout']) {
+  const args={action:'start',tasks:[{agent,task:'Assigned task'}]};
+  assert.doesNotThrow(()=>validate(args));
+  assert.doesNotThrow(()=>subagentRequest(args));
+ }
+ for(const agent of ['reviewer', 'researcher', 'oracle', 'custom', 'developer']) {
+  const args={action:'start',tasks:[{agent,task:'Assigned task'}]};
+  assert.throws(()=>validate(args));
+  assert.throws(()=>subagentRequest(args), /Available subagent roles: worker and scout/);
+ }
+});
+test('the main agent sees role responsibilities and configuration-based model selection',()=>{
+ assert.match(tool.description, /Choose worker for scoped implementation/);
+ assert.match(tool.description, /Choose scout for codebase discovery and navigation/);
+ assert.match(tool.description, /Choose the role by task, not by model/);
+ assert.doesNotMatch(JSON.stringify(tool.parameters), /reviewer|researcher|configured agent/);
+});
 test('single task uses the upstream async child interface without overriding policy',()=>{
  const args=validate({action:'start',tasks:[{agent:'worker',task:'Fix tests'}]});
  assert.deepEqual(subagentRequest(args),{agent:'worker',task:'Fix tests',async:true});
 });
 test('parallel tasks are bounded and isolated; task strings are not executable',async()=>{
- const tasks=[{agent:'reviewer',task:'quote " ` ${evil()} ;'},{agent:'scout',task:'Find entry points'}];
+ const tasks=[{agent:'worker',task:'quote " ` ${evil()} ;'},{agent:'scout',task:'Find entry points'}];
  const request=subagentRequest(validate({action:'start',tasks}));
  assert.equal(request.async,true); assert.equal(request.worktree,true);
  assert.equal(request.globalConcurrencyLimit,4); assert.equal(request.maxSubagentSpawnsPerRun,8);
@@ -52,7 +76,7 @@ test('translated requests validate against the installed upstream public schema'
  const backend={...tool,parameters:SubagentParams};
  for(const input of [
  {action:'start',tasks:[{agent:'worker',task:'Fix tests'}]},
- {action:'start',tasks:[{agent:'scout',task:'Inspect A'},{agent:'reviewer',task:'Inspect B'}]},
+ {action:'start',tasks:[{agent:'scout',task:'Inspect A'},{agent:'worker',task:'Inspect B'}]},
  {action:'status'},{action:'status',id:'r',index:0},
  {action:'steer',id:'r',message:'Read only',index:0},{action:'stop',id:'r'}]) {
  const arguments_=subagentRequest(input);

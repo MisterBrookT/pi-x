@@ -11,7 +11,7 @@
  * be driven directly by a test.
  */
 
-import { getKeybindings, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { getKeybindings, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
 import type { PanelModel, PanelRow } from "./tool-panel.ts";
 import { formatTokens, panelSummary } from "./tool-panel.ts";
 
@@ -46,6 +46,7 @@ export const plainTheme: PanelTheme = {
 export type PanelAction =
 	| { type: "toggle"; row: PanelRow }
 	| { type: "enter"; row: PanelRow }
+	| { type: "action"; verb: string }
 	| { type: "back" }
 	| { type: "close" }
 	| { type: "move" }
@@ -69,7 +70,7 @@ export interface PanelViewOptions {
 	model: PanelModel;
 	theme?: PanelTheme;
 	/** Capability whose tools are being shown, when in the advanced view. */
-	scope?: { label: string; summary: string };
+	scope?: { label: string; summary: string; actionsHint?: string; shortcuts?: { key: KeyId; verb: string }[] };
 	maxVisible?: number;
 	/** The host's keybindings, as handed to a `ui.custom` factory. */
 	keybindings?: KeyMatcher;
@@ -85,7 +86,7 @@ export class ToolPanelView {
 	private index = 0;
 	private model: PanelModel;
 	private readonly theme: PanelTheme;
-	private readonly scope?: { label: string; summary: string };
+	private readonly scope?: PanelViewOptions["scope"];
 	private readonly maxVisible: number;
 	private readonly keybindings: KeyMatcher;
 
@@ -137,6 +138,8 @@ export class ToolPanelView {
 			return row.kind === "capability" ? { type: "enter", row } : { type: "toggle", row };
 		}
 		if (bound("tui.select.cancel")) return this.scope ? { type: "back" } : { type: "close" };
+		const shortcut = this.scope?.shortcuts?.find(entry => matchesKey(data, entry.key));
+		if (shortcut) return { type: "action", verb: shortcut.verb };
 		return { type: "none" };
 	}
 
@@ -153,6 +156,9 @@ export class ToolPanelView {
 		if (this.scope) {
 			lines.push(this.theme.title(`Tools › ${this.scope.label}`));
 			lines.push(this.theme.muted(this.scope.summary));
+			// A capability's maintenance actions live in the command form, so the
+			// view that owns the capability has to say they exist.
+			if (this.scope.actionsHint) lines.push(this.theme.muted(this.scope.actionsHint));
 		} else {
 			lines.push(this.theme.title("Tools"));
 			lines.push(this.theme.muted(panelSummary(this.model)));
@@ -193,6 +199,7 @@ export class ToolPanelView {
 		const canEnter = selected?.kind === "capability";
 		return [
 			"Space toggle",
+			...(this.scope?.shortcuts ?? []).map(entry => `${entry.key.toUpperCase()} ${entry.verb}`),
 			canEnter ? "Enter open" : undefined,
 			this.scope ? "Esc back" : "Esc close",
 		]

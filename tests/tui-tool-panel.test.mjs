@@ -13,6 +13,14 @@ import { visibleWidth, getKeybindings, setKittyProtocolActive } from "@earendil-
 import { buildPanel } from "../src/tool-panel.ts";
 import { ToolPanelView } from "../src/tool-panel-view.ts";
 
+test('role shortcut is scoped and supports Kitty keyboard encoding', () => {
+ const model = { rows: [], activeTokens: 0, activeCount: 0, totalCount: 0 };
+ const scoped = new ToolPanelView({ model, scope: { label: 'Subagent', summary: 'Delegation', shortcuts: [{ key: 'r', verb: 'roles' }] } });
+ assert.deepEqual(scoped.handleInput('r'), { type: 'action', verb: 'roles' });
+ assert.deepEqual(scoped.handleInput('\x1b[114u'), { type: 'action', verb: 'roles' });
+ assert.deepEqual(new ToolPanelView({ model }).handleInput('r'), { type: 'none' });
+});
+
 const UP = "\u001b[A";
 const DOWN = "\u001b[B";
 const ENTER = "\r";
@@ -122,6 +130,17 @@ test("the advanced view shows the child tools the top level hides", () => {
 		assert.match(text, new RegExp(`^[>\\s] ${name}`, "m"));
 	}
 	assert.match(text, /Esc back/, "escape returns to the top level, it does not close");
+});
+
+test("a capability view names the actions its row accepts", () => {
+	// Actions run through the command form, so the view that owns the capability
+	// has to state that they exist and how to reach them.
+	const text = screen(advancedView({ scope: { label: "Computer", summary: "s", actionsHint: "/tool computer check · /tool computer stop" } }));
+	assert.match(text, /\/tool computer check · \/tool computer stop/);
+});
+
+test("a capability without actions shows no hint line", () => {
+	assert.doesNotMatch(screen(advancedView()), /\/tool/);
 });
 
 test("escape closes at the top level and goes back inside a capability", () => {

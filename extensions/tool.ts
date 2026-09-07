@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { capabilityActions as queryCapabilityActions, type CapabilityAction } from "../src/capability-actions.ts";
 import { inventory, renderTable } from "../src/tool-inventory.ts";
 import {
 	buildPanel,
@@ -46,6 +47,7 @@ const packageName = (baseDir: string): string | undefined => {
 };
 
 export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSettings()) {
+  const capabilityActions = (id: string) => queryCapabilityActions(pi, id);
   const knownNames = (): Set<string> => new Set(pi.getAllTools().map(entry => entry.name));
   const sync = () => {
     pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read()));
@@ -78,6 +80,17 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 			const model = panel();
 			const options = [
 				{ value: "list", label: "list", description: "Print every tool and its estimated cost" },
+				// A capability's actions are reachable as `/tool <capability> <verb>`,
+				// so completion has to offer them alongside the capability itself.
+				...model.rows.flatMap((row) =>
+					row.kind === "capability"
+						? capabilityActions(row.id).map((action) => ({
+								value: `${row.id} ${action.verb}`,
+								label: `${row.id} ${action.verb}`,
+								description: action.description,
+							}))
+						: [],
+				),
 				...model.rows.map((row) =>
 					row.kind === "capability"
 						? {
@@ -123,9 +136,23 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 						ctx.ui.notify(`${capability.label} is not available; its package is not installed.`, "error");
 						return;
 					}
+					const action = capabilityActions(target).find((entry) => entry.verb === verb);
+					if (action) {
+						await action.run(ctx);
+						return;
+					}
 					if (verb !== "on" && verb !== "off") {
+						const verbs = capabilityActions(target).map((entry) => entry.verb);
+						if (verb !== undefined) {
+							ctx.ui.notify(
+								`No ${row.label} action named ${verb}. Use: on, off${verbs.map((name) => `, ${name}`).join("")}`,
+								"error",
+							);
+							return;
+						}
+						const actions = verbs.length ? ` · actions: ${verbs.join(", ")}` : "";
 						ctx.ui.notify(
-							`${row.label} is ${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}`,
+							`${row.label} is ${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}${actions}`,
 							"info",
 						);
 						return;
@@ -170,7 +197,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 				return;
 			}
 
-			await ctx.ui.custom((tui, theme, keybindings, done) => {
+			const selectedAction = await ctx.ui.custom<CapabilityAction | undefined>((tui, theme, keybindings, done) => {
 				const themed = {
 					title: (text: string) => theme.fg("accent", theme.bold(text)),
 					muted: (text: string) => theme.fg("muted", text),
@@ -214,6 +241,10 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
                         // Another session may have changed this row since it was drawn.
                         view.setModel(scopeId ? advancedModel(scopeId) : panel());
 						const action = view.handleInput(data);
+						if (action.type === "action" && scopeId) {
+							done(capabilityActions(scopeId).find(entry => entry.verb === action.verb));
+							return;
+						}
 						if (action.type === "toggle") {
 							const row = action.row;
 							if (row.kind === "capability") toggleCapability(row.id, !row.on);
@@ -224,11 +255,19 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 						if (action.type === "enter" && action.row.kind === "capability") {
 							const capability = action.row;
 							scopeId = capability.id;
+							const verbs = capabilityActions(capability.id).map((entry) => entry.verb);
 							view = new ToolPanelView({
 								model: advancedModel(capability.id),
 								theme: themed,
 								keybindings,
-								scope: { label: capability.label, summary: capability.summary },
+								scope: {
+									label: capability.label,
+									summary: capability.summary,
+									shortcuts: capabilityActions(capability.id).flatMap(entry => entry.shortcut ? [{ key: entry.shortcut, verb: entry.verb }] : []),
+									actionsHint: verbs.length
+										? verbs.map((verb) => `/tool ${capability.id} ${verb}`).join(" · ")
+										: undefined,
+								},
 							});
 							tui.requestRender();
 							return;
@@ -250,6 +289,10 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 					},
 				};
 			});
+			if (selectedAction) {
+				await selectedAction.run(ctx);
+				return;
+			}
 			ctx.ui.notify(panelSummary(panel()), "info");
 		},
 	});

@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import registerContext, { report } from "../extensions/context.ts";
 
-const harness = ({ sessionManager = SessionManager.inMemory(), model = { context_window: 200_000 }, systemPrompt = "sys", tools = [] } = {}) => {
+const harness = ({ sessionManager = SessionManager.inMemory(), model = { context_window: 200_000 }, systemPrompt = "sys", tools = [], cwd = process.cwd() } = {}) => {
 	const commands = new Map();
+	const shortcuts = new Map();
 	const pi = {
 		registerCommand: (name, value) => commands.set(name, value),
+		registerShortcut: (key, value) => shortcuts.set(key, value),
 		on: () => {},
 		getAllTools: () => tools,
 		getActiveTools: () => tools.map((tool) => tool.name),
@@ -15,19 +20,63 @@ const harness = ({ sessionManager = SessionManager.inMemory(), model = { context
 	const notices = [];
 	const ctx = {
 		mode: "tui",
+		cwd,
 		model,
 		sessionManager,
 		getSystemPrompt: () => systemPrompt,
 		ui: { notify: (message, level) => notices.push({ message, level }) },
 	};
-	return { pi, ctx, notices, sessionManager, run: () => commands.get("context").handler("", ctx), commandNames: () => [...commands.keys()] };
+	return {
+		pi,
+		ctx,
+		notices,
+		sessionManager,
+		run: (args = "") => commands.get("context").handler(args, ctx),
+		shortcut: (key) => shortcuts.get(key).handler(ctx),
+		hasArgumentCompletions: () => commands.get("context").getArgumentCompletions !== undefined,
+		commandNames: () => [...commands.keys()],
+		shortcutNames: () => [...shortcuts.keys()],
+	};
 };
 
 const push = (manager, role, chars, toolName) =>
 	manager.appendMessage({ role, toolName, content: [{ type: "text", text: "x".repeat(chars) }], timestamp: 0 });
 
-test("/context registers one command", () => {
-	assert.deepEqual(harness().commandNames(), ["context"]);
+test("/context registers one command and one shortcut", () => {
+	const h = harness();
+	assert.deepEqual(h.commandNames(), ["context"]);
+	assert.deepEqual(h.shortcutNames(), ["alt+e"]);
+});
+
+test("/context takes no arguments, so it offers no completions", () => {
+	assert.equal(harness().hasArgumentCompletions(), false);
+});
+
+test("alt+e exports the effective prompt to the project path", async () => {
+	// The export replaces the former top-level /prompt command. It writes a file
+	// because a whole system prompt is read in an editor, not in the transcript.
+	const cwd = await mkdtemp(join(tmpdir(), "pix-context-"));
+	const h = harness({ cwd, systemPrompt: "effective prompt body" });
+	await h.shortcut("alt+e");
+	const path = join(cwd, ".pix", "system-prompt.md");
+	assert.equal(await readFile(path, "utf8"), "effective prompt body");
+	assert.equal(h.notices.at(-1).level, "info");
+	assert.match(h.notices.at(-1).message, new RegExp(`System prompt exported to ${path}$`));
+});
+
+test("a failed export is reported instead of thrown", async () => {
+	const h = harness({ cwd: "/proc/pix-nonexistent" });
+	await h.shortcut("alt+e");
+	assert.equal(h.notices.at(-1).level, "error");
+	assert.match(h.notices.at(-1).message, /Could not export the system prompt:/);
+});
+
+test("an argument is ignored rather than treated as a subcommand", async () => {
+	// /context is a single view; it must never fail on stray text.
+	const h = harness();
+	await h.run("prompt");
+	assert.equal(h.notices.at(-1).level, "info");
+	assert.match(h.notices.at(-1).message, /% of the window/);
 });
 
 test("the report attributes real session messages to their tool", async () => {

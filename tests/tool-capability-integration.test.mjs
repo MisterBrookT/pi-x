@@ -7,7 +7,7 @@ import { settingsFor } from "./helpers/tool-settings.mjs";
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, createEventBus } from "@earendil-works/pi-coding-agent";
 import registerCapabilities from "../extensions/capabilities.ts";
 import registerTool from "../extensions/tool.ts";
 
@@ -35,6 +35,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	const handlers = { session_start: [], before_agent_start: [], session_tree: [] };
 	const commands = new Map();
 	const pi = {
+		events: createEventBus(),
 		getAllTools: () => all.map(describe),
 		getActiveTools: () => [...activeTools],
 		setActiveTools: (names) => { activeTools = [...names]; },

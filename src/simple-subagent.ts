@@ -1,23 +1,26 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { subagentRoles, subagentRoleGuidance } from "./subagent-policy.ts";
 
 type Tool = Parameters<ExtensionAPI["registerTool"]>[0];
 const text = () => Type.String({ minLength: 1 });
 export const simpleSubagentParameters = Type.Object({
   action: Type.Union(["start", "status", "steer", "stop"].map(value => Type.Literal(value))),
   tasks: Type.Optional(Type.Array(Type.Object({
-    agent: text(),
+    agent: Type.Union(subagentRoles.map(role => Type.Literal(role))),
     task: text(),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 8,
-    description: "For start: one task, or independent tasks to run in parallel. Agent names: worker, scout, reviewer, researcher (or a configured agent)." })),
+    description: "For start: one task, or independent tasks to run in parallel. Available roles: worker and scout." })),
   id: Type.Optional(Type.String({ minLength: 1, description: "Run ID returned by start. Required for steer/stop; omit for status to list runs." })),
   message: Type.Optional(Type.String({ minLength: 1, description: "New guidance for steer." })),
   index: Type.Optional(Type.Integer({ minimum: 0, description: "Optional zero-based child index for status or steer within a parallel run." })),
 }, { additionalProperties: false });
 
 export const simpleSubagentDescription = `Delegate independent tasks to configured agents. Actions: start, status, steer, stop.
+${subagentRoleGuidance}
 Start accepts tasks:[{agent,task}]; multiple tasks run in parallel (at most four concurrently, eight total). Parallel children use separate git worktrees; this requires a git repository. Their changes are NOT automatically merged: inspect returned artifacts and integrate reviewed changes yourself. A single task uses the current directory; never overlap writers there.
-Runs are asynchronous and notify this session when finished. Continue independent work or return control; do not poll or sleep merely to wait. Read results before starting dependent work. Use status with the returned run ID for progress/output, optionally index for one child; without ID it lists runs. Steer sends guidance to a live run (index selects a child); stop interrupts the run. These do not undo changes already made.
+Keep the critical path with the main assistant. Delegate bounded side tasks when parallel progress or specialized isolation outweighs coordination cost; do simple or tightly coupled work yourself. Do not hand the whole task to one child just to wait.
+Runs are asynchronous and notify this session when finished. Continue useful independent work; return control only when blocked on child results and no useful independent work remains. Do not poll or sleep merely to wait. Read results before starting dependent work. Use status with the returned run ID for progress/output, optionally index for one child; without ID it lists runs. Steer sends guidance to a live run (index selects a child); stop interrupts the run. These do not undo changes already made.
 Give each task enough context and a concrete deliverable. Agent models, permissions, budgets and review rules come from configuration, not tool arguments. Keep safety and confirmation requirements in delegated tasks; delegation does not grant permission. Use the main assistant and todo for sequencing: start A and B, consume both results, then start C. No scripting, scheduling or administrative actions are exposed here.`;
 
 /** Translate a small public contract into the upstream executor's existing API. */
@@ -32,6 +35,7 @@ export function subagentRequest(input: Record<string, unknown>): Record<string, 
     const children = tasks.map((task, i) => {
       if (!task || typeof task !== "object" || Array.isArray(task) || Object.keys(task).some(k => k !== "agent" && k !== "task")) throw new Error("Each task accepts only agent and task");
       if (typeof task.agent !== "string" || !task.agent.trim() || typeof task.task !== "string" || !task.task.trim()) throw new Error("Each task requires nonempty agent and task");
+      if (!subagentRoles.some(role => role === task.agent)) throw new Error("Available subagent roles: worker and scout");
       return { key: `task-${i + 1}`, agent: task.agent, task: task.task };
     });
     if (children.length === 1) return { agent: children[0].agent, task: children[0].task, async: true };
@@ -62,7 +66,7 @@ export function simplifySubagent(tool: Tool): Tool {
     parameters: simpleSubagentParameters,
     description: simpleSubagentDescription,
     promptSnippet: "Start, inspect, guide, or stop subagents; independent tasks can run in parallel",
-    promptGuidelines: ["Use subagent only for independent work; read results before dependent work and keep one writer per worktree."],
+    promptGuidelines: ["Keep the critical path with the main assistant; use subagent for bounded independent work, not whole-task handoff followed by waiting. Read results before dependent work and keep one writer per worktree."],
     // Old normalizers/renderers expect the old schema. Keep result rendering,
     // but use Pi's generic call rendering for the new arguments.
     prepareArguments: undefined,

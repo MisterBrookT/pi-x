@@ -28,7 +28,7 @@ Pix deliberately does not include unevaluated complexity: autonomous memory, an 
 | Todo tracking | Example only | Yes | Yes |
 | Structured questions | Example only | Yes | Yes |
 | LSP diagnostics | No | Optional | Yes |
-| User-facing surface | Small | Nine Pix commands | Broad |
+| User-facing surface | Small | Seven Pix commands | Broad |
 
 Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's design, excluding personal and project `AGENTS.md`, skills, and conversation context. Provider tokenizers and OMP's conditional configuration can produce different totals. `docs/system-prompts.html` contains the full public-safe naive-Pi → Pix comparison.
 
@@ -73,9 +73,8 @@ Restart Pi.
 - `question` for structured user choices, adapted from Pi's official example
 - `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
-- `/bench` for health, startup-speed, and prompt-overhead checks
 - `/fast` for persistent priority-processing control on supported providers
-- `/prompt` to export the exact active prompt
+- `/context` for the context-window breakdown, and `Alt+E` to export the exact active prompt
 - a configurable footer with cache efficiency and latest-response token speed
 
 For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model under the separate `pix-anthropic` provider. Pix leaves Pi's native `anthropic` provider unchanged; that provider uses Anthropic's third-party extra-usage billing.
@@ -102,19 +101,24 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
-| `/prompt [path]` | Export the exact effective Pix system prompt |
-| `/bench` | Check Pix health, startup speed, and prompt overhead |
-| `/tool` | Open the tool panel; also `/tool list` and `/tool <name\|capability> [on\|off]` |
+| `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off]`, and capability actions such as `/tool computer check` |
 | `/context` | Show what is filling the context window |
-| `/subagent-config` | Configure subagent role models, thinking level, and fallback |
-| `/computer-check` | Report computer-use backend and permission state |
-| `/computer-stop` | Stop a running computer-use script and close its browser |
+| `/subagent-config` | Alias for `/tool subagent roles`: configure role models, effort, and fallback |
+
+| Shortcut | Purpose |
+| --- | --- |
+| `Alt+E` | Export the effective Pix system prompt to `.pix/system-prompt.md` |
 
 `/tool` is the single place tools are turned on and off. Everyday tools are
 listed individually; Web, Subagent, Computer, and MCP are one row each, because
 choosing what the assistant may do should not require knowing that computer use
 ships eleven backend primitives. `Space` toggles the row under the cursor,
-`Enter` opens a capability to reach its individual tools, and `Esc` goes back.
+`Enter` opens a capability to reach its individual tools, and `Esc` goes back. A
+capability can also offer maintenance actions as verbs on its own row, which the
+capability view lists: `/tool computer check` reports backend and permission
+state, and `/tool computer stop` closes the managed browser and releases its
+resources. Keeping them there avoids naming one optional capability twice in the
+command list.
 
 Computer and MCP start off. Every active tool's schema is re-sent on every
 request, so a capability most sessions never touch is a standing charge on the
@@ -128,7 +132,9 @@ compare rows and decide what to disable.
 
 Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`, or Google's priority tier according to the active direct provider, including `pix-anthropic`. Availability and any extra charges are determined by the provider. The preference persists across sessions, the footer shows `fast` while active, and it does not affect subagents. Anthropic models without upstream fast-mode support automatically use normal speed and show a warning instead of failing.
 
-Pix focuses on four built-in roles from `pi-subagents`: `worker` for implementation, `scout` for fast codebase discovery, `reviewer` for read-only review, and `researcher` for web research. Each can use a different model, thinking level, and cross-provider fallback model through `/subagent-config`. Turning subagents on or off is done in `/tool`.
+Pix exposes only two built-in roles from `pi-subagents`: `worker` for scoped implementation and verification, and `scout` for codebase discovery and navigation. The main agent sees these responsibilities in the tool description and chooses a role by task; the role's configured model is resolved at launch. Each can use a different model, effort, and cross-provider fallback through `/tool subagent roles` (or the `/subagent-config` alias). In `/tool`, open Subagent and press **R** to edit roles. The picker shows resolved mappings and saves only the chosen field in user settings; existing fallback and permission settings stay unchanged. Changes affect new children, not running ones; project/provider overrides can take precedence. Turning subagents on or off is also done in `/tool`.
+
+Delegation guidance keeps the critical path with the main assistant: delegate bounded independent side tasks, continue useful work, and wait only when child results are required and no useful independent work remains. Small or tightly coupled tasks should stay with the main assistant.
 
 The `subagent` tool exposes four actions: `start`, `status`, `steer`, and `stop`.
 For example, `{action:"start", tasks:[{agent:"scout", task:"Locate the parser"}]}`
@@ -162,7 +168,7 @@ pi install npm:@injaneity/pi-computer-use
 
 On macOS the helper needs **Accessibility** and **Screen & System Audio
 Recording** in System Settings. These cannot be granted programmatically, so
-`/computer-check` reports what is missing and links to the exact settings pane.
+`/tool computer check` reports what is missing and links to the exact settings pane.
 
 ```js
 await cua.roots({ app: "Notes" });
@@ -205,7 +211,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 - Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG without acting as an automatic scheduler.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
-- Dependency administration commands are hidden; Pix keeps seven user-facing commands.
+- Dependency administration commands are hidden; Pix keeps seven user-facing commands, with related actions as verbs on the command that already owns them and rare inspection on a shortcut.
 
 ## Development
 
@@ -215,7 +221,7 @@ npm run check
 npm run smoke:anthropic  # live OAuth check: Fable 5.1, Opus 5, Sonnet 5 at minimal
 ```
 
-`docs/system-prompts.html` contains the complete public-safe naive-Pi and Pix prompts. `/bench` compares naive Pi with the active Pix prompt on the current machine. Future task-performance checks are scoped in `ROADMAP.md`.
+`docs/system-prompts.html` contains the complete public-safe naive-Pi and Pix prompts. `npm run bench` compares naive Pi with the active Pix prompt on the current machine and reports health and startup speed. Future task-performance checks are scoped in `ROADMAP.md`.
 
 ## Acknowledgements
 

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
+import { capabilityActions } from "../src/capability-actions.ts";
 import registerComputer from "../extensions/computer.ts";
 
 const okResult = (text, stateId) => ({
@@ -51,6 +53,7 @@ const harness = ({ backend, mode = "tui", confirmAnswer = true, tcc = "kTCCServi
 	const commands = new Map();
 	const handlers = new Map();
 	const pi = {
+		events: createEventBus(),
 		registerTool: (value) => { tool = value; },
 		registerCommand: (name, value) => commands.set(name, value),
 		on: (event, handler) => handlers.set(event, handler),
@@ -71,8 +74,9 @@ const harness = ({ backend, mode = "tui", confirmAnswer = true, tcc = "kTCCServi
 	ctx.ui.notify = (message, level) => notices.push({ message, level });
 	return {
 		tool, ctx, confirms, notices,
-		command: (name, args = "") => commands.get(name)?.handler(args, ctx),
 		commandNames: () => [...commands.keys()],
+		action: (verb) => capabilityActions(pi, "computer").find((entry) => entry.verb === verb)?.run(ctx),
+		actionVerbs: () => capabilityActions(pi, "computer").map((entry) => entry.verb),
 		emit: (event) => handlers.get(event)?.({}, ctx),
 	};
 };
@@ -236,6 +240,7 @@ test("a missing permission blocks the script before the backend is touched", asy
 	let tool;
 	registerComputer(
 		{
+			events: createEventBus(),
 			registerTool: (v) => { tool = v; },
 			registerCommand: () => {},
 			on: () => {},
@@ -250,23 +255,33 @@ test("a missing permission blocks the script before the backend is touched", asy
 	assert.equal(backend.seen.length, 0);
 });
 
-test("/computer-check reports backend and permission state together", async () => {
+test("the computer capability contributes check and stop actions to /tool", () => {
+	// /tool already owns the capability, so its maintenance actions belong there
+	// rather than to a top-level command that names the capability again.
+	assert.deepEqual(harness().actionVerbs(), ["check", "stop"]);
+});
+
+test("computer use registers no slash command of its own", () => {
+	assert.deepEqual(harness().commandNames(), []);
+});
+
+test("the check action reports backend and permission state together", async () => {
 	const backend = createFakeBackend();
 	const h = harness({ backend: backend.module });
-	await h.command("computer-check");
+	await h.action("check");
 	assert.equal(h.notices[0].level, "info");
 	assert.match(h.notices[0].message, /Backend @injaneity\/pi-computer-use loaded/);
 	assert.match(h.notices[0].message, /Computer use is ready/);
 });
 
-test("/computer-stop releases the managed browser", async () => {
+test("the stop action releases the managed browser", async () => {
 	// A managed browser is spawned detached, so without an explicit release a
 	// Chrome window and its throwaway profile directory outlive the work.
 	const backend = createFakeBackend();
 	let shutdowns = 0;
 	backend.module.shutdownComputerUseSession = async () => { shutdowns += 1; };
 	const h = harness({ backend: backend.module });
-	await h.command("computer-stop");
+	await h.action("stop");
 	assert.equal(shutdowns, 1);
 	assert.match(h.notices.at(-1).message, /managed browser closed/);
 });
@@ -284,13 +299,9 @@ test("stopping is safe when the backend cannot release anything", async () => {
 	const backend = createFakeBackend();
 	delete backend.module.shutdownComputerUseSession;
 	const h = harness({ backend: backend.module });
-	await h.command("computer-stop");
+	await h.action("stop");
 	await h.emit("session_shutdown");
 	assert.match(h.notices.at(-1).message, /No computer-use session/);
-});
-
-test("both computer commands are registered", () => {
-	assert.deepEqual(harness().commandNames().sort(), ["computer-check", "computer-stop"]);
 });
 
 test("running a script points the backend at the keychain-safe Chrome shim", async () => {

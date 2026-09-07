@@ -1,6 +1,6 @@
 {
   "name": "@brooktang/pi-x",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, computer use, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -22,6 +22,7 @@
     "url": "https://github.com/MisterBrookT/pi-x/issues"
   },
   "scripts": {
+    "bench": "node scripts/bench.mjs",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
@@ -53,13 +54,11 @@
     "extensions": [
       "./extensions/capabilities.ts",
       "./extensions/pix-anthropic/index.ts",
-      "./extensions/benchmark.ts",
       "./extensions/computer.ts",
       "./extensions/context.ts",
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
       "./extensions/prompt-compact.ts",
-      "./extensions/prompt-inspector.ts",
       "./extensions/question.ts",
       "./extensions/smart-editor.ts",
       "./extensions/todo.ts",

@@ -1,8 +1,9 @@
 import { settingsFor } from "./helpers/tool-settings.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, createEventBus } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, setKittyProtocolActive } from "@earendil-works/pi-tui";
+import { registerCapabilityAction } from "../src/capability-actions.ts";
 import registerTool from "../extensions/tool.ts";
 
 const tool = (name, description = "d") => ({
@@ -22,6 +23,7 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 	const commands = new Map();
 	const entries = [];
 	const pi = {
+		events: createEventBus(),
 		getAllTools: () => all.map((name) => tool(name, name === HEAVY ? "x".repeat(3000) : "d")),
 		getActiveTools: () => [...activeTools],
 		setActiveTools: (names) => { activeTools = [...names]; },
@@ -44,7 +46,7 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 		},
 	};
 	return {
-		ctx, notices, entries, sessionManager, settings,
+		pi, ctx, notices, entries, sessionManager, settings,
 		/**
 		 * Build the component the way pi's `ui.custom` does, with a real
 		 * `KeybindingsManager` and a real theme shape, so the keys the panel reads
@@ -69,6 +71,22 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 		commandNames: () => [...commands.keys()],
 	};
 };
+
+test('Subagent roles shortcut closes the panel before opening its picker', async () => {
+ const h = harness({ all: ['subagent'], active: ['subagent'] });
+ let ran = false;
+ registerCapabilityAction(h.pi, 'subagent', { verb: 'roles', shortcut: 'r', description: 'Model and effort', run: async ctx => { assert.equal(ctx, h.ctx); ran = true; } });
+ h.ctx.ui.custom = async factory => new Promise(resolve => {
+  const component = factory({ requestRender() {} }, { fg: (_c, text) => text, bold: text => text }, new KeybindingsManager(TUI_KEYBINDINGS), resolve);
+  component.handleInput('\r');
+  assert.match(component.render(120).join('\n'), /R roles/);
+  component.handleInput('r');
+  assert.equal(ran, false);
+ });
+ await h.run();
+ assert.equal(ran, true);
+ assert.ok(h.completions('subagent r').some(item => item.value === 'subagent roles'));
+});
 
 test("/tool registers one command", () => {
 	assert.deepEqual(harness().commandNames(), ["tool"]);
@@ -163,6 +181,51 @@ test("querying a capability reports how many of its tools are on", async () => {
 	await h.run("computer");
 	assert.match(h.notices.at(-1).message, /Computer is on · 1\/2 tools · ~[\d,]+ est\. tokens/);
 	assert.equal(h.entries.length, 0, "a query is not a change");
+});
+
+test("a capability action runs through /tool <capability> <verb>", async () => {
+	// Computer use owns the behaviour; /tool owns the surface. The action reaches
+	// the owner without /tool knowing anything about computer use.
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read", "computer"] });
+	h.settings.update({ computer: true });
+	const ran = [];
+	registerCapabilityAction(h.pi, "computer", { verb: "stop", description: "Close the browser", run: (ctx) => { ran.push(ctx); } });
+	await h.run("computer stop");
+	assert.equal(ran.length, 1);
+	assert.equal(ran[0], h.ctx);
+	assert.equal(h.entries.length, 0, "an action is not a tool change");
+	assert.deepEqual(h.activeTools().sort(), ["computer", "read"], "an action does not toggle the capability");
+});
+
+test("a capability query lists the actions it accepts", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read", "computer"] });
+	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "Check permissions", run: () => {} });
+	await h.run("computer");
+	assert.match(h.notices.at(-1).message, /actions: check/);
+});
+
+test("an unknown capability verb is refused and names the ones that exist", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "Check permissions", run: () => {} });
+	await h.run("computer restart");
+	assert.equal(h.notices.at(-1).level, "error");
+	assert.match(h.notices.at(-1).message, /No Computer action named restart. Use: on, off, check/);
+});
+
+test("capability actions are offered as completions", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "Check permissions", run: () => {} });
+	const values = h.completions("computer ").map((option) => option.value);
+	assert.ok(values.includes("computer check"), `expected a computer check completion, got ${values.join(", ")}`);
+});
+
+test("re-registering a verb replaces it instead of stacking duplicates", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+	let runs = 0;
+	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "first", run: () => { runs += 1; } });
+	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "second", run: () => { runs += 1; } });
+	await h.run("computer check");
+	assert.equal(runs, 1);
 });
 
 test("an unknown name is refused with a pointer to the list", async () => {

@@ -10,60 +10,9 @@
  * session rereads them before a turn; navigating a branch never rewinds them.
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { selectedTools, toolSettings, type ToolSettings } from "../src/tool-settings.ts";
 import { CAPABILITIES } from "../src/tool-panel.ts";
-
-const agents = ["worker", "scout", "reviewer", "researcher"];
-const thinkingLevels = ["default", "off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-async function configureSubagent(ctx: ExtensionContext) {
-  if (!ctx.hasUI) {
-    ctx.ui.notify("/subagent-config requires the interactive terminal", "error");
-    return;
-  }
-  const agent = await ctx.ui.select("Configure subagent", agents);
-  if (!agent) return;
-  const availableModels = ctx.scopedModels.length
-    ? ctx.scopedModels.map(({ model }) => model)
-    : ctx.modelRegistry.getAvailable();
-  const models = ["inherit", ...new Set(availableModels.map((model) => `${model.provider}/${model.id}`))];
-  const model = await ctx.ui.select(`${agent} model`, models);
-  if (!model) return;
-  const thinking = await ctx.ui.select(`${agent} thinking`, thinkingLevels);
-  if (!thinking) return;
-  const fallback = await ctx.ui.select(`${agent} fallback model`, ["none", ...models.filter((candidate) => candidate !== "inherit" && candidate !== model)]);
-  if (!fallback) return;
-  let fallbackThinking = "default";
-  if (fallback !== "none") {
-    const chosen = await ctx.ui.select(`${agent} fallback thinking`, thinkingLevels);
-    if (!chosen) return;
-    fallbackThinking = chosen;
-  }
-  const fallbackModels = fallback === "none" ? undefined : [fallbackThinking === "default" ? fallback : `${fallback}:${fallbackThinking}`];
-
-  const path = join(homedir(), ".pi/agent/settings.json");
-  let text = "{}\n";
-  try { text = await readFile(path, "utf8"); } catch (error: unknown) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-  }
-  const errors: ParseError[] = [];
-  const settings = parse(text, errors);
-  if (errors.length || !settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error(`Cannot update invalid settings file: ${path}`);
-  const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" } as const;
-  text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "model"], model, { formattingOptions }));
-  text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "thinking"], thinking === "default" ? undefined : thinking === "off" ? false : thinking, { formattingOptions }));
-  text = applyEdits(text, modify(text, ["subagents", "agentOverrides", agent, "fallbackModels"], fallbackModels, { formattingOptions }));
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.pix-${process.pid}`;
-  await writeFile(temporary, text.endsWith("\n") ? text : `${text}\n`, "utf8");
-  await rename(temporary, path);
-  ctx.ui.notify(`${agent}: ${model}, thinking ${thinking}, fallback ${fallbackModels?.[0] ?? "none"}. Run /reload to apply.`, "info");
-}
 
 /** Tools pix enables for a new session, beyond Pi's own defaults. */
 const defaultPixTools = [
@@ -86,17 +35,12 @@ export default function (pi: ExtensionAPI, settings: ToolSettings = toolSettings
   pi.on("session_tree", () => apply());
   pi.on("before_agent_start", () => apply());
 
-  /**
-   * Subagent role configuration.
-   *
-   * This is not a tool toggle: it edits model, thinking level, and fallback in
-   * settings.json. `/tool` owns on/off, so this keeps its own command rather
-   * than hiding a settings editor inside a picker.
-   */
+  /** Compatibility alias for the role editor exposed by /tool subagent roles. */
   pi.registerCommand("subagent-config", {
     description: "Configure subagent role models, thinking level, and fallback",
     handler: async (_args, ctx) => {
-      await configureSubagent(ctx);
+      const { configureSubagentRoles } = await import("../src/subagent-roles.ts");
+      await configureSubagentRoles(ctx);
     },
   });
 }
