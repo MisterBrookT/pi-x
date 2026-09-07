@@ -120,8 +120,7 @@ Computer and MCP start off. Every active tool's schema is re-sent on every
 request, so a capability most sessions never touch is a standing charge on the
 context window and on the model's attention. Turning Computer on enables the
 `computer` script wrapper alone, which calls its primitives internally, so the
-capability costs one schema rather than twelve. Choices are recorded per session
-and survive `/reload` and branch navigation.
+capability costs one schema rather than twelve. Choices are shared across sessions in `~/.pi/agent/pix-tools.json` (or the configured Pi agent directory). Opening `/tool`, interacting with its panel, or starting a model turn rereads the file. Changes survive reloads, restarts, and branch navigation. Old per-session tool records are ignored so opening an older conversation cannot undo current settings. Existing session-only preferences must be chosen once again; MCP remains off until explicitly enabled in shared settings.
 
 Token figures in `/tool` and `/context` are estimates from serialized schema
 length, not counts from the provider's tokenizer. They are accurate enough to

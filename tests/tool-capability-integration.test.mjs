@@ -1,14 +1,8 @@
+import { settingsFor } from "./helpers/tool-settings.mjs";
 /**
- * `/tool` and the capability defaults, driven together over a real session.
- *
- * The two extensions share one persistence record, and the failure mode they
- * exist to prevent is disagreement: one enabling a tool the other withholds on
- * the next turn. That only shows up when both run against the same session, in
- * the order pi loads them, so these tests wire up both.
- *
- * The session is a real `SessionManager`, and branch navigation uses its real
- * `branch()` call rather than a stub, because "the choice survives navigation"
- * is a claim about pi's tree, not about a fake.
+ * Both extensions share file-backed settings across independent sessions.
+ * Real SessionManager branches verify conversation navigation cannot rewind
+ * preferences, while panel-open and turn hooks correct upstream reactivation.
  */
 
 import assert from "node:assert/strict";
@@ -36,7 +30,7 @@ const describe = (name) => ({
  * Both extensions over one tool set, loaded in the order package.json declares:
  * capabilities first to seed defaults, /tool last so an explicit choice wins.
  */
-const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory() } = {}) => {
+const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory(), settings = settingsFor(sessionManager) } = {}) => {
 	let activeTools = [...active];
 	const handlers = { session_start: [], before_agent_start: [], session_tree: [] };
 	const commands = new Map();
@@ -48,8 +42,8 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 		on: (event, handler) => handlers[event]?.push(handler),
 		appendEntry: (customType, data) => sessionManager.appendCustomEntry(customType, data),
 	};
-	registerCapabilities(pi);
-	registerTool(pi);
+	registerCapabilities(pi, settings);
+	registerTool(pi, settings);
 
 	const notices = [];
 	const ctx = {
@@ -59,6 +53,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	};
 	const fire = (event) => { for (const handler of handlers[event]) handler({}, ctx); };
 	return {
+		settings,
 		notices,
 		sessionManager,
 		active: () => activeTools,
@@ -171,29 +166,29 @@ test("only the choice is stored, so a later release can add tools to a capabilit
 	assert.ok(upgraded.active().includes("web_search"), "unrelated tools are untouched");
 });
 
-test("real branch navigation restores the choices of the branch", async () => {
+test("real branch navigation does not rewind shared settings", async () => {
 	const sessionManager = SessionManager.inMemory();
 	const h = harness({ sessionManager });
 	h.start();
 
-	// A point in the conversation before the choice was made.
+	// A point in the conversation before the shared choice was made.
 	const beforeChoice = sessionManager.appendCustomEntry("pix-test-marker", {});
 	await h.tool("computer on");
 	h.turn();
 	assert.ok(h.active().includes("computer"));
 
-	// Navigate back to before the choice: pi's own branch(), not a stub.
+	// Navigate back: shared preferences must not rewind with the conversation.
 	sessionManager.branch(beforeChoice);
 	h.navigate();
-	assert.ok(!h.active().includes("computer"), "a choice made after this point is not in scope here");
+	assert.ok(h.active().includes("computer"), "shared choices do not belong to a conversation branch");
 
-	// And forward again on a new branch.
+	// Further navigation also keeps the current shared preference.
 	await h.tool("computer on");
 	h.navigate();
-	assert.ok(h.active().includes("computer"), "the new branch holds its own choice");
+	assert.ok(h.active().includes("computer"), "navigation keeps the shared choice");
 });
 
-test("a choice made on an abandoned branch does not leak into a sibling", async () => {
+test("shared choices remain in effect on sibling branches", async () => {
 	const sessionManager = SessionManager.inMemory();
 	const h = harness({ sessionManager });
 	h.start();
@@ -206,32 +201,30 @@ test("a choice made on an abandoned branch does not leak into a sibling", async 
 	sessionManager.branch(fork);
 	await h.tool("read off");
 	h.navigate();
-	assert.ok(!h.active().includes("mcp"), "the sibling branch never enabled MCP");
+	assert.ok(h.active().includes("mcp"), "branch changes cannot revert shared settings");
 	assert.ok(!h.active().includes("read"), "but its own choice applies");
 });
 
-test("a session started elsewhere is unaffected by another session's choices", async () => {
+test("a second session loads choices made in the first", async () => {
 	const first = harness();
 	first.start();
 	await first.tool("computer on");
 
-	const other = harness();
+	const other = harness({ settings: first.settings });
 	other.start();
-	assert.ok(!other.active().includes("computer"), "choices are per session, not global");
+	assert.ok(other.active().includes("computer"), "shared choices apply across sessions");
 });
 
-test("a capability turned on in an older session still applies after the upgrade", async () => {
-	// Sessions recorded before the redundant commands were removed hold the old
-	// family entry; dropping it silently would turn off a capability the user
-	// had chosen, with nothing on screen explaining why.
+test("an old session cannot override fresh shared defaults", async () => {
+	// Legacy records do not automatically become cross-session preferences.
 	const sessionManager = SessionManager.inMemory();
 	sessionManager.appendCustomEntry("pix-capability-enabled", { family: "computer", on: true });
 
 	const h = harness({ sessionManager });
 	h.start();
-	assert.ok(h.active().includes("computer"), "the old choice is honoured");
+	assert.ok(!h.active().includes("computer"), "old per-session choices have no global authority");
 	h.turn();
-	assert.ok(h.active().includes("computer"));
+	assert.ok(!h.active().includes("computer"));
 });
 
 test("an older session that turned a capability off keeps it off", async () => {
@@ -273,4 +266,30 @@ test("completions offer capabilities and tools, annotated with state and cost", 
 	assert.match(basic.description, /on · ~[\d,]+ est\. tokens · builtin/);
 
 	assert.equal(h.completions("zzz"), null);
+});
+
+test('opening another session panel synchronizes shared choices and undoes MCP reactivation', async () => {
+ const a=harness();
+ const b=harness({settings:a.settings});
+ a.start();b.start();
+ await a.tool('computer on');
+ await b.tool('list');
+ assert.ok(b.active().includes('computer'));
+ await a.tool('computer off');
+ b.setActive([...b.active(),'mcp','mcpScript','mcp__excalidraw']);
+ await b.tool('list');
+ for(const name of ['computer','mcp','mcpScript','mcp__excalidraw']) assert.ok(!b.active().includes(name),name);
+ await b.tool('mcp on');
+ a.turn();assert.ok(a.active().includes('mcp'));
+ await a.tool('mcp off');
+ b.turn();assert.ok(!b.active().includes('mcp'));
+});
+
+test('old session records cannot override a newer shared off choice', async () => {
+ const a=harness();await a.tool('mcp off');
+ const old=SessionManager.inMemory();
+ old.appendCustomEntry('pix-tool-overrides',{overrides:{mcp:true}});
+ old.appendCustomEntry('pix-capability-enabled',{family:'mcp',on:true});
+ const b=harness({settings:a.settings,sessionManager:old});
+ b.start();await b.tool('list');assert.ok(!b.active().includes('mcp'));
 });

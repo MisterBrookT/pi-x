@@ -1,3 +1,4 @@
+import { settingsFor } from "./helpers/tool-settings.mjs";
 /**
  * Session defaults: which tools a new session gets, and which stay withheld.
  *
@@ -19,7 +20,7 @@ const ALL = [
 	"mcp", "mcpScript", "mcp__excalidraw",
 ];
 
-const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory() } = {}) => {
+const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory(), settings = settingsFor(sessionManager) } = {}) => {
 	let activeTools = [...active];
 	const handlers = new Map();
 	const commands = new Map();
@@ -31,17 +32,18 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 		on: (event, handler) => handlers.set(event, handler),
 		appendEntry: (customType, data) => sessionManager.appendCustomEntry(customType, data),
 	};
-	registerCapabilities(pi);
+	registerCapabilities(pi, settings);
 	const notices = [];
 	const ctx = { sessionManager, ui: { notify: (message, level) => notices.push({ message, level }) } };
 	return {
+		settings,
 		notices,
 		active: () => activeTools,
 		start: () => handlers.get("session_start")({}, ctx),
 		turn: () => handlers.get("before_agent_start")?.({}, ctx),
 		branch: () => handlers.get("session_tree")?.({}, ctx),
 		sessionManager,
-		choose: (overrides) => sessionManager.appendCustomEntry("pix-tool-overrides", { overrides }),
+		choose: (overrides) => settings.update(overrides),
 		commandNames: () => [...commands.keys()].sort(),
 		setActive: (names) => { activeTools = [...names]; },
 	};
@@ -164,34 +166,34 @@ test("only explicit choices are stored, so a later release can add tools", () =>
 	assert.ok(!upgraded.active().includes("evaluate_browser"), "a new internal follows the default");
 });
 
-test("a fresh session is unaffected by another session's choices", () => {
+test("independent settings directories do not affect each other", () => {
 	const first = harness();
 	first.start();
 	first.choose({ computer: true });
 
 	const other = harness();
 	other.start();
-	assert.ok(!other.active().includes("computer"), "choices are per session, not global");
+	assert.ok(!other.active().includes("computer"), "different agent directories remain independent");
 });
 
-test("branch navigation restores the choices of that branch", () => {
+test("branch navigation reapplies current shared settings", () => {
 	const h = harness();
 	h.start();
 	h.choose({ computer: true });
 	h.branch();
-	assert.ok(h.active().includes("computer"), "the branch still holds the choice");
+	assert.ok(h.active().includes("computer"), "shared settings still hold the choice");
 });
 
-test("a choice recorded by an older pix release is still honoured", () => {
+test("old conversation choices do not silently enable tools globally", () => {
 	// Sessions predate the removal of /computer and hold the old family entry.
 	const sessionManager = SessionManager.inMemory();
 	sessionManager.appendCustomEntry("pix-capability-enabled", { family: "computer", on: true });
 	const h = harness({ sessionManager });
 	h.start();
-	assert.ok(h.active().includes("computer"));
+	assert.ok(!h.active().includes("computer"));
 });
 
-test("the last choice wins regardless of which record it came from", () => {
+test("legacy conversation records cannot change shared defaults", () => {
 	const sessionManager = SessionManager.inMemory();
 	sessionManager.appendCustomEntry("pix-tool-overrides", { overrides: { act_ui: true } });
 	sessionManager.appendCustomEntry("pix-capability-enabled", { family: "computer", on: false });

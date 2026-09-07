@@ -1,3 +1,4 @@
+import { settingsFor } from "./helpers/tool-settings.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -15,7 +16,7 @@ const tool = (name, description = "d") => ({
 // a capability id, so using it here would exercise the knob, not a plain tool.
 const HEAVY = "grep";
 
-const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAVY], sessionManager = SessionManager.inMemory(), mode = "tui" } = {}) => {
+const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAVY], sessionManager = SessionManager.inMemory(), mode = "tui", settings = settingsFor(sessionManager) } = {}) => {
 	let activeTools = [...active];
 	const handlers = new Map();
 	const commands = new Map();
@@ -31,7 +32,7 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 			sessionManager.appendCustomEntry(customType, data);
 		},
 	};
-	registerTool(pi);
+	registerTool(pi, settings);
 	const notices = [];
 	const custom = [];
 	const ctx = {
@@ -43,7 +44,7 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 		},
 	};
 	return {
-		ctx, notices, entries, sessionManager,
+		ctx, notices, entries, sessionManager, settings,
 		/**
 		 * Build the component the way pi's `ui.custom` does, with a real
 		 * `KeybindingsManager` and a real theme shape, so the keys the panel reads
@@ -118,7 +119,8 @@ test("only explicit choices persist, so new tools are not silently withheld", as
 	// a tool added afterwards would be missing from the list and stay off.
 	const h = harness();
 	await h.run(`${HEAVY} off`);
-	assert.deepEqual(h.entries.at(-1), { customType: "pix-tool-overrides", data: { overrides: { [HEAVY]: false } } });
+	assert.deepEqual(h.settings.read(), { [HEAVY]: false });
+	assert.equal(h.entries.length, 0, "choices no longer write conversation entries");
 
 	const upgraded = harness({
 		sessionManager: h.sessionManager,
@@ -157,6 +159,7 @@ test("querying one tool reports its state without changing anything", async () =
 
 test("querying a capability reports how many of its tools are on", async () => {
 	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read", "computer"] });
+ h.settings.update({computer:true});
 	await h.run("computer");
 	assert.match(h.notices.at(-1).message, /Computer is on · 1\/2 tools · ~[\d,]+ est\. tokens/);
 	assert.equal(h.entries.length, 0, "a query is not a change");
@@ -242,4 +245,12 @@ test("the mounted panel shows provenance on capability and tool rows alike", asy
 	const text = component.render(80).join("\n");
 	assert.match(text, /^› read\s+\S+\s+~[\d,]+ est\. tokens · builtin$/m);
 	assert.match(text, /^ {2}Computer\s.*· builtin {2}▸$/m, "a capability names its packages too");
+});
+
+test('settings write failure in a keyboard callback does not crash the TUI', async () => {
+ const settings={read:()=>({}),update:()=>{throw new Error('settings busy');}};
+ const h=harness({settings});
+ const {component}=await h.mountPanel();
+ assert.doesNotThrow(()=>component.handleInput(' '));
+ assert.match(h.notices.at(-1).message,/Could not update tool settings: settings busy/);
 });

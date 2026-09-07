@@ -14,7 +14,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { inventory, renderTable } from "../src/tool-inventory.ts";
 import {
 	buildPanel,
@@ -25,7 +25,8 @@ import {
 	type PanelModel,
 } from "../src/tool-panel.ts";
 import { ToolPanelView } from "../src/tool-panel-view.ts";
-import { type Overrides, readOverrides, TOOL_ENTRY } from "../src/tool-overrides.ts";
+import type { Overrides } from "../src/tool-overrides.ts";
+import { selectedTools, toolSettings, type ToolSettings } from "../src/tool-settings.ts";
 
 /**
  * Name a package from its directory, so a local checkout of pix reports the
@@ -44,42 +45,22 @@ const packageName = (baseDir: string): string | undefined => {
 	return name;
 };
 
-export default function tool(pi: ExtensionAPI) {
-	let overrides: Overrides = {};
-
-	const knownNames = (): Set<string> => new Set(pi.getAllTools().map((entry) => entry.name));
-
-	const panel = (): PanelModel => buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName);
-
-	/** Apply saved choices over whatever the rest of the session decided. */
-	const apply = () => {
-		const known = knownNames();
-		const active = new Set(pi.getActiveTools());
-		for (const [name, on] of Object.entries(overrides)) {
-			if (!known.has(name)) continue;
-			if (on) active.add(name);
-			else active.delete(name);
-		}
-		pi.setActiveTools([...active]);
-	};
-
-	const restore = (ctx: ExtensionContext) => {
-		overrides = readOverrides(ctx);
-		apply();
-	};
-
-	// Runs after the capability defaults are seeded, so an explicit choice is not
-	// undone by the session_start handler that applies them.
-	pi.on("session_start", (_event, ctx) => restore(ctx));
-	pi.on("session_tree", (_event, ctx) => restore(ctx));
-
-	/** Record one or more choices as a single entry, so a capability is atomic. */
-	const setTools = (changes: Overrides) => {
-		if (!Object.keys(changes).length) return;
-		Object.assign(overrides, changes);
-		apply();
-		pi.appendEntry(TOOL_ENTRY, { overrides: changes });
-	};
+export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSettings()) {
+  const knownNames = (): Set<string> => new Set(pi.getAllTools().map(entry => entry.name));
+  const sync = () => {
+    pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read()));
+  };
+  const panel = (): PanelModel => {
+    sync();
+    return buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName);
+  };
+  pi.on("session_start", sync);
+  pi.on("session_tree", sync);
+  const setTools = (changes: Overrides) => {
+    if (!Object.keys(changes).length) return;
+    settings.update(changes);
+    sync();
+  };
 
 	const setTool = (name: string, on: boolean) => setTools({ [name]: on });
 
@@ -127,6 +108,7 @@ export default function tool(pi: ExtensionAPI) {
 			return matches.length ? matches : null;
 		},
 		handler: async (rawArgs, ctx) => {
+            sync();
 			const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 
 			// `/tool <name|capability> [on|off]` stays scriptable and works headless.
@@ -228,6 +210,9 @@ export default function tool(pi: ExtensionAPI) {
 					render: (width: number) => view.render(width),
 					invalidate() {},
 					handleInput: (data: string) => {
+                        try {
+                        // Another session may have changed this row since it was drawn.
+                        view.setModel(scopeId ? advancedModel(scopeId) : panel());
 						const action = view.handleInput(data);
 						if (action.type === "toggle") {
 							const row = action.row;
@@ -259,6 +244,9 @@ export default function tool(pi: ExtensionAPI) {
 							return;
 						}
 						if (action.type === "move") tui.requestRender();
+                        } catch (error) {
+                          ctx.ui.notify(`Could not update tool settings: ${(error as Error).message}`, "error");
+                        }
 					},
 				};
 			});

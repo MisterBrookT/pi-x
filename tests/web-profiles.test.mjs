@@ -1,3 +1,4 @@
+import {settingsFor} from "./helpers/tool-settings.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createJiti} from 'jiti';
@@ -55,12 +56,13 @@ test('video and normal fetch forward unchanged arguments, cancellation, results 
 test('actual capability lifecycle withholds optional research tools and respects explicit choices',async()=>{
  const {default:register}=await import('../extensions/capabilities.ts');
  let active=profiles.map(t=>t.name);const handlers=new Map();const entries=[];
- register({on:(n,h)=>handlers.set(n,h),registerCommand(){},getAllTools:()=>profiles,getActiveTools:()=>active,setActiveTools:n=>{active=n;}});
+ const settings=settingsFor({});
+ register({on:(n,h)=>handlers.set(n,h),registerCommand(){},getAllTools:()=>profiles,getActiveTools:()=>active,setActiveTools:n=>{active=n;}},settings);
  const ctx={sessionManager:{getBranch:()=>entries}};
  handlers.get('session_start')({},ctx);
  assert.ok(!active.includes('source_check'));assert.ok(!active.includes('video_content'));
  assert.ok(active.includes('fetch_content'));
- entries.push({type:'custom',customType:'pix-tool-overrides',data:{overrides:{video_content:true}}});
+ settings.update({video_content:true});
  handlers.get('before_agent_start')({},ctx);
  assert.ok(active.includes('video_content'));assert.ok(!active.includes('source_check'));
 });
