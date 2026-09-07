@@ -11,8 +11,20 @@
  * be driven directly by a test.
  */
 
+import { getKeybindings, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import type { PanelModel, PanelRow } from "./tool-panel.ts";
 import { formatTokens, panelSummary } from "./tool-panel.ts";
+
+/** The keybindings this panel reads, as pi's `KeybindingsManager` exposes them. */
+export type PanelKeybinding =
+	| "tui.select.up"
+	| "tui.select.down"
+	| "tui.select.confirm"
+	| "tui.select.cancel";
+
+export interface KeyMatcher {
+	matches(data: string, keybinding: PanelKeybinding): boolean;
+}
 
 export interface PanelTheme {
 	title: (text: string) => string;
@@ -39,12 +51,18 @@ export type PanelAction =
 	| { type: "move" }
 	| { type: "none" };
 
-/** Keys, matched on raw terminal input so no keybinding registry is needed. */
-const UP = ["\u001b[A", "\u001b[Z", "k"];
-const DOWN = ["\u001b[B", "\u0009", "j"];
-const ENTER = ["\r", "\n"];
-const SPACE = [" "];
-const ESCAPE = ["\u001b"];
+/**
+ * Keys are decoded by pi, never compared as raw bytes.
+ *
+ * A terminal that negotiated the Kitty keyboard protocol sends Escape as
+ * `\u001b[27u` and Space as `\u001b[32u`; xterm's modifyOtherKeys sends a third
+ * form again. Testing `data === "\u001b"` therefore ignored Escape on exactly
+ * the terminals pi upgrades, which is what made "Esc back" appear broken. Going
+ * through the host's `KeybindingsManager` also means a user who rebound
+ * selection keys gets those keys here too.
+ */
+const SHIFT_TAB = "shift+tab";
+const TAB = "tab";
 
 export interface PanelViewOptions {
 	/** Rows currently shown; the advanced view passes a capability's tools. */
@@ -53,6 +71,8 @@ export interface PanelViewOptions {
 	/** Capability whose tools are being shown, when in the advanced view. */
 	scope?: { label: string; summary: string };
 	maxVisible?: number;
+	/** The host's keybindings, as handed to a `ui.custom` factory. */
+	keybindings?: KeyMatcher;
 }
 
 /**
@@ -67,12 +87,14 @@ export class ToolPanelView {
 	private readonly theme: PanelTheme;
 	private readonly scope?: { label: string; summary: string };
 	private readonly maxVisible: number;
+	private readonly keybindings: KeyMatcher;
 
 	constructor(options: PanelViewOptions) {
 		this.model = options.model;
 		this.theme = options.theme ?? plainTheme;
 		this.scope = options.scope;
 		this.maxVisible = options.maxVisible ?? 14;
+		this.keybindings = options.keybindings ?? getKeybindings();
 	}
 
 	/** Replace the rows after a toggle, keeping the cursor where the user left it. */
@@ -91,21 +113,22 @@ export class ToolPanelView {
 
 	handleInput(data: string): PanelAction {
 		const rows = this.model.rows;
-		if (UP.includes(data)) {
+		const bound = (keybinding: PanelKeybinding): boolean => this.keybindings.matches(data, keybinding);
+		if (bound("tui.select.up") || matchesKey(data, SHIFT_TAB) || data === "k") {
 			if (!rows.length) return { type: "none" };
 			this.index = this.index === 0 ? rows.length - 1 : this.index - 1;
 			return { type: "move" };
 		}
-		if (DOWN.includes(data)) {
+		if (bound("tui.select.down") || matchesKey(data, TAB) || data === "j") {
 			if (!rows.length) return { type: "none" };
 			this.index = this.index === rows.length - 1 ? 0 : this.index + 1;
 			return { type: "move" };
 		}
-		if (SPACE.includes(data)) {
+		if (matchesKey(data, "space")) {
 			const row = this.selected;
 			return row ? { type: "toggle", row } : { type: "none" };
 		}
-		if (ENTER.includes(data)) {
+		if (bound("tui.select.confirm")) {
 			const row = this.selected;
 			// Enter opens a capability. On a plain tool there is nothing to open,
 			// so it toggles instead of doing nothing, which is the least surprising
@@ -113,7 +136,7 @@ export class ToolPanelView {
 			if (!row) return { type: "none" };
 			return row.kind === "capability" ? { type: "enter", row } : { type: "toggle", row };
 		}
-		if (ESCAPE.includes(data)) return this.scope ? { type: "back" } : { type: "close" };
+		if (bound("tui.select.cancel")) return this.scope ? { type: "back" } : { type: "close" };
 		return { type: "none" };
 	}
 
@@ -184,20 +207,28 @@ export const rowOn = (row: PanelRow): boolean => row.on;
  * Trailing detail for one row.
  *
  * A capability shows how many of its tools are on, because "on" alone does not
- * say whether the advanced view holds anything unexpected. A plain tool shows
- * its origin, which is the only provenance the user gets for it.
+ * say whether the advanced view holds anything unexpected. Every row also names
+ * where its tools came from: "MCP" or "act_ui" alone does not say whether the
+ * user's own package or a third party put it there, and that is the question
+ * provenance answers.
  */
 export const rowDetail = (row: PanelRow): string => {
 	if (row.kind === "capability") {
 		const arrow = "▸";
-		return `${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)}  ${arrow}`;
+		return `${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}  ${arrow}`;
 	}
 	return `${formatTokens(row.tokens)} · ${row.origin}`;
 };
 
+/**
+ * Trim a themed row to the terminal width.
+ *
+ * Must count display cells, not string length: a themed row carries an ANSI
+ * escape around each of its three segments, so a length-based cut removed the
+ * trailing origin from rows that fit the screen perfectly well. That is why
+ * provenance disappeared in the TUI while the plain-theme tests still passed.
+ */
 const truncate = (text: string, width: number): string => {
-	// Counts code points rather than display cells; the panel is ASCII, and a
-	// wrong count here only shortens a line early.
-	if (width <= 0 || text.length <= width) return text;
-	return `${text.slice(0, Math.max(0, width - 1))}…`;
+	if (width <= 0) return "";
+	return truncateToWidth(text, width, "…");
 };

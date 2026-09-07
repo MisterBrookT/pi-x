@@ -102,7 +102,7 @@ export default function tool(pi: ExtensionAPI) {
 						? {
 								value: row.id,
 								label: row.label,
-								description: `${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)}`,
+								description: `${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}`,
 							}
 						: {
 								value: row.name,
@@ -143,7 +143,7 @@ export default function tool(pi: ExtensionAPI) {
 					}
 					if (verb !== "on" && verb !== "off") {
 						ctx.ui.notify(
-							`${row.label} is ${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)}`,
+							`${row.label} is ${row.on ? "on" : "off"} · ${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}`,
 							"info",
 						);
 						return;
@@ -188,7 +188,7 @@ export default function tool(pi: ExtensionAPI) {
 				return;
 			}
 
-			await ctx.ui.custom((tui, theme, _keybindings, done) => {
+			await ctx.ui.custom((tui, theme, keybindings, done) => {
 				const themed = {
 					title: (text: string) => theme.fg("accent", theme.bold(text)),
 					muted: (text: string) => theme.fg("muted", text),
@@ -217,7 +217,7 @@ export default function tool(pi: ExtensionAPI) {
 					};
 				};
 
-				let view = new ToolPanelView({ model: panel(), theme: themed });
+				let view = new ToolPanelView({ model: panel(), theme: themed, keybindings });
 
 				const refresh = () => {
 					view.setModel(scopeId ? advancedModel(scopeId) : panel());
@@ -242,6 +242,7 @@ export default function tool(pi: ExtensionAPI) {
 							view = new ToolPanelView({
 								model: advancedModel(capability.id),
 								theme: themed,
+								keybindings,
 								scope: { label: capability.label, summary: capability.summary },
 							});
 							tui.requestRender();
@@ -249,7 +250,7 @@ export default function tool(pi: ExtensionAPI) {
 						}
 						if (action.type === "back") {
 							scopeId = undefined;
-							view = new ToolPanelView({ model: panel(), theme: themed });
+							view = new ToolPanelView({ model: panel(), theme: themed, keybindings });
 							tui.requestRender();
 							return;
 						}

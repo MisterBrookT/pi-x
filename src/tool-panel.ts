@@ -113,6 +113,8 @@ export interface CapabilityRow {
 	activeTokens: number;
 	activeCount: number;
 	toolCount: number;
+	/** Which packages ship the capability's tools, as one label. */
+	origin: string;
 }
 
 export interface ToolRow {
@@ -182,6 +184,7 @@ export const buildPanel = (
 			activeTokens: owned.filter((row) => row.active).reduce((sum, row) => sum + row.tokens, 0),
 			activeCount: owned.filter((row) => row.active).length,
 			toolCount: owned.length,
+			origin: capabilityOrigin(owned),
 		});
 	}
 
@@ -220,6 +223,20 @@ export const capabilityTargets = (
  * accurate enough to compare rows and choose what to disable and no more.
  */
 export const formatTokens = (tokens: number): string => `~${tokens.toLocaleString()} est. tokens`;
+
+/**
+ * Provenance for a capability row.
+ *
+ * A capability can span packages: the Computer wrapper ships in pi-x while its
+ * primitives come from pi-computer-use. Naming only one of them would be wrong,
+ * so every distinct origin is listed, in the order the tools appear, with
+ * built-ins first because they are the stable baseline.
+ */
+export const capabilityOrigin = (tools: ToolCost[]): string => {
+	const origins = [...new Set(tools.map((entry) => entry.origin))];
+	origins.sort((a, b) => (a === "builtin" === (b === "builtin") ? 0 : a === "builtin" ? -1 : 1));
+	return origins.join(", ");
+};
 
 /** Header line: what is active, and roughly what it costs per request. */
 export const panelSummary = (model: PanelModel): string =>

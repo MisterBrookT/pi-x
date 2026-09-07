@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { KeybindingsManager, TUI_KEYBINDINGS, setKittyProtocolActive } from "@earendil-works/pi-tui";
 import registerTool from "../extensions/tool.ts";
 
 const tool = (name, description = "d") => ({
@@ -38,11 +39,28 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 		sessionManager,
 		ui: {
 			notify: (message, level) => notices.push({ message, level }),
-			custom: async (factory) => { custom.push(factory); },
+			custom: async (factory, options) => { custom.push({ factory, options }); },
 		},
 	};
 	return {
 		ctx, notices, entries, sessionManager,
+		/**
+		 * Build the component the way pi's `ui.custom` does, with a real
+		 * `KeybindingsManager` and a real theme shape, so the keys the panel reads
+		 * are the keys the host would actually give it.
+		 */
+		mountPanel: async () => {
+			await commands.get("tool").handler("", ctx);
+			const { factory } = custom.at(-1);
+			const results = [];
+			const component = await factory(
+				{ requestRender: () => {} },
+				{ fg: (_colour, text) => text, bold: (text) => text },
+				new KeybindingsManager(TUI_KEYBINDINGS),
+				(result) => results.push(result),
+			);
+			return { component, results };
+		},
 		activeTools: () => activeTools,
 		run: (args = "") => commands.get("tool").handler(args, ctx),
 		completions: (prefix) => commands.get("tool").getArgumentCompletions(prefix),
@@ -171,4 +189,57 @@ test("completions never offer the same name twice", () => {
 	const h = harness({ all: ["read", "computer", "act_ui"], active: ["computer"] });
 	const values = h.completions("").map((option) => option.value);
 	assert.deepEqual(values, [...new Set(values)]);
+});
+
+/**
+ * The panel as the host mounts it.
+ *
+ * The user-visible failure was "Esc does not go back", which lives in the seam
+ * between pi's `ui.custom` and this panel, not in either alone. These drive the
+ * real factory with pi's real `KeybindingsManager`.
+ */
+const ESC = "\u001b";
+const KITTY_ESC = "\u001b[27u";
+const ENTER = "\r";
+
+test("Esc inside a capability goes back to the top level instead of closing", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+	const { component, results } = await h.mountPanel();
+
+	// Walk to the Computer row and open it.
+	while (!component.render(80).join("\n").match(/^› Computer/m)) component.handleInput("\u001b[B");
+	component.handleInput(ENTER);
+	assert.match(component.render(80).join("\n"), /Tools › Computer/);
+
+	component.handleInput(ESC);
+	assert.doesNotMatch(component.render(80).join("\n"), /Tools › Computer/, "Esc returned to the top level");
+	assert.equal(results.length, 0, "and did not close the panel");
+
+	component.handleInput(ESC);
+	assert.equal(results.length, 1, "a second Esc closes it");
+});
+
+test("Esc still goes back when the terminal speaks the Kitty keyboard protocol", async () => {
+	setKittyProtocolActive(true);
+	try {
+		const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+		const { component, results } = await h.mountPanel();
+		while (!component.render(80).join("\n").match(/^› Computer/m)) component.handleInput("\u001b[B");
+		component.handleInput("\u001b[13u");
+		assert.match(component.render(80).join("\n"), /Tools › Computer/);
+
+		component.handleInput(KITTY_ESC);
+		assert.doesNotMatch(component.render(80).join("\n"), /Tools › Computer/);
+		assert.equal(results.length, 0);
+	} finally {
+		setKittyProtocolActive(false);
+	}
+});
+
+test("the mounted panel shows provenance on capability and tool rows alike", async () => {
+	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
+	const { component } = await h.mountPanel();
+	const text = component.render(80).join("\n");
+	assert.match(text, /^› read\s+\S+\s+~[\d,]+ est\. tokens · builtin$/m);
+	assert.match(text, /^ {2}Computer\s.*· builtin {2}▸$/m, "a capability names its packages too");
 });
