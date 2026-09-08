@@ -28,7 +28,7 @@ Pix deliberately does not include unevaluated complexity: autonomous memory, an 
 | Todo tracking | Example only | Yes | Yes |
 | Structured questions | Example only | Yes | Yes |
 | LSP diagnostics | No | Optional | Yes |
-| User-facing surface | Small | Seven Pix commands | Broad |
+| User-facing surface | Small | Eight Pix commands | Broad |
 
 Prompt counts use a GPT tokenizer on clean base prompts captured during Pix's design, excluding personal and project `AGENTS.md`, skills, and conversation context. Provider tokenizers and OMP's conditional configuration can produce different totals. `docs/system-prompts.html` contains the full public-safe naive-Pi → Pix comparison.
 
@@ -68,6 +68,8 @@ Restart Pi.
   - Video timestamp/frame controls are exposed only by `video_content`. This is an interface split, not a security restriction on which URLs the fetch backend can read.
   - Ordinary fetching does not expose browser-cookie opt-in or forced large repository cloning.
 - `subagent` through `pi-subagents`
+- `background` for long shell commands: start, inspect, or stop a job; completion or failure automatically wakes the agent
+- opt-in `/goal` mode to continue unfinished work, with explicit completion/blockers and a continuation limit
 - `todo` plus the `/todo` terminal view
 - inline local-history and macOS word completion, optional AI completion via `/complete`, plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
@@ -100,6 +102,7 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/complete [on\|off\|model\|status]` | Toggle AI inline completion or pick its model; persists across sessions |
 | `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
+| `/goal [objective]` | Open goal configuration, or start with an objective; also `status`, `pause` (`stop`), `resume`, and `clear` |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off]`, and capability actions such as `/tool computer check` |
 | `/context` | Show what is filling the context window |
@@ -112,8 +115,13 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 `/tool` is the single place tools are turned on and off. Everyday tools are
 listed individually; Web, Subagent, Computer, and MCP are one row each, because
 choosing what the assistant may do should not require knowing that computer use
-ships eleven backend primitives. `Space` toggles the row under the cursor,
-`Enter` opens a capability to reach its individual tools, and `Esc` goes back. A
+ships eleven backend primitives. Rows use fixed functional groups (Core tools,
+Workflow, Code checks, Capabilities, Other), alphabetically within each group,
+not ordered by changing token costs. Type in the top-level panel to search names,
+groups, origins, or hidden child-tool names; Backspace edits and Esc clears the
+search before closing. Arrow keys select, `Space` toggles the row, and `Enter`
+opens a capability to reach its individual tools. Inside a capability, `Esc`
+returns to the previous search. A
 capability can also offer maintenance actions as verbs on its own row, which the
 capability view lists: `/tool computer check` reports backend and permission
 state, and `/tool computer stop` closes the managed browser and releases its
@@ -149,9 +157,61 @@ handle dependencies such as A/B → C after reading the earlier results.
 Workflow scripting, scheduling, missions, and administrative actions are not
 exposed through this tool. Models and safety controls remain backend-configured.
 The full definition has a tested budget of 2,000 estimated tokens; estimates are
-character-based, not provider token counts. Supporting `bg_wait` and
-`subagent_supervisor` tools remain available for background jobs and child
-communication.
+character-based, not provider token counts. Subagents notify the parent automatically;
+Pix does not expose a separate `bg_wait` tool. The `subagent_supervisor` tool
+remains available for child communication. Explicit blocking waits and external-job
+wait subscriptions are not part of Pix's tool surface.
+
+## Goal mode
+
+Use `/goal Fix the parser bug and pass the regression tests` when a task should
+continue beyond a plan or progress report. Pix resumes unfinished work after the
+agent settles, but waits quietly for background commands and subagents. It stops
+on reported completion with verification evidence, a blocker, interruption, or
+10 automatic continuations. Open `/goal` without arguments for the configuration
+menu: inspect status and pause reasons, start or replace the objective, resume,
+pause, or clear it. Opening the menu changes nothing. New sessions start with
+goal off. `/goal pause` stops future continuations; `Esc` interrupts current
+work. Ordinary supplementary messages keep an active goal enabled, and transient
+model errors do not pause it while Pi is still retrying or recovering context.
+An error that remains after recovery does pause it. `/goal resume` explicitly
+restarts a paused goal; ordinary text such as “go on” does not turn goal mode
+back on.
+
+The footer shows `goal on` only while a goal is active, including its waiting
+state. Inactive goals add nothing to the footer; `/goal status` shows their details.
+An active goal remains visible even when the project path is long.
+
+Goal mode adds no judge model or dependency. The objective survives compaction.
+`/reload` preserves this session's goal status, objective, and continuation count
+without starting another turn. Reopening a closed session or navigating to a
+different branch restores active goals paused, never silently restarted. See
+[Goal mode](docs/goal-mode.md) for controls, verification limits, and implementation.
+
+## Background commands
+
+`background` keeps long commands from blocking the conversation. The agent starts
+one, does other work or yields, then resumes automatically when it finishes or
+fails. There is no need to say “continue,” poll, or watch every log line.
+
+```json
+{"action":"start","command":"npm run check"}
+{"action":"status","id":"1"}
+{"action":"stop","id":"1"}
+```
+
+Omit `id` from `status` to list jobs. Up to four run at once; the latest 32 are
+retained in memory. Completion includes a short output tail; `status` provides
+Pi's bounded Bash output and a full log path when truncated. An optional
+`timeout` is in seconds. Explicitly stopped jobs do not wake the agent.
+
+This minimal version requires a persistent TUI or RPC session. Jobs stop on exit,
+reload, session replacement, or branch navigation; they do not survive restarts.
+Use ordinary `bash` in print/JSON mode. There is no stdin interaction, output
+watcher, or scheduler. Toggle the tool with `/tool background off` (this prevents
+new tool calls, not existing jobs). Like Bash, it executes local commands with
+Pi's permissions; extensions that guard or sandbox only the `bash` tool must
+also cover `background` before enabling it.
 
 ## Computer use
 
@@ -211,7 +271,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 - Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG without acting as an automatic scheduler.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
-- Dependency administration commands are hidden; Pix keeps seven user-facing commands, with related actions as verbs on the command that already owns them and rare inspection on a shortcut.
+- Dependency administration commands are hidden; Pix keeps eight user-facing commands, with related actions as verbs on the command that already owns them and rare inspection on a shortcut.
 
 ## Development
 

@@ -11,6 +11,8 @@ import { webProfiles } from "../src/web-profiles.ts";
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 
 function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
+  // Native completion notifications remain upstream-owned; no separate wait tool.
+  if (tool.name === "bg_wait") return;
   if (tool.name !== "subagent") {
     for (const profile of webProfiles(tool)) pi.registerTool(profile);
     return;

@@ -15,7 +15,7 @@ import registerCapabilities from "../extensions/capabilities.ts";
 const ALL = [
 	"read", "bash", "todo", "question", "lsp_diagnostics", "lsp_fix",
 	"web_search", "source_check", "fetch_content", "get_search_content",
-	"subagent", "bg_wait", "subagent_supervisor",
+	"subagent", "subagent_supervisor",
 	"computer", "find_roots", "observe_ui", "act_ui", "launch_browser", "evaluate_browser",
 	"mcp", "mcpScript", "mcp__excalidraw",
 ];
@@ -77,7 +77,7 @@ test("MCP is off by default, including per-server tools", () => {
 test("subagent internals are on, because the family is on by default", () => {
 	const h = harness();
 	h.start();
-	for (const name of ["subagent", "bg_wait", "subagent_supervisor"]) {
+	for (const name of ["subagent", "subagent_supervisor"]) {
 		assert.ok(h.active().includes(name), `${name} should be on`);
 	}
 });

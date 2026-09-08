@@ -310,6 +310,31 @@ test("the mounted panel shows provenance on capability and tool rows alike", asy
 	assert.match(text, /^ {2}Computer\s.*· builtin {2}▸$/m, "a capability names its packages too");
 });
 
+test("the mounted panel filters, toggles the matching row, and preserves search when returning from a capability", async () => {
+	const h = harness({ all: ["read", "bash", "computer", "act_ui"], active: ["read", "bash"] });
+	const { component, results } = await h.mountPanel();
+	for (const key of "read") component.handleInput(key);
+	assert.match(component.render(100).join("\n"), /^› read\s+on/m);
+	component.handleInput(" ");
+	assert.ok(!h.activeTools().includes("read"));
+	assert.ok(h.activeTools().includes("bash"), "the unfiltered first row is untouched");
+	assert.match(component.render(100).join("\n"), /Search: read/);
+	assert.match(component.render(100).join("\n"), /^› read\s+off/m);
+	component.handleInput(ESC);
+	for (const key of "act_ui") component.handleInput(key);
+	assert.match(component.render(100).join("\n"), /^› Computer/m);
+	component.handleInput(ENTER);
+	assert.match(component.render(100).join("\n"), /Tools › Computer/);
+	component.handleInput(ESC);
+	assert.match(component.render(100).join("\n"), /Search: act_ui/);
+	assert.match(component.render(100).join("\n"), /^› Computer/m);
+	assert.equal(results.length, 0);
+	component.handleInput(ESC);
+	assert.equal(results.length, 0, "first Escape clears the restored search");
+	component.handleInput(ESC);
+	assert.equal(results.length, 1);
+});
+
 test('settings write failure in a keyboard callback does not crash the TUI', async () => {
  const settings={read:()=>({}),update:()=>{throw new Error('settings busy');}};
  const h=harness({settings});

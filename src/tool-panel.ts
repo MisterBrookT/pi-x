@@ -2,7 +2,7 @@
  * The `/tool` panel model: which rows exist, and what each one means.
  *
  * A flat list of every registered tool is unusable. Thirty rows named
- * `observe_ui`, `bg_wait`, and `mcpScript` ask the user to understand a
+ * `observe_ui`, `subagent_supervisor`, and `mcpScript` ask the user to understand a
  * package's internals before choosing what the assistant may do. The rows that
  * matter are the everyday ones plus a handful of capabilities, so this module
  * decides which tools stay visible and which fold into a capability.
@@ -63,8 +63,8 @@ export const CAPABILITIES: CapabilitySpec[] = [
 	{
 		id: "subagent",
 		label: "Subagent",
-		summary: "Delegate work to a subagent and wait for background results",
-		primary: ["subagent", "bg_wait", "subagent_supervisor"],
+		summary: "Delegate work to a subagent with automatic completion notifications",
+		primary: ["subagent", "subagent_supervisor"],
 		secondary: [],
 		defaultOn: true,
 	},
@@ -129,21 +129,28 @@ export interface ToolRow {
 export type PanelRow = ToolRow | CapabilityRow;
 
 export interface PanelModel {
-	/** Individually listed tools, then capability knobs. */
+	/** Functional groups in fixed order; alphabetical rows within each group. */
 	rows: PanelRow[];
 	activeTokens: number;
 	activeCount: number;
 	totalCount: number;
 }
 
-/**
- * Build the panel.
- *
- * Basic tools are listed individually and sorted by cost, because each is a
- * direct choice. Capabilities follow in declaration order so the list does not
- * reshuffle as costs change; a knob that moves between sessions is harder to
- * find than one that stays put.
- */
+const PANEL_GROUPS = ["Core tools", "Workflow", "Code checks", "Capabilities", "Other"] as const;
+
+/** Group by purpose rather than package or changing schema cost. */
+export const panelGroup = (row: PanelRow): typeof PANEL_GROUPS[number] => {
+	if (["bash", "edit", "find", "grep", "ls", "read", "write"].includes(row.id)) return "Core tools";
+	if (["background", "goal", "question", "subagent", "todo"].includes(row.id)) return "Workflow";
+	if (["lsp_diagnostics", "lsp_fix"].includes(row.id)) return "Code checks";
+	return row.kind === "capability" ? "Capabilities" : "Other";
+};
+
+const comparePanelRows = (a: PanelRow, b: PanelRow): number =>
+	PANEL_GROUPS.indexOf(panelGroup(a)) - PANEL_GROUPS.indexOf(panelGroup(b))
+	|| a.id.localeCompare(b.id);
+
+/** Build a stable, grouped panel; token estimates never change row positions. */
 export const buildPanel = (
 	tools: ToolInfoLike[],
 	active: Iterable<string>,
@@ -189,7 +196,7 @@ export const buildPanel = (
 	}
 
 	return {
-		rows: [...basic, ...capabilityRows],
+		rows: [...basic, ...capabilityRows].sort(comparePanelRows),
 		activeTokens: rows.filter((row) => row.active).reduce((sum, row) => sum + row.tokens, 0),
 		activeCount: rows.filter((row) => row.active).length,
 		totalCount: rows.length,

@@ -11,9 +11,9 @@
  * be driven directly by a test.
  */
 
-import { getKeybindings, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
+import { Input, getKeybindings, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
 import type { PanelModel, PanelRow } from "./tool-panel.ts";
-import { formatTokens, panelSummary } from "./tool-panel.ts";
+import { formatTokens, panelGroup, panelSummary } from "./tool-panel.ts";
 
 /** The keybindings this panel reads, as pi's `KeybindingsManager` exposes them. */
 export type PanelKeybinding =
@@ -84,6 +84,17 @@ export interface PanelViewOptions {
  */
 export class ToolPanelView {
 	private index = 0;
+	private readonly search = new Input();
+
+	private get rows(): PanelRow[] {
+		const query = this.search.getValue().trim().toLowerCase();
+		if (!query) return this.model.rows;
+		return this.model.rows.filter(row => {
+			const text = [rowLabel(row), row.origin, panelGroup(row),
+				...(row.kind === "capability" ? [row.summary, ...row.tools.map(tool => tool.name)] : [])].join(" ").toLowerCase();
+			return query.split(/\s+/).every(word => text.includes(word));
+		});
+	}
 	private model: PanelModel;
 	private readonly theme: PanelTheme;
 	private readonly scope?: PanelViewOptions["scope"];
@@ -100,12 +111,15 @@ export class ToolPanelView {
 
 	/** Replace the rows after a toggle, keeping the cursor where the user left it. */
 	setModel(model: PanelModel): void {
+		const selectedId = this.selected?.id;
 		this.model = model;
-		if (this.index >= model.rows.length) this.index = Math.max(0, model.rows.length - 1);
+		const rows = this.rows;
+		const selectedIndex = rows.findIndex(row => row.id === selectedId);
+		this.index = selectedIndex >= 0 ? selectedIndex : Math.max(0, Math.min(this.index, rows.length - 1));
 	}
 
 	get selected(): PanelRow | undefined {
-		return this.model.rows[this.index];
+		return this.rows[this.index];
 	}
 
 	get cursorIndex(): number {
@@ -113,14 +127,14 @@ export class ToolPanelView {
 	}
 
 	handleInput(data: string): PanelAction {
-		const rows = this.model.rows;
+		const rows = this.rows;
 		const bound = (keybinding: PanelKeybinding): boolean => this.keybindings.matches(data, keybinding);
-		if (bound("tui.select.up") || matchesKey(data, SHIFT_TAB) || data === "k") {
+		if (bound("tui.select.up") || matchesKey(data, SHIFT_TAB) || (this.scope && data === "k")) {
 			if (!rows.length) return { type: "none" };
 			this.index = this.index === 0 ? rows.length - 1 : this.index - 1;
 			return { type: "move" };
 		}
-		if (bound("tui.select.down") || matchesKey(data, TAB) || data === "j") {
+		if (bound("tui.select.down") || matchesKey(data, TAB) || (this.scope && data === "j")) {
 			if (!rows.length) return { type: "none" };
 			this.index = this.index === rows.length - 1 ? 0 : this.index + 1;
 			return { type: "move" };
@@ -137,15 +151,32 @@ export class ToolPanelView {
 			if (!row) return { type: "none" };
 			return row.kind === "capability" ? { type: "enter", row } : { type: "toggle", row };
 		}
-		if (bound("tui.select.cancel")) return this.scope ? { type: "back" } : { type: "close" };
+		if (bound("tui.select.cancel")) {
+			if (this.search.getValue()) {
+				this.search.setValue("");
+				this.index = 0;
+				return { type: "move" };
+			}
+			return this.scope ? { type: "back" } : { type: "close" };
+		}
 		const shortcut = this.scope?.shortcuts?.find(entry => matchesKey(data, entry.key));
 		if (shortcut) return { type: "action", verb: shortcut.verb };
+		// Search the top level, including hidden child names. Capability views
+		// keep their existing single-letter maintenance shortcuts.
+		if (!this.scope) {
+			const before = this.search.getValue();
+			this.search.handleInput(data);
+			if (this.search.getValue() !== before) {
+				this.index = 0;
+				return { type: "move" };
+			}
+		}
 		return { type: "none" };
 	}
 
 	/** Visible window, so a long list scrolls rather than overflowing the screen. */
 	private window(): { start: number; end: number } {
-		const total = this.model.rows.length;
+		const total = this.rows.length;
 		if (total <= this.maxVisible) return { start: 0, end: total };
 		const start = Math.max(0, Math.min(this.index - Math.floor(this.maxVisible / 2), total - this.maxVisible));
 		return { start, end: start + this.maxVisible };
@@ -163,11 +194,12 @@ export class ToolPanelView {
 			lines.push(this.theme.title("Tools"));
 			lines.push(this.theme.muted(panelSummary(this.model)));
 		}
+		if (!this.scope) lines.push(this.theme.muted(`Search: ${this.search.getValue() || "type to filter"}`));
 		lines.push("");
 
-		const rows = this.model.rows;
+		const rows = this.rows;
 		if (!rows.length) {
-			lines.push(this.theme.muted("  No tools available"));
+			lines.push(this.theme.muted(this.search.getValue() ? "  No matching tools · Esc clear search" : "  No tools available"));
 			return lines.map((line) => truncate(line, width));
 		}
 
@@ -175,6 +207,9 @@ export class ToolPanelView {
 		const { start, end } = this.window();
 		for (let i = start; i < end; i += 1) {
 			const row = rows[i];
+			if (!this.scope && (i === start || panelGroup(rows[i - 1]) !== panelGroup(row))) {
+				lines.push(this.theme.muted(panelGroup(row)));
+			}
 			const selected = i === this.index;
 			const marker = selected ? this.theme.cursor : " ";
 			const label = this.theme.label(rowLabel(row).padEnd(labelWidth), selected);
@@ -201,7 +236,8 @@ export class ToolPanelView {
 			"Space toggle",
 			...(this.scope?.shortcuts ?? []).map(entry => `${entry.key.toUpperCase()} ${entry.verb}`),
 			canEnter ? "Enter open" : undefined,
-			this.scope ? "Esc back" : "Esc close",
+			this.scope ? "Esc back" : this.search.getValue() ? "Esc clear search" : "Esc close",
+			!this.scope ? "Type to search" : undefined,
 		]
 			.filter(Boolean)
 			.join(" · ");

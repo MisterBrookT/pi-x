@@ -18,7 +18,7 @@ test('role shortcut is scoped and supports Kitty keyboard encoding', () => {
  const scoped = new ToolPanelView({ model, scope: { label: 'Subagent', summary: 'Delegation', shortcuts: [{ key: 'r', verb: 'roles' }] } });
  assert.deepEqual(scoped.handleInput('r'), { type: 'action', verb: 'roles' });
  assert.deepEqual(scoped.handleInput('\x1b[114u'), { type: 'action', verb: 'roles' });
- assert.deepEqual(new ToolPanelView({ model }).handleInput('r'), { type: 'none' });
+ assert.deepEqual(new ToolPanelView({ model }).handleInput('r'), { type: 'move' });
 });
 
 const UP = "\u001b[A";
@@ -43,7 +43,7 @@ const tool = (name, source = "builtin") => ({
 	sourceInfo: { source, path: `<builtin:${name}>` },
 });
 
-const ALL = ["read", "bash", "web_search", "subagent", "bg_wait", "computer", "act_ui", "observe_ui", "mcp"].map((name) => tool(name));
+const ALL = ["read", "bash", "web_search", "subagent", "subagent_supervisor", "computer", "act_ui", "observe_ui", "mcp"].map((name) => tool(name));
 
 const view = (active = ["read", "bash"]) => new ToolPanelView({ model: buildPanel(ALL, active) });
 
@@ -79,13 +79,13 @@ test("arrow keys move the cursor and wrap around", () => {
 	panel.handleInput(UP);
 	// Six rows: two basic tools, then the four capabilities.
 	assert.equal(panel.cursorIndex, 5, "wraps to the last row");
-	assert.match(screen(panel), /^> MCP/m);
+	assert.match(screen(panel), /^> Web/m);
 });
 
 test("space toggles the row under the cursor", () => {
 	const panel = view();
 	assert.deepEqual(panel.handleInput(SPACE), { type: "toggle", row: panel.selected });
-	assert.equal(panel.selected.name, "bash", "rows lead with the costliest tool");
+	assert.equal(panel.selected.name, "bash", "Core tools are alphabetical, independent of cost");
 });
 
 test("space on a capability row toggles the capability, not one tool", () => {
@@ -269,11 +269,65 @@ test("toggling refreshes the rendered state without moving the cursor", () => {
 	assert.match(screen(panel), /^ {2}read\s+on/m, "other rows keep their state");
 });
 
-test("an unrecognised key changes nothing", () => {
+test("typing filters names, backspace edits, and Escape clears before closing", () => {
 	const panel = view();
-	const before = screen(panel);
-	assert.deepEqual(panel.handleInput("q"), { type: "none" });
-	assert.equal(screen(panel), before);
+	for (const key of "READ") assert.equal(panel.handleInput(key).type, "move");
+	assert.equal(panel.selected.id, "read");
+	assert.match(screen(panel), /Search: READ/);
+	assert.doesNotMatch(screen(panel), /^ {2}bash/m);
+	assert.equal(panel.handleInput(SPACE).row.id, "read");
+	panel.handleInput("x");
+	assert.equal(panel.selected, undefined);
+	assert.match(screen(panel), /No matching tools/);
+	assert.equal(panel.handleInput(SPACE).type, "none");
+	assert.equal(panel.handleInput(ENTER).type, "none");
+	panel.handleInput("\x7f");
+	assert.equal(panel.selected.id, "read");
+	assert.equal(panel.handleInput(ESC).type, "move");
+	assert.match(screen(panel), /Search: type to filter/);
+	assert.equal(panel.handleInput(ESC).type, "close");
+});
+
+test("search matches child tools, group names and origin; j and k are text", () => {
+	for (const [query, expected] of [["ACT_UI", "computer"], ["workflow", "subagent"], ["builtin", "bash"]]) {
+		const panel = view();
+		for (const key of query) panel.handleInput(key);
+		assert.equal(panel.selected.id, expected);
+	}
+	const panel = view();
+	panel.handleInput("j");
+	panel.handleInput("k");
+	assert.match(screen(panel), /Search: jk/);
+	assert.equal(panel.selected, undefined);
+});
+
+test("search supports real Kitty printable keys and bracketed paste", () => {
+	setKittyProtocolActive(true);
+	try {
+		const panel = view();
+		for (const key of "read") panel.handleInput(`\x1b[${key.codePointAt(0)}u`);
+		assert.equal(panel.selected.id, "read");
+		panel.handleInput(KITTY.esc);
+		panel.handleInput("\x1b[200~act_ui\x1b[201~");
+		assert.equal(panel.selected.id, "computer");
+	} finally {
+		setKittyProtocolActive(false);
+	}
+});
+
+test("group headers are non-selectable and filtered selection survives model refresh", () => {
+	const panel = view();
+	const text = screen(panel);
+	assert.ok(text.indexOf("Core tools") < text.indexOf("Workflow"));
+	assert.ok(text.indexOf("Workflow") < text.indexOf("Capabilities"));
+	for (const key of "builtin") panel.handleInput(key);
+	panel.handleInput(DOWN);
+	assert.equal(panel.selected.id, "read");
+	panel.setModel(buildPanel([...ALL].reverse(), []));
+	assert.equal(panel.selected.id, "read");
+	assert.match(screen(panel), /Search: builtin/);
+	panel.handleInput(DOWN);
+	assert.equal(panel.selected.id, "subagent", "headers do not take a cursor slot");
 });
 
 test("a long list scrolls rather than overflowing the terminal", () => {

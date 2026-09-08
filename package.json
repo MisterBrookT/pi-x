@@ -1,6 +1,6 @@
 {
   "name": "@brooktang/pi-x",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, computer use, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -53,11 +53,13 @@
   "pi": {
     "extensions": [
       "./extensions/capabilities.ts",
+      "./extensions/background.ts",
       "./extensions/pix-anthropic/index.ts",
       "./extensions/computer.ts",
       "./extensions/context.ts",
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
+      "./extensions/goal.ts",
       "./extensions/prompt-compact.ts",
       "./extensions/question.ts",
       "./extensions/smart-editor.ts",

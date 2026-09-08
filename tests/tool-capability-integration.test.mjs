@@ -14,7 +14,7 @@ import registerTool from "../extensions/tool.ts";
 const ALL = [
 	"read", "bash", "todo", "question", "lsp_diagnostics", "lsp_fix",
 	"web_search", "source_check", "fetch_content", "get_search_content",
-	"subagent", "bg_wait", "subagent_supervisor",
+	"subagent", "subagent_supervisor",
 	"computer", "find_roots", "observe_ui", "act_ui", "launch_browser", "evaluate_browser",
 	"mcp", "mcpScript", "mcp__excalidraw",
 ];

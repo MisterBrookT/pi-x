@@ -210,7 +210,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 				let scopeId: string | undefined;
 				const advancedModel = (id: string): PanelModel => {
 					const row = panel().rows.find((entry) => entry.kind === "capability" && entry.id === id);
-					const tools = row?.kind === "capability" ? row.tools : [];
+					const tools = row?.kind === "capability" ? [...row.tools].sort((a, b) => a.name.localeCompare(b.name)) : [];
 					return {
 						rows: tools.map((entry) => ({
 							kind: "tool" as const,
@@ -226,7 +226,8 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 					};
 				};
 
-				let view = new ToolPanelView({ model: panel(), theme: themed, keybindings });
+				const topView = new ToolPanelView({ model: panel(), theme: themed, keybindings });
+				let view = topView;
 
 				const refresh = () => {
 					view.setModel(scopeId ? advancedModel(scopeId) : panel());
@@ -274,7 +275,8 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 						}
 						if (action.type === "back") {
 							scopeId = undefined;
-							view = new ToolPanelView({ model: panel(), theme: themed, keybindings });
+							view = topView;
+							view.setModel(panel());
 							tui.requestRender();
 							return;
 						}

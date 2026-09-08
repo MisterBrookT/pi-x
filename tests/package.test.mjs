@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir, access } from "node:fs/promises";
 const root=new URL("..",import.meta.url);
-test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts"]) assert.ok(e.includes(x));assert.equal(j["pi-subagents"],undefined);assert.equal(j.pi.skills,undefined);});
+test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts","./extensions/background.ts","./extensions/goal.ts"]) assert.ok(e.includes(x));assert.equal(j["pi-subagents"],undefined);assert.equal(j.pi.skills,undefined);});
 test("prompt snapshots and comparison exist",async()=>{for(const p of ["docs/prompts/pi-default.txt","docs/prompts/pix-default.txt","docs/system-prompts.html"])await access(new URL(p,root));});
 
 test("slash commands stay minimal", async () => {
@@ -55,7 +55,7 @@ test("slash commands stay minimal", async () => {
  * an implementation detail. Verbs live under a parent command instead of
  * claiming another top-level name.
  */
-test("Pix keeps seven top-level slash commands", async () => {
+test("Pix keeps eight top-level slash commands", async () => {
   // ai-completion is loaded by smart-editor rather than by the manifest, so the
   // whole extension tree is scanned instead of the declared entry points.
   const names = [];
@@ -69,6 +69,7 @@ test("Pix keeps seven top-level slash commands", async () => {
     "context",
     "fast",
     "footer",
+    "goal",
     "subagent-config",
     "todo",
     "tool",

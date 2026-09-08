@@ -7,6 +7,7 @@ import {
 	capabilityById,
 	formatTokens,
 	panelSummary,
+	panelGroup,
 } from "../src/tool-panel.ts";
 
 const tool = (name, description = "d") => ({
@@ -19,7 +20,7 @@ const tool = (name, description = "d") => ({
 const ALL = [
 	"read", "bash", "todo",
 	"web_search", "fetch_content",
-	"subagent", "bg_wait", "subagent_supervisor",
+	"subagent", "subagent_supervisor",
 	"computer", "act_ui", "observe_ui", "launch_browser",
 	"mcp", "mcpScript", "mcp__excalidraw",
 ].map((name) => tool(name));
@@ -33,13 +34,22 @@ test("basic tools are listed individually", () => {
 test("the four capabilities are single rows, labelled as the user named them", () => {
 	const model = buildPanel(ALL, []);
 	const labels = model.rows.filter((row) => row.kind === "capability").map((row) => row.label);
-	assert.deepEqual(labels, ["Web", "Subagent", "Computer", "MCP"]);
+	assert.deepEqual(labels, ["Subagent", "Computer", "MCP", "Web"]);
+});
+
+test("rows use fixed functional groups and alphabetical names, not schema cost", () => {
+	const tools = ["write", "read", "bash", "todo", "goal", "background", "question", "lsp_fix", "lsp_diagnostics", "web_search", "subagent", "custom_z", "custom_a"].map(name => tool(name));
+	const model = buildPanel(tools, []);
+	assert.deepEqual(model.rows.map(row => row.id), ["bash", "read", "write", "background", "goal", "question", "subagent", "todo", "lsp_diagnostics", "lsp_fix", "web", "custom_a", "custom_z"]);
+	assert.deepEqual([...new Set(model.rows.map(panelGroup))], ["Core tools", "Workflow", "Code checks", "Capabilities", "Other"]);
+	const changedCosts = tools.toReversed().map((entry, i) => ({ ...entry, description: "x".repeat(i * 1000) }));
+	assert.deepEqual(buildPanel(changedCosts, ["read"]).rows.map(row => row.id), model.rows.map(row => row.id));
 });
 
 test("the delegation capability is called Subagent, not Delegation", () => {
 	const subagent = CAPABILITIES.find((capability) => capability.id === "subagent");
 	assert.equal(subagent.label, "Subagent");
-	assert.deepEqual(subagent.primary.sort(), ["bg_wait", "subagent", "subagent_supervisor"]);
+	assert.deepEqual(subagent.primary.sort(), ["subagent", "subagent_supervisor"]);
 	assert.ok(!CAPABILITIES.some((capability) => /delegation/i.test(capability.label)));
 });
 
