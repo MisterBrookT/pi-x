@@ -67,6 +67,30 @@ test("observe returns a state carrying the backend stateId and outline", async (
 	assert.match(state.text, /button "Send"/);
 });
 
+test("returned states clone safely, directly and inside result containers", async () => {
+	const { runtime } = runtimeFor();
+	const outcome = await runScript(`
+		const observed = await cua.observe();
+		await observed.search({ text: "App" });
+		const acted = await observed.act({ action: "setText", ref: "@e1", text: "hi" });
+		const page = await cua.launchBrowser("https://example.com");
+		const navigated = await page.navigate("https://example.org");
+		const rebound = await cua.state(observed.id);
+		return { observed, states: [acted, page, navigated, rebound] };
+	`, runtime);
+	assert.equal(outcome.error, undefined);
+	const states = [outcome.value.observed, ...outcome.value.states];
+	for (const state of states) {
+		assert.equal(typeof state.search, "function", "methods remain usable in scripts");
+		assert.deepEqual(structuredClone(state), { id: state.id, text: state.text });
+	}
+	assert.deepEqual(structuredClone(outcome.value), {
+		observed: { id: states[0].id, text: states[0].text },
+		states: states.slice(1).map(({ id, text }) => ({ id, text })),
+	});
+	assert.doesNotThrow(() => structuredClone(outcome));
+});
+
 test("act threads the successor stateId so the script never re-observes", async () => {
 	const { runtime, calls } = runtimeFor();
 	const first = await runtime.cua.observe();

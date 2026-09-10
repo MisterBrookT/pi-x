@@ -353,6 +353,14 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				return extractEvaluationValue(textOf(result));
 			},
 		};
+		// Scripts may return states directly or nested in other results. Tool
+		// metadata is structured-cloned by the host: expose only the snapshot
+		// data to serialization while keeping methods callable in the script.
+		for (const key of Object.keys(state)) {
+			if (typeof state[key as keyof CuaState] === "function") {
+				Object.defineProperty(state, key, { enumerable: false });
+			}
+		}
 		return state;
 	};
 
