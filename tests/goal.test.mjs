@@ -10,6 +10,7 @@ import { hasPendingGoalWork } from "../src/goal-work.ts";
 function harness(sessionManager = SessionManager.inMemory()) {
 	const handlers = new Map();
 	const messages = [];
+	const reminders = [];
 	const notices = [];
 	const selections = [];
 	const inputs = [];
@@ -28,7 +29,10 @@ function harness(sessionManager = SessionManager.inMemory()) {
 		getActiveTools: () => enabled ? ["goal"] : [],
 		getAllTools: () => [tool],
 		appendEntry: (name, data) => sessionManager.appendCustomEntry(name, structuredClone(data)),
-		sendMessage: (message, options) => messages.push({ message, options }),
+		sendMessage: (message, options) => {
+			(options?.triggerTurn ? messages : reminders).push({ message, options });
+			sessionManager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
+		},
 	};
 	const ctx = {
 		mode: "tui", hasUI: true, sessionManager,
@@ -46,7 +50,7 @@ function harness(sessionManager = SessionManager.inMemory()) {
 		return parseGoal(entry?.data);
 	};
 	return {
-		pi, tool, ctx, messages, notices, selections, inputs, state,
+		pi, tool, ctx, messages, reminders, notices, selections, inputs, state,
 		command: (args) => command.handler(args, ctx),
 		emit: (name, event = {}) => handlers.get(name)?.(event, ctx),
 		finish: async (status, evidence = "Focused tests passed; acceptance criteria checked.", id = state()?.id, signal) => tool.execute("finish", validateToolArguments(tool, { type: "toolCall", id: "finish", name: "goal", arguments: { id, status, evidence } }), signal, undefined, ctx),
@@ -62,7 +66,8 @@ test("goal is opt-in and has no inactive context instructions", async () => {
 	await h.emit("session_start");
 	await h.emit("agent_settled");
 	assert.equal(h.messages.length, 0);
-	assert.deepEqual(await h.emit("context", { messages: [] }), { messages: [] });
+	assert.equal(await h.emit("context", { messages: [] }), undefined);
+	assert.equal(h.reminders.length, 0);
 	assert.equal(h.tool.promptSnippet, undefined);
 	assert.ok(JSON.stringify({ description: h.tool.description, parameters: h.tool.parameters }).length / 3.7 < 250);
 	await h.command("status");
@@ -75,10 +80,10 @@ test("starts a goal, injects its objective, and continues only at fully settled 
 	assert.equal(h.state().status, "active");
 	assert.equal(h.messages.length, 1);
 	assert.deepEqual(h.messages[0].options, { triggerTurn: true, deliverAs: "followUp" });
-	const context = await h.emit("context", { messages: [] });
-	assert.match(context.messages[0].content, /Fix parser/);
-	assert.match(context.messages[0].content, /Goal mode grants no extra permissions/);
-	assert.match(context.messages[0].content, /concrete evidence/);
+	assert.equal(await h.emit("context", { messages: [] }), undefined);
+	assert.match(h.reminders[0].message.content, /Fix parser/);
+	assert.match(h.reminders[0].message.content, /Goal mode grants no extra permissions/);
+	assert.match(h.reminders[0].message.content, /concrete evidence/);
 	await h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
 	assert.equal(h.messages.length, 1);
 	h.setIdle(false);
@@ -211,7 +216,8 @@ test("explicit pause, abort, and unrecovered model errors stop the loop without 
 		assert.equal(h.state().status, "paused");
 		assert.equal(backgroundState(h.pi).goal.active, false);
 		const result = await h.emit("context", { messages: [{ role: "custom", customType: "pix-goal-wake", content: "stale", details: { goalId: h.state().id } }] });
-		assert.deepEqual(result.messages, []);
+		assert.equal(result, undefined, "old wakes stay in history to preserve the prefix");
+		assert.match(h.reminders.at(-1).message.content, /paused.*earlier instructions.*no longer active/is);
 	}
 	const h = harness();
 	await h.command("Goal.");
@@ -263,7 +269,8 @@ test("startup and tree navigation pause active goals, while reload preserves eve
 	await reloaded.emit("session_start", { reason: "reload" });
 	assert.deepEqual(reloaded.state(), beforeReload);
 	assert.equal(reloaded.messages.length, 0, "reload itself launches no work");
-	assert.match((await reloaded.emit("context", { messages: [] })).messages.at(-1).content, /Original objective/);
+	assert.equal(reloaded.reminders.length, 0, "reload reuses the saved reminder");
+	assert.match(sm.buildSessionContext().messages.find(message => message.customType === "pix-goal-context").content, /Original objective/);
 
 	for (const status of ["paused", "completed", "blocked"]) {
 		const branch = SessionManager.inMemory();
@@ -290,10 +297,12 @@ test("startup and tree navigation pause active goals, while reload preserves eve
 test("context retains the objective after compaction, and non-reload shutdown never restarts work", async () => {
 	const h = harness();
 	await h.command("Objective survives compaction.");
-	const compacted = [{ role: "compactionSummary", summary: "No objective here", tokensBefore: 10000, timestamp: 0 }];
-	const context = await h.emit("context", { messages: compacted });
-	assert.ok(context.messages.at(-1).content.includes(h.state().objective));
-	assert.equal(compacted.length, 1, "input messages are not mutated");
+	const kept = h.ctx.sessionManager.appendMessage({ role: "user", content: "Keep this", timestamp: 0 });
+	h.ctx.sessionManager.appendCompaction("No objective here", kept, 10000);
+	await h.emit("session_compact");
+	assert.ok(h.reminders.at(-1).message.content.includes(h.state().objective));
+	assert.equal(h.reminders.length, 2, "a lost reminder is appended once after compaction");
+	assert.equal(await h.emit("context", { messages: [] }), undefined);
 	await h.emit("session_shutdown", { reason: "quit" });
 	await h.emit("agent_settled");
 	assert.equal(h.state().status, "paused");

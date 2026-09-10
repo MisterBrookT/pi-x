@@ -7,6 +7,7 @@ import { registerCapabilityAction } from "../src/capability-actions.ts";
 import { configureSubagentRoles } from "../src/subagent-roles.ts";
 import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
 import { webProfiles } from "../src/web-profiles.ts";
+import { configureWeb, readWebSettings } from "../src/web-settings.ts";
 
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 
@@ -63,6 +64,39 @@ export default function (pi: ExtensionAPI) {
   });
   const api = toolsOnly(pi);
   registerSubagents(api);
-  registerWebAccess(api);
+  // A reopened panel must not test a saved config against stale upstream caches.
+  let loadedWebSettings: string | undefined;
+  try { loadedWebSettings = JSON.stringify(readWebSettings()); } catch { /* Configuration UI reports malformed files. */ }
+  const webTools = new Map<string, RegisteredTool>();
+  registerWebAccess(new Proxy(api, {
+    get(target, property, receiver) {
+      if (property === "registerTool") return (tool: RegisteredTool) => {
+        webTools.set(tool.name, tool);
+        target.registerTool(tool);
+      };
+      return Reflect.get(target, property, receiver);
+    },
+  }));
+  registerCapabilityAction(pi, "web", {
+    verb: "configure",
+    description: "Choose search source, test access, and configure web settings",
+    shortcut: "c",
+    run: ctx => configureWeb(ctx, async (kind, context) => {
+      if (JSON.stringify(readWebSettings()) !== loadedWebSettings) {
+        throw new Error("Run /reload before testing changed web settings.");
+      }
+      const name = kind === "search" ? "web_search" : "fetch_content";
+      const tool = webTools.get(name);
+      if (!tool) throw new Error(`${name} is not registered`);
+      const args = kind === "search"
+        ? { query: "example domain", numResults: 1, workflow: "none" }
+        : { url: "https://example.com", mode: "readable" };
+      const result = await tool.execute(`web-test-${Date.now()}`, args, AbortSignal.timeout(30000), undefined, context);
+      const details = result.details as { error?: string; successful?: number } | undefined;
+      if (details?.error || details?.successful === 0) throw new Error(`${kind}: ${details.error ?? "No successful results"}`);
+      const text = result.content.filter(item => item.type === "text").map(item => item.text).join("\n");
+      return `${kind} test result:\n${text.slice(0, 1500)}`;
+    }),
+  });
   registerLsp(api);
 }

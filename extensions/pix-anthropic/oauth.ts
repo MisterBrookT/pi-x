@@ -284,18 +284,19 @@ export async function loginAnthropic(callbacks: OAuthLoginCallbacks): Promise<Pi
 }
 
 /**
- * `signal` must be honoured. Anthropic rotates the refresh token on every
- * successful refresh, and pi runs this inside `AuthStorage.modify`, which skips
- * its write when the caller's signal aborts while the request is in flight. An
- * unabortable request can therefore consume the stored token server-side while
- * the rotated replacement is discarded, leaving the credential permanently
- * un-refreshable ("invalid_grant: Refresh token not found or invalid").
- * Cancelling the request instead keeps the stored token valid.
+ * Honour the runtime's refresh deadline. The refresh-persistence shim detaches
+ * prompt cancellation BEFORE auth resolution, keeping both this exchange and
+ * Pi's locked commit alive. Aborting HTTP cannot undo a rotation already
+ * processed by Anthropic; forwarding prompt cancellation here is not safe.
+ * Like OMP's stored-credential refresh, prompt cancellation stops waiting, not
+ * the owned transaction. Network loss/timeouts/process death remain unavoidable
+ * failure windows; do not blindly retry a possibly consumed refresh token.
  */
 export async function refreshAnthropicToken(
 	credentials: PixAnthropicOAuthCredentials,
 	signal?: AbortSignal,
 ): Promise<PixAnthropicOAuthCredentials> {
+	signal?.throwIfAborted();
 	const responseBody = await postJson(TOKEN_URL, {
 		grant_type: "refresh_token",
 		client_id: CLIENT_ID,

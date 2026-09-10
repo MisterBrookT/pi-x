@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../src/background-state.ts";
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
+import { createStateReminder } from "../src/state-reminder.ts";
 
 const WAKE = "pix-goal-wake";
 const commands = ["status", "pause", "stop", "resume", "clear"];
@@ -14,14 +15,25 @@ export default function goalExtension(pi: ExtensionAPI) {
 	let closed = false;
 	let checking = false;
 	let modelFailed = false;
+	let hasGoalHistory = false;
+	const reminder = createStateReminder(pi, "pix-goal-context");
+	const publishState = (beforeNextResponse = false) => {
+		if (!hasGoalHistory) return;
+		const content = goal?.status === "active" ? goalInstructions(goal)
+			: goal ? `Goal ${goal.id} is ${goal.status}. ${goal.reason}\nEarlier instructions to continue this goal are no longer active. Only an explicit /goal resume or a new /goal can activate goal mode.`
+			: "Goal mode is off. Earlier goal instructions are no longer active. Only an explicit /goal can activate goal mode.";
+		reminder.publish(`[CURRENT GOAL STATE]\nThis update supersedes earlier goal-state reminders.\n${content}`, beforeNextResponse);
+	};
 
 	const show = (ctx: ExtensionContext, waiting = false) => {
 		if (ctx.hasUI) ctx.ui.setStatus("pix-goal", goal?.status === "active"
 			? `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}` : undefined);
 	};
-	const save = (next: GoalState | null, ctx: ExtensionContext) => {
+	const save = (next: GoalState | null, ctx: ExtensionContext, beforeNextResponse = false) => {
 		goal = next;
+		hasGoalHistory = true;
 		pi.appendEntry(GOAL_ENTRY, goal ? { ...goal } : null);
+		publishState(beforeNextResponse);
 		show(ctx);
 	};
 	const pause = (reason: string, ctx: ExtensionContext) => {
@@ -33,10 +45,16 @@ export default function goalExtension(pi: ExtensionAPI) {
 		closed = false;
 		modelFailed = false;
 		goal = null;
+		hasGoalHistory = false;
+		reminder.restore(ctx);
 		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type === "custom" && entry.customType === GOAL_ENTRY) goal = parseGoal(entry.data);
+			if (entry.type === "custom" && entry.customType === GOAL_ENTRY) {
+				goal = parseGoal(entry.data);
+				hasGoalHistory = true;
+			}
 		}
 		if (!reloading && goal?.status === "active") pause("Session restored; use /goal resume to continue.", ctx);
+		publishState();
 		show(ctx);
 	};
 	const wake = (content: string) => pi.sendMessage({
@@ -50,6 +68,10 @@ export default function goalExtension(pi: ExtensionAPI) {
 	});
 	pi.on("session_start", (event, ctx) => restore(ctx, event.reason === "reload"));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
+	pi.on("session_compact", (_event, ctx) => {
+		reminder.restore(ctx);
+		publishState(true);
+	});
 	pi.on("session_shutdown", (event, ctx) => {
 		closed = true;
 		// Reload replaces extensions, not the user's goal or continuation budget.
@@ -65,18 +87,12 @@ export default function goalExtension(pi: ExtensionAPI) {
 			pause("Interrupted; use /goal resume when ready.", ctx);
 		}
 	});
-	pi.on("context", (event, ctx) => {
+	pi.on("context", (_event, ctx) => {
 		if (goal?.status === "active" && !pi.getActiveTools().includes("goal")) {
 			pause("The goal tool is disabled. Enable it with /tool goal on before resuming.", ctx);
 		}
-		// This hook also runs for completion wakes, unlike before_agent_start.
-		// Reinject from persisted state, so compaction cannot lose the objective.
-		const messages = event.messages.filter((message) => message.role !== "custom" || message.customType !== WAKE
-			|| (goal?.status === "active" && (message.details as { goalId?: string } | undefined)?.goalId === goal.id));
-		if (closed || goal?.status !== "active") return { messages };
-		return { messages: [...messages, {
-			role: "custom" as const, customType: "pix-goal-context", content: goalInstructions(goal), display: false, timestamp: Date.now(),
-		}] };
+		// Never remove old wakes or move state reminders: later durable updates
+		// supersede them without invalidating the provider's conversation prefix.
 	});
 	pi.on("agent_settled", async (_event, ctx) => {
 		if (closed || checking || goal?.status !== "active" || !ctx.isIdle() || ctx.hasPendingMessages()) return;
@@ -191,7 +207,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 			if (params.status === "completed" && await hasPendingGoalWork(pi)) throw new Error("Background work is still running. Read its results before completing the goal.");
 			signal?.throwIfAborted();
 			if (closed || goal !== current) throw new Error("Goal changed while checking completion.");
-			save({ ...current, status: params.status, reason: params.evidence.trim() }, ctx);
+			save({ ...current, status: params.status, reason: params.evidence.trim() }, ctx, true);
 			return { content: [{ type: "text", text: `Goal ${params.status}: ${goal.reason}` }], details: { goal: { ...goal } } };
 		},
 	});

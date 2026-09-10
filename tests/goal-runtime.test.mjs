@@ -181,10 +181,10 @@ test("a supplementary user message preserves the active goal identity and contex
 test("real public compaction retains an active goal and reinjects it afterward", options, async (t) => {
 	let pending = true;
 	const pendingExtension = pi => pi.events.on("pix:background-state:query", query => { if (pending) query.running += 1; });
-	const h = await goalSession(t, ({ index, goal }) => {
+	const h = await goalSession(t, ({ index, goal, context }) => {
 		if (index === 0) return say(`Initial work remains pending. ${"context ".repeat(5000)}`);
-		if (index === 1) return say("Compaction summary deliberately omits the private objective.");
-		if (index === 2) return finish(goal, "completed", "Goal context was reinjected after real compaction.");
+		if (!context.tools?.length) return say("Compaction summary deliberately omits the private objective.");
+		if (goal.status === "active") return finish(goal, "completed", "Goal context was reinjected after real compaction.");
 		return say("Verified after compaction.");
 	}, { extensions: [pendingExtension], settings: { compaction: { enabled: false, keepRecentTokens: 1, reserveTokens: 1 }, retry: { enabled: false } } });
 	await h.session.prompt("/goal Preserve this exact objective across real compaction.");
@@ -199,11 +199,12 @@ test("real public compaction retains an active goal and reinjects it afterward",
 	assert.ok(h.sm.getBranch().some(entry => entry.type === "compaction"), "public compact() wrote a real checkpoint");
 
 	pending = false;
+	const nextRequest = h.requests.length;
 	await h.session.sendCustomMessage({ customType: "test-post-compact", content: "Continue after compaction.", display: false }, { triggerTurn: true });
 	await h.session.agent.waitForIdle();
 	assert.equal(h.state().status, "completed");
-	assert.ok(JSON.stringify(h.requests[2].messages).includes("Active user goal"));
-	assert.ok(JSON.stringify(h.requests[2].messages).includes("Preserve this exact objective across real compaction."));
+	assert.ok(JSON.stringify(h.requests[nextRequest].messages).includes("Active user goal"));
+	assert.ok(JSON.stringify(h.requests[nextRequest].messages).includes("Preserve this exact objective across real compaction."));
 });
 
 test("a new session defaults to goal off while another session has an active goal", options, async (t) => {

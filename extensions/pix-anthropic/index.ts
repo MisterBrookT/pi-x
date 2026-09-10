@@ -46,6 +46,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loginAnthropic, refreshAnthropicToken, type PixAnthropicOAuthCredentials } from "./oauth.ts";
 import { createPixAnthropicStream } from "./stream.ts";
+import { installRefreshPersistence } from "./refresh-persistence.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = "https://api.anthropic.com";
@@ -166,6 +167,7 @@ const MODELS: ModelSpec[] = [
 ];
 
 export default function (pi: ExtensionAPI) {
+	installRefreshPersistence();
 	const debug = process.env.PIX_ANTHROPIC_DEBUG === "1";
 	const extraBetas = (process.env.PIX_ANTHROPIC_EXTRA_BETAS ?? "")
 		.split(",")

@@ -85,12 +85,17 @@ Completing a goal still permits the agent's normal final summary.
 ## Persistence and prompt footprint
 
 - Goal state is stored in a session custom entry, separate from model context.
-- On each model request while active, a context hook supplies the objective and
-  concise continuation/completion rules. This also works after compaction and
-  for background-result wakes. It does not edit `AGENTS.md` or permanently
-  append to the system prompt.
-- With no active goal, there are no active-goal instructions. The small `goal`
-  tool schema is present when enabled, like other Pix tools.
+- Goal changes append a hidden, durable message with the current status,
+  objective, and continuation/completion rules. Unchanged state adds nothing.
+  Compaction restores a reminder only if the current one is no longer retained.
+  Background-result wakes see the same saved context; `AGENTS.md` and the system
+  prompt are not modified.
+- Earlier reminders stay in history. Pausing, completing, blocking, or clearing
+  a goal appends an explicit update superseding the old instructions rather
+  than removing them. This keeps the conversation prefix stable for cached
+  continuation. Cache-hit percentages still depend on the provider.
+- Sessions that have never enabled goal mode add no goal-state messages. The
+  small `goal` tool schema is present when enabled, like other Pix tools.
 - `/reload` preserves the current session's goal status, objective, and used
   continuation count. It does not create a new goal or launch an extra turn;
   subsequent turns still receive active goal context.
@@ -100,9 +105,10 @@ Completing a goal still permits the agent's normal final summary.
 
 ## Implementation and tests
 
-`extensions/goal.ts` owns the command, reporting tool, context injection,
+`extensions/goal.ts` owns the command, reporting tool, state reminders,
 persistence, and `agent_settled` continuation hook. `src/goal-state.ts` validates
-saved state; `src/goal-work.ts` checks pending work. Background commands and
+saved state; `src/goal-work.ts` checks pending work. `src/state-reminder.ts`
+handles append-only, deduplicated messages shared with Todo. Background commands and
 goals coordinate via Pi's session-scoped event bus in `src/background-state.ts`.
 No new dependency or secondary model is used.
 
@@ -110,3 +116,7 @@ No new dependency or secondary model is used.
 shapes. `tests/goal-runtime.test.mjs` uses real Pi sessions with scripted provider
 responses and real shell processes to exercise continuation, background waits,
 pause/clear, interruption, failures, and compaction checkpoint restoration.
+`tests/state-reminder-runtime.test.mjs` checks stable request prefixes through
+state changes, tool-result ordering, reload deduplication, and manual/automatic
+compaction recovery. These deterministic checks do not depend on a provider's
+cache-hit percentage.

@@ -269,7 +269,7 @@ test("subscription transport does not retry unrelated server errors", async () =
   setFastModeEnabled(false);
 });
 
-test("OAuth refresh is cancellable so a rotated token is never lost", async () => {
+test("OAuth exchange honours the runtime-owned refresh deadline", async () => {
   let registration;
   registerPixAnthropic({
     registerProvider(id, config) {
@@ -277,10 +277,9 @@ test("OAuth refresh is cancellable so a rotated token is never lost", async () =
     },
   });
 
-  // Anthropic rotates the refresh token on every successful refresh, and Pi
-  // skips its auth.json write when the caller aborts mid-refresh. An
-  // unabortable request would consume the stored token server-side while the
-  // replacement is discarded, bricking the credential with `invalid_grant`.
+  // The runtime shim separates prompt cancellation from this deadline.
+  // A stalled token endpoint must still be bounded; this unit test alone does
+  // not establish persistence safety (covered through the real ModelRuntime).
   const originalFetch = globalThis.fetch;
   let requestSignal;
   globalThis.fetch = (_url, init) => {
@@ -296,11 +295,11 @@ test("OAuth refresh is cancellable so a rotated token is never lost", async () =
       { type: "oauth", access: "access", refresh: "refresh", expires: 0 },
       controller.signal,
     );
-    controller.abort(new Error("cancelled by keystroke"));
-    await assert.rejects(pending, /cancelled by keystroke/);
+    controller.abort(new Error("refresh deadline exceeded"));
+    await assert.rejects(pending, /refresh deadline exceeded/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 
-  assert.ok(requestSignal?.aborted, "refresh request must observe the caller's abort");
+  assert.ok(requestSignal?.aborted, "refresh request must observe its operation deadline");
 });

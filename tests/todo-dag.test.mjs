@@ -23,6 +23,10 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
     registerCommand(name, value) { assert.equal(name, "todo"); command = value; },
     getActiveTools() { return [...activeTools]; },
     setActiveTools(value) { activeTools = value; },
+    sendMessage(message, options) {
+      assert.ok(options.deliverAs === "steer" || options.triggerTurn === false);
+      sessionManager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
+    },
   };
   registerTodo(pi);
   const ctx = {
@@ -43,7 +47,8 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   };
   return {
     call, tool, theme, sessionManager, notifications,
-    event: (name, payload = {}) => handlers.get(name)(payload, ctx),
+    event: (name, payload = {}) => handlers.get(name)?.(payload, ctx),
+    reminders: () => sessionManager.getBranch().filter(entry => entry.type === "custom_message" && entry.customType === "pix-todo-state"),
     command: (args) => command.handler(args, ctx),
     activeTools: () => activeTools,
     widget: () => widget,
@@ -61,7 +66,7 @@ const rejectsWithoutChange = async (call, input, message) => {
   assert.equal(after.nextId, before.nextId);
 };
 
-test("injects the current todo state into model context only when tracking has items", async () => {
+test("persists state changes without adding ephemeral reminders to each model request", async () => {
   const h = createTodoHarness();
   const original = [{ role: "user", content: "continue", timestamp: 0 }];
 
@@ -70,18 +75,13 @@ test("injects the current todo state into model context only when tracking has i
   await h.call({ action: "add", text: "Inspect backend" });
   await h.call({ action: "add", text: "Run checks", dependsOn: ["1"] });
   await h.call({ action: "set", id: "1", status: "done" });
-  const injected = h.event("context", { messages: original });
-
-  assert.equal(injected.messages.length, 2);
-  assert.equal(injected.messages[0], original[0]);
-  assert.deepEqual(injected.messages[1], {
-    role: "custom",
-    customType: "pix-todo-state",
-    content: "[CURRENT TODO STATE]\n[done] #1 Inspect backend\n[pending] #2 Run checks (depends on #1)",
-    display: false,
-    timestamp: injected.messages[1].timestamp,
-  });
-  assert.equal(typeof injected.messages[1].timestamp, "number");
+  assert.equal(h.event("context", { messages: original }), undefined);
+  const saved = h.reminders();
+  assert.equal(saved.length, 3);
+  assert.equal(saved.at(-1).content, "[CURRENT TODO STATE]\nThis update supersedes earlier todo-state reminders.\n[done] #1 Inspect backend\n[pending] #2 Run checks (depends on #1)");
+  assert.equal(saved.at(-1).display, false);
+  await h.call({ action: "list" });
+  assert.equal(h.reminders().length, 3, "unchanged state adds nothing");
   assert.deepEqual(original, [{ role: "user", content: "continue", timestamp: 0 }]);
 
   await h.command("off");
@@ -107,6 +107,64 @@ test("todo dependencies block work until every prerequisite is done", async () =
   assert.equal(ready.isError, undefined);
   assert.equal(text(ready), "#3 → active");
 });
+
+test("batch set finishes prerequisites and starts a dependent regardless of update order", async () => {
+  const h = createTodoHarness();
+  const original = await h.call({ action: "replace", items: [
+    { text: "Backend" }, { text: "Frontend" }, { text: "Integrate", dependsOn: ["1", "2"] },
+  ] });
+  const result = await h.call({ action: "set", updates: [
+    { id: 3, status: "active" }, { id: "2", status: "done" }, { id: 1, status: "done" },
+  ] });
+  assert.equal(text(result), "#3 → active\n#2 → done\n#1 → done");
+  assert.deepEqual(result.details.items.map(item => item.status), ["done", "done", "active"]);
+  assert.equal(result.details.nextId, 4);
+  assert.deepEqual(original.details.items.map(item => item.status), ["pending", "pending", "pending"]);
+  assert.deepEqual(h.render(), ["› #3 Integrate", "  └─ after #1 ✓, #2 ✓"]);
+  assert.match(h.reminders().at(-1).content, /\[active\] #3/);
+  const restored = createTodoHarness(h.sessionManager);
+  restored.event("session_start");
+  assert.deepEqual((await restored.call({ action: "list" })).details.items, result.details.items);
+});
+
+test("batch set can reopen a dependency chain atomically and complete nested items", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [
+    { text: "Parent" }, { text: "Child", parentId: "1" },
+    { text: "Review", dependsOn: ["1.1"] }, { text: "Ship", dependsOn: ["2"] },
+  ] });
+  await h.call({ action: "set", updates: [
+    { id: "3", status: "done" }, { id: "2", status: "done" },
+    { id: "1.1", status: "done" }, { id: "1", status: "done" },
+  ] });
+  assert.equal(h.widget(), undefined);
+  await rejectsWithoutChange(h.call, { action: "set", updates: [
+    { id: "1.1", status: "pending" }, { id: "2", status: "pending" },
+  ] }, /Reset dependents #3 to pending first/);
+  const result = await h.call({ action: "set", updates: [
+    { id: "1.1", status: "active" }, { id: "2", status: "pending" }, { id: "3", status: "pending" },
+  ] });
+  assert.deepEqual(result.details.items.map(item => item.status), ["done", "active", "pending", "pending"]);
+});
+
+for (const [name, params, message] of [
+  ["unknown ID", { updates: [{ id: "1", status: "done" }, { id: "99", status: "done" }] }, /valid id and status/],
+  ["duplicate ID", { updates: [{ id: 1, status: "done" }, { id: "1", status: "active" }] }, /duplicate.*#1/i],
+  ["blocked dependent", { updates: [{ id: "1", status: "active" }, { id: "2", status: "done" }] }, /#2 is blocked by #1/],
+  ["mixed single and batch", { id: "1", status: "done", updates: [{ id: "2", status: "pending" }] }, /either.*updates/i],
+  ["mixed status only", { status: "done", updates: [{ id: "1", status: "done" }] }, /either.*updates/i],
+  ["empty batch", { updates: [] }, /Validation failed/],
+  ["missing status", { updates: [{ id: "1" }] }, /Validation failed/],
+  ["invalid status", { updates: [{ id: "1", status: "finished" }] }, /Validation failed/],
+]) {
+  test(`invalid batch (${name}) leaves the complete plan and widget unchanged`, async () => {
+    const h = createTodoHarness();
+    await h.call({ action: "replace", items: [{ text: "First" }, { text: "Second", dependsOn: ["1"] }] });
+    const widget = h.render();
+    await rejectsWithoutChange(h.call, { action: "set", ...params }, message);
+    assert.deepEqual(h.render(), widget);
+  });
+}
 
 test("todo rejects unknown and self dependencies without consuming an ID", async () => {
   const { call } = createTodoHarness();

@@ -2,6 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { createStateReminder } from "../src/state-reminder.ts";
 
 type Status = "pending" | "active" | "done";
 interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[] }
@@ -52,28 +53,49 @@ const Params = Type.Object({
   id: Type.Optional(Type.String({ description: "Todo ID, such as 1 or 1.2" })),
   ...itemFields,
   status: Type.Optional(StringEnum(["pending", "active", "done"] as const)),
+  updates: Type.Optional(Type.Array(Type.Object({
+    id: Type.String({ description: "Todo ID, such as 1 or 1.2" }),
+    status: StringEnum(["pending", "active", "done"] as const),
+  }), {
+    minItems: 1,
+    description: "For set: batch status changes instead of id/status. Unique IDs; all changes apply atomically. Dependencies are checked against the final state, so array order does not matter.",
+  })),
 });
 
 export default function (pi: ExtensionAPI) {
   let state: State = { items: [], nextId: 1 };
   let enabled = true;
+  let hasTodoHistory = false;
+  const reminder = createStateReminder(pi, "pix-todo-state");
+  const publishState = (beforeNextResponse = false) => {
+    if (!hasTodoHistory) return;
+    const content = !enabled ? "Todo tracking is off. Earlier todo-state reminders are no longer current."
+      : state.items.length ? state.items.map(item => formatItem(item, state.items)).join("\n") : "No todos. The previous plan has been cleared.";
+    reminder.publish(`[CURRENT TODO STATE]\nThis update supersedes earlier todo-state reminders.\n${content}`, beforeNextResponse);
+  };
   const restore = (ctx: ExtensionContext) => {
     state = { items: [], nextId: 1 };
+    hasTodoHistory = false;
+    reminder.restore(ctx);
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type !== "message" || entry.message.role !== "toolResult" || entry.message.toolName !== "todo") continue;
       const d = entry.message.details as Details | undefined;
       // A thrown tool error is recorded with empty details, so `d` can be a
       // truthy object with no items. Restore only from a complete snapshot.
-      if (d && Array.isArray(d.items)) state = {
-        items: d.items.map(item => ({
-          ...item,
-          id: String(item.id),
-          ...(item.parentId === undefined ? {} : { parentId: String(item.parentId) }),
-          ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn.map(String) }),
-        })),
-        nextId: d.nextId,
-      };
+      if (d && Array.isArray(d.items)) {
+        hasTodoHistory = true;
+        state = {
+          items: d.items.map(item => ({
+            ...item,
+            id: String(item.id),
+            ...(item.parentId === undefined ? {} : { parentId: String(item.parentId) }),
+            ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn.map(String) }),
+          })),
+          nextId: d.nextId,
+        };
+      }
     }
+    publishState();
     renderWidget(ctx);
   };
   const renderWidget = (ctx: ExtensionContext) => {
@@ -110,25 +132,17 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
   pi.on("session_tree", (_e, ctx) => restore(ctx));
-  pi.on("context", (event) => {
-    if (!enabled || !state.items.length) return;
-    return {
-      messages: [...event.messages, {
-        role: "custom",
-        customType: "pix-todo-state",
-        content: `[CURRENT TODO STATE]\n${state.items.map(item => formatItem(item, state.items)).join("\n")}`,
-        display: false,
-        timestamp: Date.now(),
-      }],
-    };
+  pi.on("session_compact", (_event, ctx) => {
+    reminder.restore(ctx);
+    publishState(true);
   });
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(id,status) updates progress, list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Independent ready items may be delegated in parallel. Reset active/done dependents to pending before reopening a prerequisite.",
+    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Independent ready items may be delegated in parallel. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
-      "Use todo for non-trivial multi-step work; keep statuses current.",
+      "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates).",
     ],
     parameters: Params,
     prepareArguments(args) {
@@ -143,10 +157,11 @@ export default function (pi: ExtensionAPI) {
           ...(Array.isArray(input.dependsOn) ? { dependsOn: input.dependsOn.map(id => typeof id === "number" ? String(id) : id) } : {}),
         };
       };
-      const input = args as { items?: unknown };
+      const input = args as { items?: unknown; updates?: unknown };
       return {
         ...normalize(args) as object,
         ...(Array.isArray(input.items) ? { items: input.items.map(normalize) } : {}),
+        ...(Array.isArray(input.updates) ? { updates: input.updates.map(normalize) } : {}),
       };
     },
     async execute(_id, p, _signal, _update, ctx) {
@@ -183,29 +198,54 @@ export default function (pi: ExtensionAPI) {
         }
         if (hasTodoDependencyCycle(next.items)) return result(p.action, "dependency cycle detected", "dependency cycle detected");
         state = next;
+        hasTodoHistory = true;
+        publishState(true);
         renderWidget(ctx);
         return result(p.action, p.action === "replace"
           ? state.items.map(item => formatItem(item, state.items)).join("\n")
           : `Added #${state.items[state.items.length - 1].id}`);
       }
       if (p.action === "set") {
-        const item = state.items.find(i => i.id === p.id);
-        if (!item || !p.status) return result("set", "valid id and status are required", "valid id and status are required");
-        const unmet = unmetTodoDependencies(item, state.items);
-        if (p.status !== "pending" && unmet.length) {
-          const message = `#${item.id} is blocked by ${unmet.map(id => `#${id}`).join(", ")}`;
-          return result("set", message, message);
+        if (p.updates !== undefined && (p.id !== undefined || p.status !== undefined)) {
+          throw new Error("Use either updates or id/status, not both");
         }
-        if (item.status === "done" && p.status !== "done") {
-          const dependents = state.items.filter(candidate => candidate.status !== "pending" && candidate.dependsOn?.includes(item.id));
-          if (dependents.length) {
-            const message = `Reset dependents ${dependents.map(candidate => `#${candidate.id}`).join(", ")} to pending first before reopening #${item.id}`;
-            return result("set", message, message);
+        const updates = p.updates ?? [{ id: p.id, status: p.status }];
+        if (!updates.length) throw new Error("updates must not be empty");
+        const next = structuredClone(state);
+        const seen = new Set<string>();
+        for (const update of updates) {
+          const item = next.items.find(i => i.id === update.id);
+          if (!item || !update.status) throw new Error("valid id and status are required");
+          if (seen.has(item.id)) throw new Error(`Duplicate update for #${item.id}`);
+          seen.add(item.id);
+          item.status = update.status;
+        }
+        // Validate the final snapshot, not array order; a batch may finish
+        // prerequisites and start dependents, or reset an entire chain together.
+        for (const [index, item] of next.items.entries()) {
+          if (state.items[index].status === "done" && item.status !== "done") {
+            const dependents = next.items.filter(candidate => candidate.status !== "pending" && candidate.dependsOn?.includes(item.id));
+            if (dependents.length) {
+              throw new Error(`Reset dependents ${dependents.map(candidate => `#${candidate.id}`).join(", ")} to pending first before reopening #${item.id}`);
+            }
           }
         }
-        item.status = p.status; renderWidget(ctx); return result("set", `#${item.id} → ${item.status}`);
+        for (const item of next.items) {
+          const unmet = unmetTodoDependencies(item, next.items);
+          if (item.status !== "pending" && unmet.length) {
+            throw new Error(`#${item.id} is blocked by ${unmet.map(id => `#${id}`).join(", ")}`);
+          }
+        }
+        state = next;
+        publishState(true);
+        renderWidget(ctx);
+        return result("set", updates.map(update => `#${update.id} → ${update.status}`).join("\n"));
       }
-      state={items:[],nextId:1}; renderWidget(ctx); return result("clear", "Todos cleared");
+      state = { items: [], nextId: 1 };
+      hasTodoHistory = true;
+      publishState(true);
+      renderWidget(ctx);
+      return result("clear", "Todos cleared");
     },
     renderCall(args, theme) { return new Text(theme.fg("toolTitle", theme.bold(`todo ${args.action}`)),0,0); },
     renderResult(r, _o, theme, context) { const t=r.content[0]; return new Text(theme.fg(context.isError?"error":"muted",t?.type==="text"?t.text:""),0,0); }
@@ -226,6 +266,7 @@ export default function (pi: ExtensionAPI) {
         const active = new Set(pi.getActiveTools());
         if (enabled) active.add("todo"); else active.delete("todo");
         pi.setActiveTools([...active]);
+        publishState();
         renderWidget(ctx);
         ctx.ui.notify(`todo ${action}`, "info");
         return;

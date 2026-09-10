@@ -49,6 +49,19 @@ test('Pi separately loads the role action and /tool, including after reload', as
     const computerActions = tool.getArgumentCompletions('computer ');
     assert.ok(computerActions.some(item => item.value === 'computer check'));
     assert.ok(computerActions.some(item => item.value === 'computer stop'));
+    loaded.runtime.getAllTools = () => [{ name: 'web_search', description: 'Search', parameters: {} }];
+    assert.ok(tool.getArgumentCompletions('web ').some(item => item.value === 'web configure'));
+    await tool.handler('web configure', ctx);
+    assert.match(notices.at(-1).text, /Web configuration requires an interactive UI/);
+    const picks = ['Search source', 'duckduckgo', undefined, 'Test connection', 'Search:'];
+    const webCtx = { ...ctx, hasUI: true, ui: { ...ctx.ui, select: async (_title, options) => {
+      const prefix = picks.shift();
+      return prefix === undefined ? undefined : options.find(option => option.startsWith(prefix));
+    } } };
+    await tool.handler('web configure', webCtx);
+    await tool.handler('web configure', webCtx);
+    assert.match(notices.at(-1).text, /reload before testing changed web settings/);
+    rmSync(join(agentDir, 'web-search.json'), { force: true });
     const beforeReload = [];
     bus.emit('pix:capability-actions:query', { capabilityId: 'subagent', actions: beforeReload });
     assert.equal(beforeReload.length, 1, 'each loaded provider contributes once');
