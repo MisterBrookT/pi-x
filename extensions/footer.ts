@@ -86,7 +86,8 @@ export default function (pi: ExtensionAPI) {
         const room = width - visibleWidth(left) - visibleWidth(right);
         const stats = room >= 2 ? left + " ".repeat(room) + right : truncateToWidth(`${left}  ${right}`, width);
         const branch = footerData.getGitBranch();
-        const goal = footerData.getExtensionStatuses().get("pix-goal");
+        const statuses = footerData.getExtensionStatuses();
+        const goal = [statuses.get("pix-background"), statuses.get("pix-goal")].filter(Boolean).join(" · ") || undefined;
         const pathWidth = goal ? Math.max(0, width - visibleWidth(goal) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !goal ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(goal)) + goal : truncateToWidth(goal, width);

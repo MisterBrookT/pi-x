@@ -15,6 +15,7 @@ const text = (result) => result.content.map((part) => part.text ?? "").join("\n"
 
 function harness(t, mode = "tui") {
 	let tool;
+	const statuses = new Map();
 	const handlers = new Map();
 	const messages = [];
 	const events = new EventEmitter();
@@ -24,10 +25,13 @@ function harness(t, mode = "tui") {
 		on(name, handler) { handlers.set(name, handler); },
 		sendMessage(message, options) { messages.push({ message, options }); events.emit("wake", message); },
 	});
-	const ctx = { cwd: process.cwd(), mode, hasUI: false, sessionManager: SessionManager.inMemory(), thinkingLevel: "off" };
+	const ctx = {
+		cwd: process.cwd(), mode, hasUI: true, sessionManager: SessionManager.inMemory(), thinkingLevel: "off",
+		ui: { notify() {}, setStatus: (key, value) => { if (value === undefined) statuses.delete(key); else statuses.set(key, value); } },
+	};
 	const call = (args, signal) => tool.execute("test", validateToolArguments(tool, { type: "toolCall", id: "test", name: tool.name, arguments: args }), signal, undefined, ctx);
 	t.after(() => handlers.get("session_shutdown")());
-	return { tool, call, ctx, messages, handlers, wake: () => once(events, "wake", { signal: AbortSignal.timeout(10000) }).then(([message]) => message) };
+	return { tool, call, ctx, messages, handlers, status: () => statuses.get("pix-background"), wake: () => once(events, "wake", { signal: AbortSignal.timeout(10000) }).then(([message]) => message) };
 }
 
 // The child blocks on an HTTP response controlled by the test, not a timing guess.
@@ -165,4 +169,25 @@ test("validates inputs, refuses ephemeral modes, and limits concurrent jobs", as
 	for (let i = 0; i < 4; i++) await h.call({ action: "start", command: node("setInterval(() => {}, 1000)") });
 	await assert.rejects(h.call({ action: "start", command: "echo no" }), /At most 4/);
 	assert.equal(text(await h.call({ action: "status" })).match(/running/g).length, 4);
+});
+
+test("the footer status counts running jobs and clears when they finish", { timeout: 15000 }, async (t) => {
+	const h = harness(t);
+	assert.equal(h.status(), undefined);
+	const g = await gate(t);
+	const first = g.request();
+	await h.call({ action: "start", command: g.command });
+	await first;
+	assert.equal(h.status(), "1 job running");
+	const second = g.request();
+	await h.call({ action: "start", command: g.command });
+	const response = await second;
+	assert.equal(h.status(), "2 jobs running");
+	const wake = h.wake();
+	response.end("done\n");
+	await wake;
+	assert.equal(h.status(), "1 job running");
+	const stopped = await h.call({ action: "stop", id: "1" });
+	assert.equal(stopped.details.state, "stopped");
+	assert.equal(h.status(), undefined);
 });

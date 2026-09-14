@@ -24,6 +24,14 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	let nextId = 0;
 	let closed = false;
 
+	const runningCount = () => [...jobs.values()].filter((job) => job.state === "running").length;
+	/** Footer indicator: background work is otherwise invisible while the agent does something else. */
+	const showStatus = (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
+		if (!ctx.hasUI) return;
+		const running = runningCount();
+		ctx.ui.setStatus("pix-background", running ? `${running} job${running === 1 ? "" : "s"} running` : undefined);
+	};
+
 	pi.events.on(BACKGROUND_STATE_QUERY, (data: unknown) => {
 		if (data && typeof data === "object" && "running" in data) {
 			(data as BackgroundState).running += [...jobs.values()].filter((job) => job.state === "running").length;
@@ -40,20 +48,21 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		job.state = "stopped";
 		job.controller.abort();
 	};
-	const cleanup = async () => {
+	const cleanup = async (_event: unknown, ctx?: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
 		closed = true;
 		for (const job of jobs.values()) stop(job);
 		await Promise.all([...jobs.values()].map((job) => job.done));
 		jobs.clear();
+		if (ctx) showStatus(ctx);
 	};
 
 	pi.on("session_shutdown", cleanup);
 	// Branch navigation must not inject results from the abandoned conversation.
-	pi.on("session_tree", async () => {
-		await cleanup();
+	pi.on("session_tree", async (event, ctx) => {
+		await cleanup(event, ctx);
 		closed = false;
 	});
-	pi.on("session_start", () => { closed = false; });
+	pi.on("session_start", (_event, ctx) => { closed = false; showStatus(ctx); });
 
 	pi.registerTool({
 		name: "background",
@@ -80,6 +89,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				if (!job) throw new Error("stop requires a known job id.");
 				stop(job);
 				await job.done;
+				showStatus(ctx);
 				return result(describe(job), job);
 			}
 			if (ctx.mode !== "tui" && ctx.mode !== "rpc") {
@@ -101,6 +111,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				controller: new AbortController(), done: Promise.resolve(),
 			};
 			jobs.set(job.id, job);
+			showStatus(ctx);
 			const bash = createBashToolDefinition(ctx.cwd);
 			const update = (value: { content: Array<{ type: string; text?: string }>; details?: { fullOutputPath?: string } }) => {
 				job.output = value.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
@@ -114,6 +125,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					job.output = error instanceof Error ? error.message : String(error);
 					if (job.state === "running") job.state = "failed";
 				}
+				showStatus(ctx);
 				if (closed || job.state === "stopped") return;
 				const tail = truncateTail(job.output, { maxLines: 40, maxBytes: 4096 });
 				const goal = backgroundState(pi).goal;
