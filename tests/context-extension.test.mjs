@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import registerContext, { report } from "../extensions/context.ts";
+import registerContext, { report, setBrowserOpener } from "../extensions/context.ts";
+
+// The export opens the page in a desktop browser, which a test run must not do.
+const opened = [];
+setBrowserOpener(async (path) => {
+	opened.push(path);
+	return true;
+});
 
 const harness = ({ sessionManager = SessionManager.inMemory(), model = { context_window: 200_000 }, systemPrompt = "sys", tools = [], cwd = process.cwd() } = {}) => {
 	const commands = new Map();
@@ -34,6 +41,7 @@ const harness = ({ sessionManager = SessionManager.inMemory(), model = { context
 		run: (args = "") => commands.get("context").handler(args, ctx),
 		shortcut: (key) => shortcuts.get(key).handler(ctx),
 		hasArgumentCompletions: () => commands.get("context").getArgumentCompletions !== undefined,
+		completions: (prefix) => commands.get("context").getArgumentCompletions(prefix, ctx),
 		commandNames: () => [...commands.keys()],
 		shortcutNames: () => [...shortcuts.keys()],
 	};
@@ -42,14 +50,17 @@ const harness = ({ sessionManager = SessionManager.inMemory(), model = { context
 const push = (manager, role, chars, toolName) =>
 	manager.appendMessage({ role, toolName, content: [{ type: "text", text: "x".repeat(chars) }], timestamp: 0 });
 
-test("/context registers one command and one shortcut", () => {
+test("/context registers one command and its export shortcuts", () => {
 	const h = harness();
 	assert.deepEqual(h.commandNames(), ["context"]);
-	assert.deepEqual(h.shortcutNames(), ["alt+e"]);
+	assert.deepEqual(h.shortcutNames(), ["alt+e", "alt+h"]);
 });
 
-test("/context takes no arguments, so it offers no completions", () => {
-	assert.equal(harness().hasArgumentCompletions(), false);
+test("/context completes its only subcommand", () => {
+	const h = harness();
+	assert.equal(h.hasArgumentCompletions(), true);
+	assert.deepEqual(h.completions("").map((option) => option.value), ["html"]);
+	assert.equal(h.completions("z"), null);
 });
 
 test("alt+e exports the effective prompt to the project path", async () => {
@@ -71,8 +82,8 @@ test("a failed export is reported instead of thrown", async () => {
 	assert.match(h.notices.at(-1).message, /Could not export the system prompt:/);
 });
 
-test("an argument is ignored rather than treated as a subcommand", async () => {
-	// /context is a single view; it must never fail on stray text.
+test("an unknown argument still shows the report", async () => {
+	// /context must never fail on stray text; only "html" changes behaviour.
 	const h = harness();
 	await h.run("prompt");
 	assert.equal(h.notices.at(-1).level, "info");
@@ -153,4 +164,38 @@ test("an empty session renders without error", async () => {
 	const h = harness();
 	await h.run();
 	assert.equal(h.notices.at(-1).level, "info");
+});
+
+test("/context html writes a self-contained page with prompt, schemas, and messages", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pix-context-html-"));
+	const manager = SessionManager.inMemory();
+	push(manager, "user", 30);
+	const tools = [{ name: "read", description: "Read file contents", parameters: { type: "object" }, sourceInfo: { source: "builtin" } }];
+	const h = harness({ cwd, sessionManager: manager, tools, systemPrompt: "effective <prompt> body" });
+	await h.run("html");
+	const path = join(cwd, ".pix", "context.html");
+	assert.match(h.notices.at(-1).message, new RegExp(`Context opened in your browser · ${path}$`));
+	assert.deepEqual(opened.at(-1), path, "the page is opened, not merely written");
+	const html = await readFile(path, "utf8");
+	assert.match(html, /^<!doctype html>/);
+	assert.doesNotMatch(html, /<(script|link)[^>]+src=|https?:\/\//, "the page must not load anything remote");
+	assert.match(html, /effective &lt;prompt&gt; body/, "the prompt is escaped, not injected");
+	assert.match(html, /Read file contents/);
+	assert.match(html, /Context snapshot/);
+	assert.match(html, /class="label">system</, "the system prompt and schemas are the first turn");
+});
+
+test("alt+h exports the same page as /context html", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pix-context-hotkey-"));
+	const h = harness({ cwd });
+	await h.shortcut("alt+h");
+	assert.equal(h.notices.at(-1).level, "info");
+	assert.ok((await readFile(join(cwd, ".pix", "context.html"), "utf8")).includes("Context snapshot"));
+});
+
+test("a failed html export is reported instead of thrown", async () => {
+	const h = harness({ cwd: "/proc/pix-nonexistent" });
+	await h.shortcut("alt+h");
+	assert.equal(h.notices.at(-1).level, "error");
+	assert.match(h.notices.at(-1).message, /Could not export the context:/);
 });

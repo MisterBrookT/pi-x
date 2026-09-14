@@ -88,9 +88,12 @@ test("computer-use actions live under /tool, and the prompt export under a short
   assert.match(computer, /verb: "stop"/);
   const toolPanel = await readFile(new URL("extensions/tool.ts", root), "utf8");
   assert.match(toolPanel, /capabilityActions/);
+  // Both exports stay inside /context: they are inspection views of the same
+  // window, not commands of their own.
   const context = await readFile(new URL("extensions/context.ts", root), "utf8");
   assert.match(context, /registerShortcut\("alt\+e"/);
-  assert.doesNotMatch(context, /getArgumentCompletions/);
+  assert.match(context, /registerShortcut\("alt\+h"/);
+  assert.match(context, /value: "html"/);
 });
 
 test("the benchmark is a delivery check, not a slash command", async () => {

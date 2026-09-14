@@ -56,6 +56,7 @@ Use Pi normally—Pix's enabled tools are available to the agent as needed. A fe
 | `/goal Fix the failing tests` | Keep working toward an explicit goal, within a continuation limit |
 | `/complete on` | Enable cloud-model inline completion; off by default |
 | `/context` | See what is filling the context window |
+| `/context html` | Open prompt, tool schemas, and messages as one HTML page (`Alt+H`) |
 
 See the [full guide](docs/guide.md) for all commands, configuration, and limits.
 

@@ -21,7 +21,7 @@ Detailed usage, configuration, and design boundaries.
 - `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/fast` for persistent priority-processing control on supported providers
-- `/context` for the context-window breakdown, and `Alt+E` to export the exact active prompt
+- `/context` for the context-window breakdown, `Alt+E` to export the exact active prompt, and `/context html` (`Alt+H`) to open the whole context as a readable page in your browser
 - a configurable footer with cache efficiency and latest-response token speed
 
 For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model under the separate `pix-anthropic` provider. Pix leaves Pi's native `anthropic` provider unchanged; that provider uses Anthropic's third-party extra-usage billing.
@@ -50,12 +50,13 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/goal [objective]` | Open goal configuration, or start with an objective; also `status`, `pause` (`stop`), `resume`, and `clear` |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off]`, and capability actions such as `/tool computer check` |
-| `/context` | Show what is filling the context window |
+| `/context` | Show what is filling the context window; `/context html` writes and opens the full context as an HTML page |
 | `/subagent-config` | Alias for `/tool subagent roles`: configure role models, effort, and fallback |
 
 | Shortcut | Purpose |
 | --- | --- |
 | `Alt+E` | Export the effective Pix system prompt to `.pix/system-prompt.md` |
+| `Alt+H` | Write the full context — prompt, tool schemas, and messages — to `.pix/context.html` and open it in your browser |
 
 `/tool` is the single place tools are turned on and off. Everyday tools are
 listed individually; Web, Subagent, Computer, and MCP are one row each, because
