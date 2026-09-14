@@ -3,9 +3,13 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { createStateReminder } from "../src/state-reminder.ts";
+import { subagentRoles } from "../src/subagent-policy.ts";
 
 type Status = "pending" | "active" | "done";
-interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; runId?: string }
+/** Who is planned to do an item: the main assistant, or a subagent role. */
+const agents = ["self", ...subagentRoles] as const;
+type Agent = (typeof agents)[number];
+interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; agent?: Agent; runId?: string }
 interface State { items: Item[]; nextId: number }
 interface Details extends State { action: string; error?: string }
 
@@ -60,30 +64,41 @@ export const todoWaves = (items: Item[]): Item[][] => {
     return level;
   };
   const waves: Item[][] = [];
-  for (const item of items) (waves[visit(item, new Set())] ??= []).push(item);
+  for (const item of items) {
+    const level = visit(item, new Set());
+    waves[level] ??= [];
+    waves[level].push(item);
+  }
   return waves;
 };
 
 const wavesLine = (items: Item[]): string | undefined => {
   const waves = todoWaves(items);
   // A chain reads fine as a list; only a graph with width needs its layers spelled out.
-  if (waves.length < 2 || !waves.some(wave => wave.length > 1)) return undefined;
-  return `Waves: ${waves.map(wave => `[${wave.map(item => `#${item.id}`).join(", ")}]`).join(" → ")}`;
+  if (!hasParallelism(waves)) return undefined;
+  return `Waves: ${waves.map(wave => `[${wave.map(tag).join(", ")}]`).join(" → ")}`;
 };
+
+/** `#3`, or `#3 (scout)` when the plan assigned it away from the main assistant. */
+const tag = (item: Item): string => (item.agent && item.agent !== "self" ? `#${item.id} (${item.agent})` : `#${item.id}`);
 
 const readyLine = (items: Item[]): string | undefined => {
   if (items.some(item => item.status === "active")) return undefined;
   const ready = readyTodos(items);
   if (ready.length < 2) return undefined;
-  return `Ready now, no dependency between them: ${ready.map(item => `#${item.id}`).join(", ")}`;
+  return `Ready now, no dependency between them: ${ready.map(tag).join(", ")}`;
 };
+
+/** Does this plan have width anywhere, so that layers are worth showing? */
+const hasParallelism = (waves: Item[][]): boolean => waves.length >= 2 && waves.some(wave => wave.length > 1);
 
 const formatItem = (item: Item, items: Item[]): string => {
   const unmet = unmetTodoDependencies(item, items);
   const status = item.status === "pending" && unmet.length ? `blocked: ${unmet.map(id => `#${id}`).join(", ")}` : item.status;
   const dependencies = item.dependsOn?.length ? ` (depends on ${item.dependsOn.map(id => `#${id}`).join(", ")})` : "";
+  const agent = item.agent && item.agent !== "self" ? ` · ${item.agent}` : "";
   const run = item.runId && item.status === "active" ? ` (run ${item.runId})` : "";
-  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${dependencies}${run}`;
+  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${agent}${dependencies}${run}`;
 };
 
 const formatPlan = (items: Item[]): string =>
@@ -92,6 +107,7 @@ const formatPlan = (items: Item[]): string =>
     .join("\n");
 
 const itemFields = {
+  agent: Type.Optional(StringEnum(agents, { description: "Who is planned to do this item: self (the main assistant, default) or a subagent role. Items in one wave with the same role can be one subagent start." })),
   parentId: Type.Optional(Type.String({ description: "Top-level parent ID; parents must appear before children" })),
   dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Todo IDs that must be done before this item can start" })),
 };
@@ -146,6 +162,7 @@ export default function (pi: ExtensionAPI) {
             ...(item.parentId === undefined ? {} : { parentId: String(item.parentId) }),
             ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn.map(String) }),
             ...(item.runId === undefined ? {} : { runId: String(item.runId) }),
+            ...(item.agent === undefined ? {} : { agent: item.agent }),
           })),
           nextId: d.nextId,
         };
@@ -159,23 +176,34 @@ export default function (pi: ExtensionAPI) {
     const open = state.items.filter(i => i.status !== "done");
     if (!open.length) return ctx.ui.setWidget("pix-todo", undefined);
     ctx.ui.setWidget("pix-todo", (_tui, theme) => {
+      const openWaves = todoWaves(state.items).map(wave => wave.filter(item => item.status !== "done")).filter(wave => wave.length);
+      const markerFor = (item: Item, unmet: string[]) => theme.fg("accent", item.status === "active" ? "›" : unmet.length ? "◌" : "○");
+      // While the remaining work still has width, read it in layers: items in
+      // wave order with a hairline between waves, so what can run side by side
+      // is adjacent and what must wait sits below. A chain keeps the plain list.
+      const layered = openWaves.some(wave => wave.length > 1);
+      const rows: Item[] = layered ? openWaves.flat() : open;
+      const breakBefore = new Set<string>();
+      if (layered) for (const wave of openWaves.slice(1)) breakBefore.add(wave[0].id);
       return {
-        render: (width: number) => open.slice(0, 6).flatMap(item => {
+        render: (width: number) => rows.slice(0, 6).flatMap(item => {
+          const separator = breakBefore.has(item.id) ? [truncateToWidth(theme.fg("muted", "┈┈"), width, "")] : [];
           const unmet = unmetTodoDependencies(item, state.items);
-          const marker = theme.fg("accent", item.status === "active" ? "›" : unmet.length ? "◌" : "○");
+          const marker = markerFor(item, unmet);
           const indent = item.parentId ? "  " : "";
+          const agent = item.agent && item.agent !== "self" ? theme.fg("muted", ` · ${item.agent}`) : "";
           const run = item.runId && item.status === "active" ? theme.fg("muted", ` ⇄ ${item.runId}`) : "";
           const lines = fitTodoWidgetLines([
-            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}${run}`,
+            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}${agent}${run}`,
           ], width);
-          if (!item.dependsOn?.length || width <= 0) return lines;
+          if (!item.dependsOn?.length || width <= 0) return [...separator, ...lines];
           // Give prerequisites their own line: long titles must not hide blockers.
           const dependencies = item.dependsOn.map(id => `#${id}${unmet.includes(id) ? "" : " ✓"}`).join(", ");
           const label = unmet.length ? "waiting on" : item.status === "active" ? "after" : "ready · after";
           const padding = `${indent}  `;
           const detail = `└─ ${label} ${dependencies}`;
           const available = Math.max(1, width - padding.length);
-          return [...lines, ...wrapTextWithAnsi(theme.fg("muted", detail), available)
+          return [...separator, ...lines, ...wrapTextWithAnsi(theme.fg("muted", detail), available)
             .map(line => truncateToWidth(padding + line, width, ""))];
         }),
         invalidate() {},
@@ -209,7 +237,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Plan output names the ready set and the waves of a non-linear graph. Set an item active with runId to tie it to a subagent run; it closes itself when the run succeeds. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
+    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Optional agent assigns an item to a subagent role at planning time. Plan output names the ready set and the waves of a non-linear graph. Set an item active with runId to tie it to a subagent run; it closes itself when the run succeeds. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
       "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates). Plan with dependsOn so independent items are visible; when several are ready, consider running them concurrently.",
@@ -256,6 +284,7 @@ export default function (pi: ExtensionAPI) {
             id, text: input.text.trim(), status: "pending",
             ...(input.parentId ? { parentId: input.parentId } : {}),
             ...(dependsOn.length ? { dependsOn } : {}),
+            ...(input.agent && input.agent !== "self" ? { agent: input.agent } : {}),
           });
         }
         for (const item of next.items) {

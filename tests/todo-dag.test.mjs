@@ -313,7 +313,7 @@ test("widget and slash command show readiness, progress and toggling", async () 
   await h.call({ action: "replace", items: [
     { text: "Inspect" }, { text: "Independent child", parentId: "1" }, { text: "Summarize", dependsOn: ["1"] },
   ] });
-  assert.deepEqual(h.render(), ["○ #1 Inspect", "  ○ #1.1 Independent child", "◌ #2 Summarize", "  └─ waiting on #1"]);
+  assert.deepEqual(h.render(), ["○ #1 Inspect", "  ○ #1.1 Independent child", "┈┈", "◌ #2 Summarize", "  └─ waiting on #1"]);
   await h.call({ action: "set", id: "1", status: "active" });
   assert.match(h.render()[0], /^› #1/);
   assert.ok(h.widget().render(12).every(line => visibleWidth(line) <= 12));
@@ -325,7 +325,7 @@ test("widget and slash command show readiness, progress and toggling", async () 
   assert.equal(h.widget(), undefined);
   await h.command("on");
   assert.deepEqual(h.activeTools(), ["read", "todo"]);
-  assert.equal(h.render().length, 4);
+  assert.equal(h.render().length, 5);
 
   await h.call({ action: "set", id: "1", status: "done" });
   assert.deepEqual(h.render(), ["  ○ #1.1 Independent child", "○ #2 Summarize", "  └─ ready · after #1 ✓"]);
@@ -512,4 +512,37 @@ test("run links survive restore", async () => {
   const restored = createTodoHarness(manager);
   restored.event("session_start");
   assert.match(text(await restored.call({ action: "list" })), /\(run run-1\)/);
+});
+
+test("the widget reads a wide plan in waves and a chain as a list", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [
+    { text: "search a", agent: "scout" }, { text: "search b", agent: "scout" },
+    { text: "implement", dependsOn: ["1", "2"] }, { text: "test", dependsOn: ["3"] },
+  ] });
+  assert.deepEqual(h.render(), [
+    "○ #1 search a · scout", "○ #2 search b · scout",
+    "┈┈", "◌ #3 implement", "  └─ waiting on #1, #2",
+    "┈┈", "◌ #4 test", "  └─ waiting on #3",
+  ]);
+  assert.ok(h.widget().render(14).every(line => visibleWidth(line) <= 14));
+  // Once the remaining work is a chain the separators disappear.
+  await h.call({ action: "set", updates: [{ id: "1", status: "done" }, { id: "2", status: "done" }] });
+  assert.deepEqual(h.render(), ["○ #3 implement", "  └─ ready · after #1 ✓, #2 ✓", "◌ #4 test", "  └─ waiting on #3"]);
+});
+
+test("a planned agent is carried through plan output, ready set, waves, and restore", async () => {
+  const manager = SessionManager.inMemory();
+  const h = createTodoHarness(manager);
+  const plan = text(await h.call({ action: "replace", items: [
+    { text: "search a", agent: "scout" }, { text: "search b", agent: "scout" }, { text: "merge", agent: "self", dependsOn: ["1", "2"] },
+  ] }));
+  assert.match(plan, /\[pending\] #1 search a · scout$/m);
+  assert.match(plan, /#3 merge \(depends on/, "self is the default and stays silent");
+  assert.match(plan, /Waves: \[#1 \(scout\), #2 \(scout\)\] → \[#3\]/);
+  assert.match(plan, /Ready now, no dependency between them: #1 \(scout\), #2 \(scout\)/);
+  await rejectsWithoutChange(h.call, { action: "add", text: "x", agent: "manager" }, /agent/);
+  const restored = createTodoHarness(manager);
+  restored.event("session_start");
+  assert.equal((await restored.call({ action: "list" })).details.items[0].agent, "scout");
 });

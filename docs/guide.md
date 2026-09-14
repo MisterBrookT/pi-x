@@ -228,7 +228,7 @@ Pix does not download language servers. Install only what your projects need. Fo
 
 - Delegate only genuinely independent or context-heavy work.
 - Default limits: 4 concurrent children, 8 per run, 24 per session, and one level of delegation.
-- Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG. The plan output names the ready set and the waves of a non-linear graph, and an active item can carry a subagent `runId` so it closes itself when that run succeeds. Nothing is scheduled automatically; the model decides what to run and when.
+- Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG and an optional `agent` assigns an item to a subagent role at planning time. The plan output names the ready set and the waves of a non-linear graph, and an active item can carry a subagent `runId` so it closes itself when that run succeeds. Nothing is scheduled automatically; the model decides what to run and when.
 - No autonomous memory, MCP umbrella, agent hub, or plan framework.
 - Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
 - Dependency administration commands are hidden; Pix keeps eight user-facing commands, with related actions as verbs on the command that already owns them and rare inspection on a shortcut.
