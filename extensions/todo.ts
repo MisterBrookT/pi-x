@@ -31,11 +31,34 @@ export const hasTodoDependencyCycle = (items: Item[]): boolean => {
   return items.some(item => visit(item.id));
 };
 
+/**
+ * The items that could start right now.
+ *
+ * A dependency graph states what may run in parallel, but a flat list makes the
+ * model rediscover that frontier on every turn. Naming it is the whole point of
+ * planning in a graph rather than a line; what to do with it — one agent, or
+ * several in parallel — stays the model's decision.
+ */
+export const readyTodos = (items: Item[]): Item[] =>
+  items.filter(item => item.status === "pending" && unmetTodoDependencies(item, items).length === 0);
+
+const readyLine = (items: Item[]): string | undefined => {
+  if (items.some(item => item.status === "active")) return undefined;
+  const ready = readyTodos(items);
+  if (ready.length < 2) return undefined;
+  return `Ready now, no dependency between them: ${ready.map(item => `#${item.id}`).join(", ")}`;
+};
+
 const formatItem = (item: Item, items: Item[]): string => {
   const unmet = unmetTodoDependencies(item, items);
   const status = item.status === "pending" && unmet.length ? `blocked: ${unmet.map(id => `#${id}`).join(", ")}` : item.status;
   const dependencies = item.dependsOn?.length ? ` (depends on ${item.dependsOn.map(id => `#${id}`).join(", ")})` : "";
   return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${dependencies}`;
+};
+
+const formatPlan = (items: Item[]): string => {
+  const ready = readyLine(items);
+  return [...items.map(item => formatItem(item, items)), ...(ready ? [ready] : [])].join("\n");
 };
 
 const itemFields = {
@@ -70,7 +93,7 @@ export default function (pi: ExtensionAPI) {
   const publishState = (beforeNextResponse = false) => {
     if (!hasTodoHistory) return;
     const content = !enabled ? "Todo tracking is off. Earlier todo-state reminders are no longer current."
-      : state.items.length ? state.items.map(item => formatItem(item, state.items)).join("\n") : "No todos. The previous plan has been cleared.";
+      : state.items.length ? formatPlan(state.items) : "No todos. The previous plan has been cleared.";
     reminder.publish(`[CURRENT TODO STATE]\nThis update supersedes earlier todo-state reminders.\n${content}`, beforeNextResponse);
   };
   const restore = (ctx: ExtensionContext) => {
@@ -139,7 +162,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Independent ready items may be delegated in parallel. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
+    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Independent ready items may be delegated in parallel; when a plan has several, `list` and the state reminder name them. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
       "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates).",
@@ -165,7 +188,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
     async execute(_id, p, _signal, _update, ctx) {
-      if (p.action === "list") return result("list", state.items.length ? state.items.map(i => formatItem(i, state.items)).join("\n") : "No todos");
+      if (p.action === "list") return result("list", state.items.length ? formatPlan(state.items) : "No todos");
       if (p.action === "add" || p.action === "replace") {
         const inputs = p.action === "replace" ? p.items : [p];
         if (!inputs?.length) return result(p.action, "items is required and must not be empty", "items is required and must not be empty");
@@ -202,7 +225,7 @@ export default function (pi: ExtensionAPI) {
         publishState(true);
         renderWidget(ctx);
         return result(p.action, p.action === "replace"
-          ? state.items.map(item => formatItem(item, state.items)).join("\n")
+          ? formatPlan(state.items)
           : `Added #${state.items[state.items.length - 1].id}`);
       }
       if (p.action === "set") {
@@ -275,7 +298,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /todo [on|off]", "error");
         return;
       }
-      const lines = state.items.length ? state.items.map(i => formatItem(i, state.items)) : ["No todos"];
+      const lines = state.items.length ? [formatPlan(state.items)] : ["No todos"];
       ctx.ui.notify(`${enabled ? "todo is on" : "todo is off"}\n${lines.join("\n")}`, "info");
     },
   });

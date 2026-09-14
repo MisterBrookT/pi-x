@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { hasTodoDependencyCycle, unmetTodoDependencies } from "../extensions/todo.ts";
+import registerTodo, { hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
 
 const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;
@@ -412,4 +412,42 @@ test("restore ignores todo results whose details lack a usable snapshot", async 
   const restored = createTodoHarness(harness.sessionManager);
   restored.event("session_start");
   assert.deepEqual((await restored.call({ action: "list" })).details.items, plan);
+});
+
+test("the ready set names every item that could start now", () => {
+  const items = [
+    { id: "1", text: "search a", status: "pending" },
+    { id: "2", text: "search b", status: "pending" },
+    { id: "3", text: "implement", status: "pending", dependsOn: ["1", "2"] },
+  ];
+  assert.deepEqual(readyTodos(items).map((item) => item.id), ["1", "2"]);
+  // Finishing one prerequisite does not open the dependent; finishing both does.
+  const half = items.map((item) => (item.id === "1" ? { ...item, status: "done" } : item));
+  assert.deepEqual(readyTodos(half).map((item) => item.id), ["2"]);
+  const all = half.map((item) => (item.id === "2" ? { ...item, status: "done" } : item));
+  assert.deepEqual(readyTodos(all).map((item) => item.id), ["3"]);
+});
+
+test("a plan with an independent frontier says so, and a linear plan does not", async () => {
+  const h = createTodoHarness();
+  const parallel = text(await h.call({
+    action: "replace",
+    items: [{ text: "search a" }, { text: "search b" }, { text: "implement", dependsOn: ["1", "2"] }],
+  }));
+  assert.match(parallel, /Ready now, no dependency between them: #1, #2/);
+
+  const linear = text(await h.call({
+    action: "replace",
+    items: [{ text: "search" }, { text: "implement", dependsOn: ["1"] }, { text: "test", dependsOn: ["2"] }],
+  }));
+  assert.doesNotMatch(linear, /Ready now/, "a chain has one ready item, which needs no announcement");
+});
+
+test("starting work retires the ready line instead of inviting a second start", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [{ text: "search a" }, { text: "search b" }] });
+  await h.call({ action: "set", id: "1", status: "active" });
+  assert.doesNotMatch(text(await h.call({ action: "list" })), /Ready now/);
+  await h.call({ action: "set", id: "1", status: "done" });
+  assert.doesNotMatch(text(await h.call({ action: "list" })), /Ready now/, "one remaining item is not a frontier");
 });
