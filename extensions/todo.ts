@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { createStateReminder } from "../src/state-reminder.ts";
 
 type Status = "pending" | "active" | "done";
-interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[] }
+interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; runId?: string }
 interface State { items: Item[]; nextId: number }
 interface Details extends State { action: string; error?: string }
 
@@ -42,6 +42,35 @@ export const hasTodoDependencyCycle = (items: Item[]): boolean => {
 export const readyTodos = (items: Item[]): Item[] =>
   items.filter(item => item.status === "pending" && unmetTodoDependencies(item, items).length === 0);
 
+/**
+ * Topological layers: everything in one wave can run at the same time, and a
+ * wave can start once the wave before it is done.
+ */
+export const todoWaves = (items: Item[]): Item[][] => {
+  const depth = new Map<string, number>();
+  const byId = new Map(items.map(item => [item.id, item]));
+  const visit = (item: Item, trail: Set<string>): number => {
+    const known = depth.get(item.id);
+    if (known !== undefined) return known;
+    if (trail.has(item.id)) return 0;
+    trail.add(item.id);
+    const parents = (item.dependsOn ?? []).map(id => byId.get(id)).filter((parent): parent is Item => parent !== undefined);
+    const level = parents.length ? 1 + Math.max(...parents.map(parent => visit(parent, trail))) : 0;
+    depth.set(item.id, level);
+    return level;
+  };
+  const waves: Item[][] = [];
+  for (const item of items) (waves[visit(item, new Set())] ??= []).push(item);
+  return waves;
+};
+
+const wavesLine = (items: Item[]): string | undefined => {
+  const waves = todoWaves(items);
+  // A chain reads fine as a list; only a graph with width needs its layers spelled out.
+  if (waves.length < 2 || !waves.some(wave => wave.length > 1)) return undefined;
+  return `Waves: ${waves.map(wave => `[${wave.map(item => `#${item.id}`).join(", ")}]`).join(" → ")}`;
+};
+
 const readyLine = (items: Item[]): string | undefined => {
   if (items.some(item => item.status === "active")) return undefined;
   const ready = readyTodos(items);
@@ -53,13 +82,14 @@ const formatItem = (item: Item, items: Item[]): string => {
   const unmet = unmetTodoDependencies(item, items);
   const status = item.status === "pending" && unmet.length ? `blocked: ${unmet.map(id => `#${id}`).join(", ")}` : item.status;
   const dependencies = item.dependsOn?.length ? ` (depends on ${item.dependsOn.map(id => `#${id}`).join(", ")})` : "";
-  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${dependencies}`;
+  const run = item.runId && item.status === "active" ? ` (run ${item.runId})` : "";
+  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${dependencies}${run}`;
 };
 
-const formatPlan = (items: Item[]): string => {
-  const ready = readyLine(items);
-  return [...items.map(item => formatItem(item, items)), ...(ready ? [ready] : [])].join("\n");
-};
+const formatPlan = (items: Item[]): string =>
+  [...items.map(item => formatItem(item, items)), wavesLine(items), readyLine(items)]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
 
 const itemFields = {
   parentId: Type.Optional(Type.String({ description: "Top-level parent ID; parents must appear before children" })),
@@ -76,9 +106,11 @@ const Params = Type.Object({
   id: Type.Optional(Type.String({ description: "Todo ID, such as 1 or 1.2" })),
   ...itemFields,
   status: Type.Optional(StringEnum(["pending", "active", "done"] as const)),
+  runId: Type.Optional(Type.String({ description: "With status active: the subagent run doing this item; several items may share one run. The item becomes done by itself when that run completes successfully." })),
   updates: Type.Optional(Type.Array(Type.Object({
     id: Type.String({ description: "Todo ID, such as 1 or 1.2" }),
     status: StringEnum(["pending", "active", "done"] as const),
+    runId: Type.Optional(Type.String({ description: "Subagent run doing this item; see the top-level runId." })),
   }), {
     minItems: 1,
     description: "For set: batch status changes instead of id/status. Unique IDs; all changes apply atomically. Dependencies are checked against the final state, so array order does not matter.",
@@ -113,6 +145,7 @@ export default function (pi: ExtensionAPI) {
             id: String(item.id),
             ...(item.parentId === undefined ? {} : { parentId: String(item.parentId) }),
             ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn.map(String) }),
+            ...(item.runId === undefined ? {} : { runId: String(item.runId) }),
           })),
           nextId: d.nextId,
         };
@@ -131,8 +164,9 @@ export default function (pi: ExtensionAPI) {
           const unmet = unmetTodoDependencies(item, state.items);
           const marker = theme.fg("accent", item.status === "active" ? "›" : unmet.length ? "◌" : "○");
           const indent = item.parentId ? "  " : "";
+          const run = item.runId && item.status === "active" ? theme.fg("muted", ` ⇄ ${item.runId}`) : "";
           const lines = fitTodoWidgetLines([
-            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}`,
+            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}${run}`,
           ], width);
           if (!item.dependsOn?.length || width <= 0) return lines;
           // Give prerequisites their own line: long titles must not hide blockers.
@@ -153,19 +187,32 @@ export default function (pi: ExtensionAPI) {
     if (error) throw new Error(error);
     return { content: [{ type: "text", text }], details: { action, items: structuredClone(state.items), nextId: state.nextId } };
   };
-  pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
-  pi.on("session_tree", (_e, ctx) => restore(ctx));
+  let lastCtx: ExtensionContext | undefined;
+  pi.on("session_start", (_e, ctx) => { lastCtx = ctx; enabled = true; restore(ctx); });
+  pi.on("session_tree", (_e, ctx) => { lastCtx = ctx; restore(ctx); });
   pi.on("session_compact", (_event, ctx) => {
     reminder.restore(ctx);
     publishState(true);
   });
+  // A finished run closes the items it was doing. Success needs no tool call
+  // from the model; failure keeps the item active so the model must decide.
+  pi.events?.on?.("subagent:async-complete", (data: unknown) => {
+    const run = data as { runId?: unknown; id?: unknown; success?: unknown };
+    const runId = typeof run.runId === "string" ? run.runId : typeof run.id === "string" ? run.id : undefined;
+    if (!runId || run.success !== true) return;
+    const linked = state.items.filter(item => item.status === "active" && item.runId === runId);
+    if (!linked.length) return;
+    for (const item of linked) { item.status = "done"; delete item.runId; }
+    publishState(true);
+    if (lastCtx) renderWidget(lastCtx);
+  });
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Independent ready items may be delegated in parallel; when a plan has several, `list` and the state reminder name them. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
+    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Plan output names the ready set and the waves of a non-linear graph. Set an item active with runId to tie it to a subagent run; it closes itself when the run succeeds. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
-      "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates).",
+      "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates). Plan with dependsOn so independent items are visible; when several are ready, consider running them concurrently.",
     ],
     parameters: Params,
     prepareArguments(args) {
@@ -232,7 +279,7 @@ export default function (pi: ExtensionAPI) {
         if (p.updates !== undefined && (p.id !== undefined || p.status !== undefined)) {
           throw new Error("Use either updates or id/status, not both");
         }
-        const updates = p.updates ?? [{ id: p.id, status: p.status }];
+        const updates = p.updates ?? [{ id: p.id, status: p.status, runId: p.runId }];
         if (!updates.length) throw new Error("updates must not be empty");
         const next = structuredClone(state);
         const seen = new Set<string>();
@@ -241,7 +288,10 @@ export default function (pi: ExtensionAPI) {
           if (!item || !update.status) throw new Error("valid id and status are required");
           if (seen.has(item.id)) throw new Error(`Duplicate update for #${item.id}`);
           seen.add(item.id);
+          if (update.runId !== undefined && update.status !== "active") throw new Error(`runId is only meaningful with status active (#${item.id})`);
           item.status = update.status;
+          if (update.runId !== undefined) item.runId = update.runId;
+          else if (update.status !== "active") delete item.runId;
         }
         // Validate the final snapshot, not array order; a batch may finish
         // prerequisites and start dependents, or reset an entire chain together.

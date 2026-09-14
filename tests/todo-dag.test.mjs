@@ -4,9 +4,9 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
+import registerTodo, { hasTodoDependencyCycle, readyTodos, todoWaves, unmetTodoDependencies } from "../extensions/todo.ts";
 
-const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
+const createTodoHarness = (sessionManager = SessionManager.inMemory(), extra = {}) => {
   let tool;
   let command;
   let widget;
@@ -18,6 +18,7 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
     { selectedBg: "#000000" }, "truecolor",
   );
   const pi = {
+    ...extra,
     on(event, handler) { handlers.set(event, handler); },
     registerTool(value) { tool = value; },
     registerCommand(name, value) { assert.equal(name, "todo"); command = value; },
@@ -450,4 +451,65 @@ test("starting work retires the ready line instead of inviting a second start", 
   assert.doesNotMatch(text(await h.call({ action: "list" })), /Ready now/);
   await h.call({ action: "set", id: "1", status: "done" });
   assert.doesNotMatch(text(await h.call({ action: "list" })), /Ready now/, "one remaining item is not a frontier");
+});
+
+test("waves are the topological layers of the plan", () => {
+  const items = [
+    { id: "1", text: "search a", status: "pending" },
+    { id: "2", text: "search b", status: "pending" },
+    { id: "3", text: "implement a", status: "pending", dependsOn: ["1"] },
+    { id: "4", text: "implement b", status: "pending", dependsOn: ["2"] },
+    { id: "5", text: "merge", status: "pending", dependsOn: ["3", "4"] },
+  ];
+  assert.deepEqual(todoWaves(items).map((wave) => wave.map((item) => item.id)), [["1", "2"], ["3", "4"], ["5"]]);
+});
+
+test("a graph with width shows its waves; a chain does not", async () => {
+  const h = createTodoHarness();
+  const graph = text(await h.call({
+    action: "replace",
+    items: [{ text: "search a" }, { text: "search b" }, { text: "merge", dependsOn: ["1", "2"] }],
+  }));
+  assert.match(graph, /Waves: \[#1, #2\] → \[#3\]/);
+  const chain = text(await h.call({ action: "replace", items: [{ text: "a" }, { text: "b", dependsOn: ["1"] }] }));
+  assert.doesNotMatch(chain, /Waves:/);
+});
+
+test("an item tied to a subagent run closes itself when the run succeeds", async () => {
+  const events = new Map();
+  const h = createTodoHarness(SessionManager.inMemory(), { events: { on: (name, handler) => events.set(name, handler) } });
+  await h.call({ action: "replace", items: [{ text: "search a" }, { text: "search b" }, { text: "merge", dependsOn: ["1", "2"] }] });
+  const started = text(await h.call({ action: "set", updates: [{ id: "1", status: "active", runId: "run-a" }, { id: "2", status: "active", runId: "run-b" }] }));
+  assert.match(started, /#1 → active/);
+  assert.match(text(await h.call({ action: "list" })), /\[active\] #1 search a \(run run-a\)/);
+  assert.match(h.render().join("\n"), /› #1 search a ⇄ run-a/);
+
+  events.get("subagent:async-complete")({ runId: "run-a", success: true });
+  const afterOne = text(await h.call({ action: "list" }));
+  assert.match(afterOne, /\[done\] #1 search a$/m, "the run id is dropped once the item is done");
+  assert.match(afterOne, /blocked: #2\] #3/);
+
+  // A failed run leaves the item active: the model decides what to do.
+  events.get("subagent:async-complete")({ runId: "run-b", success: false });
+  assert.match(text(await h.call({ action: "list" })), /\[active\] #2 search b \(run run-b\)/);
+
+  events.get("subagent:async-complete")({ runId: "run-b", success: true });
+  assert.match(text(await h.call({ action: "list" })), /\[pending\] #3 merge/);
+  assert.match(h.reminders().at(-1).content, /\[done\] #2/, "the model is told without having to ask");
+});
+
+test("a run id cannot be attached to anything but active work", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "add", text: "a" });
+  await rejectsWithoutChange(h.call, { action: "set", id: "1", status: "done", runId: "r" }, /only meaningful with status active/);
+});
+
+test("run links survive restore", async () => {
+  const manager = SessionManager.inMemory();
+  const h = createTodoHarness(manager);
+  await h.call({ action: "add", text: "a" });
+  await h.call({ action: "set", id: "1", status: "active", runId: "run-1" });
+  const restored = createTodoHarness(manager);
+  restored.event("session_start");
+  assert.match(text(await restored.call({ action: "list" })), /\(run run-1\)/);
 });
