@@ -9,7 +9,7 @@ type Status = "pending" | "active" | "done";
 /** Who is planned to do an item: the main assistant, or a subagent role. */
 const agents = ["self", ...subagentRoles] as const;
 type Agent = (typeof agents)[number];
-interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; agent?: Agent; runId?: string }
+interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; agent?: Agent }
 interface State { items: Item[]; nextId: number }
 interface Details extends State { action: string; error?: string }
 
@@ -97,8 +97,7 @@ const formatItem = (item: Item, items: Item[]): string => {
   const status = item.status === "pending" && unmet.length ? `blocked: ${unmet.map(id => `#${id}`).join(", ")}` : item.status;
   const dependencies = item.dependsOn?.length ? ` (depends on ${item.dependsOn.map(id => `#${id}`).join(", ")})` : "";
   const agent = item.agent && item.agent !== "self" ? ` · ${item.agent}` : "";
-  const run = item.runId && item.status === "active" ? ` (run ${item.runId})` : "";
-  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${agent}${dependencies}${run}`;
+  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${agent}${dependencies}`;
 };
 
 const formatPlan = (items: Item[]): string =>
@@ -122,11 +121,9 @@ const Params = Type.Object({
   id: Type.Optional(Type.String({ description: "Todo ID, such as 1 or 1.2" })),
   ...itemFields,
   status: Type.Optional(StringEnum(["pending", "active", "done"] as const)),
-  runId: Type.Optional(Type.String({ description: "With status active: the subagent run doing this item; several items may share one run. The item becomes done by itself when that run completes successfully." })),
   updates: Type.Optional(Type.Array(Type.Object({
     id: Type.String({ description: "Todo ID, such as 1 or 1.2" }),
     status: StringEnum(["pending", "active", "done"] as const),
-    runId: Type.Optional(Type.String({ description: "Subagent run doing this item; see the top-level runId." })),
   }), {
     minItems: 1,
     description: "For set: batch status changes instead of id/status. Unique IDs; all changes apply atomically. Dependencies are checked against the final state, so array order does not matter.",
@@ -161,7 +158,6 @@ export default function (pi: ExtensionAPI) {
             id: String(item.id),
             ...(item.parentId === undefined ? {} : { parentId: String(item.parentId) }),
             ...(item.dependsOn === undefined ? {} : { dependsOn: item.dependsOn.map(String) }),
-            ...(item.runId === undefined ? {} : { runId: String(item.runId) }),
             ...(item.agent === undefined ? {} : { agent: item.agent }),
           })),
           nextId: d.nextId,
@@ -192,9 +188,8 @@ export default function (pi: ExtensionAPI) {
           const marker = markerFor(item, unmet);
           const indent = item.parentId ? "  " : "";
           const agent = item.agent && item.agent !== "self" ? theme.fg("muted", ` · ${item.agent}`) : "";
-          const run = item.runId && item.status === "active" ? theme.fg("muted", ` ⇄ ${item.runId}`) : "";
           const lines = fitTodoWidgetLines([
-            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}${agent}${run}`,
+            `${indent}${marker} ${theme.fg("accent", `#${item.id}`)} ${theme.fg(unmet.length ? "muted" : "text", item.text)}${agent}`,
           ], width);
           if (!item.dependsOn?.length || width <= 0) return [...separator, ...lines];
           // Give prerequisites their own line: long titles must not hide blockers.
@@ -215,29 +210,16 @@ export default function (pi: ExtensionAPI) {
     if (error) throw new Error(error);
     return { content: [{ type: "text", text }], details: { action, items: structuredClone(state.items), nextId: state.nextId } };
   };
-  let lastCtx: ExtensionContext | undefined;
-  pi.on("session_start", (_e, ctx) => { lastCtx = ctx; enabled = true; restore(ctx); });
-  pi.on("session_tree", (_e, ctx) => { lastCtx = ctx; restore(ctx); });
+  pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
+  pi.on("session_tree", (_e, ctx) => restore(ctx));
   pi.on("session_compact", (_event, ctx) => {
     reminder.restore(ctx);
     publishState(true);
   });
-  // A finished run closes the items it was doing. Success needs no tool call
-  // from the model; failure keeps the item active so the model must decide.
-  pi.events?.on?.("subagent:async-complete", (data: unknown) => {
-    const run = data as { runId?: unknown; id?: unknown; success?: unknown };
-    const runId = typeof run.runId === "string" ? run.runId : typeof run.id === "string" ? run.id : undefined;
-    if (!runId || run.success !== true) return;
-    const linked = state.items.filter(item => item.status === "active" && item.runId === runId);
-    if (!linked.length) return;
-    for (const item of linked) { item.status = "done"; delete item.runId; }
-    publishState(true);
-    if (lastCtx) renderWidget(lastCtx);
-  });
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Optional agent assigns an item to a subagent role at planning time. Plan output names the ready set and the waves of a non-linear graph. Set an item active with runId to tie it to a subagent run; it closes itself when the run succeeds. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
+    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Optional agent assigns an item to a subagent role at planning time. Plan output names the ready set and the waves of a non-linear graph. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
       "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates). Plan with dependsOn so independent items are visible; when several are ready, consider running them concurrently.",
@@ -308,7 +290,7 @@ export default function (pi: ExtensionAPI) {
         if (p.updates !== undefined && (p.id !== undefined || p.status !== undefined)) {
           throw new Error("Use either updates or id/status, not both");
         }
-        const updates = p.updates ?? [{ id: p.id, status: p.status, runId: p.runId }];
+        const updates = p.updates ?? [{ id: p.id, status: p.status }];
         if (!updates.length) throw new Error("updates must not be empty");
         const next = structuredClone(state);
         const seen = new Set<string>();
@@ -317,10 +299,7 @@ export default function (pi: ExtensionAPI) {
           if (!item || !update.status) throw new Error("valid id and status are required");
           if (seen.has(item.id)) throw new Error(`Duplicate update for #${item.id}`);
           seen.add(item.id);
-          if (update.runId !== undefined && update.status !== "active") throw new Error(`runId is only meaningful with status active (#${item.id})`);
           item.status = update.status;
-          if (update.runId !== undefined) item.runId = update.runId;
-          else if (update.status !== "active") delete item.runId;
         }
         // Validate the final snapshot, not array order; a batch may finish
         // prerequisites and start dependents, or reset an entire chain together.

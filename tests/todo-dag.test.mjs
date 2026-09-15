@@ -6,7 +6,7 @@ import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import registerTodo, { hasTodoDependencyCycle, readyTodos, todoWaves, unmetTodoDependencies } from "../extensions/todo.ts";
 
-const createTodoHarness = (sessionManager = SessionManager.inMemory(), extra = {}) => {
+const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;
   let command;
   let widget;
@@ -18,7 +18,6 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory(), extra = {
     { selectedBg: "#000000" }, "truecolor",
   );
   const pi = {
-    ...extra,
     on(event, handler) { handlers.set(event, handler); },
     registerTool(value) { tool = value; },
     registerCommand(name, value) { assert.equal(name, "todo"); command = value; },
@@ -475,43 +474,13 @@ test("a graph with width shows its waves; a chain does not", async () => {
   assert.doesNotMatch(chain, /Waves:/);
 });
 
-test("an item tied to a subagent run closes itself when the run succeeds", async () => {
-  const events = new Map();
-  const h = createTodoHarness(SessionManager.inMemory(), { events: { on: (name, handler) => events.set(name, handler) } });
-  await h.call({ action: "replace", items: [{ text: "search a" }, { text: "search b" }, { text: "merge", dependsOn: ["1", "2"] }] });
-  const started = text(await h.call({ action: "set", updates: [{ id: "1", status: "active", runId: "run-a" }, { id: "2", status: "active", runId: "run-b" }] }));
-  assert.match(started, /#1 → active/);
-  assert.match(text(await h.call({ action: "list" })), /\[active\] #1 search a \(run run-a\)/);
-  assert.match(h.render().join("\n"), /› #1 search a ⇄ run-a/);
-
-  events.get("subagent:async-complete")({ runId: "run-a", success: true });
-  const afterOne = text(await h.call({ action: "list" }));
-  assert.match(afterOne, /\[done\] #1 search a$/m, "the run id is dropped once the item is done");
-  assert.match(afterOne, /blocked: #2\] #3/);
-
-  // A failed run leaves the item active: the model decides what to do.
-  events.get("subagent:async-complete")({ runId: "run-b", success: false });
-  assert.match(text(await h.call({ action: "list" })), /\[active\] #2 search b \(run run-b\)/);
-
-  events.get("subagent:async-complete")({ runId: "run-b", success: true });
-  assert.match(text(await h.call({ action: "list" })), /\[pending\] #3 merge/);
-  assert.match(h.reminders().at(-1).content, /\[done\] #2/, "the model is told without having to ask");
-});
-
-test("a run id cannot be attached to anything but active work", async () => {
+test("todo has no field for a run id: status is written only by the model", () => {
+  // A subagent result is judged by the main agent, not by an exit code, so the
+  // tool offers nothing that could flip an item on its own.
   const h = createTodoHarness();
-  await h.call({ action: "add", text: "a" });
-  await rejectsWithoutChange(h.call, { action: "set", id: "1", status: "done", runId: "r" }, /only meaningful with status active/);
-});
-
-test("run links survive restore", async () => {
-  const manager = SessionManager.inMemory();
-  const h = createTodoHarness(manager);
-  await h.call({ action: "add", text: "a" });
-  await h.call({ action: "set", id: "1", status: "active", runId: "run-1" });
-  const restored = createTodoHarness(manager);
-  restored.event("session_start");
-  assert.match(text(await restored.call({ action: "list" })), /\(run run-1\)/);
+  const schema = JSON.stringify(h.tool.parameters);
+  assert.doesNotMatch(schema, /runId/);
+  assert.doesNotMatch(JSON.stringify(h.tool.description), /runId|closes itself/);
 });
 
 test("the widget reads a wide plan in waves and a chain as a list", async () => {
