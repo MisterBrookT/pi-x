@@ -97,9 +97,12 @@ test("registers a single computer tool with a valid schema", () => {
 
 test("the description documents the cua API the model must write against", () => {
 	const { tool } = harness();
-	for (const fragment of ["cua.observe", "state.act", "state.eval", "expect"]) {
-		assert.match(tool.description, new RegExp(fragment.replace(".", "\\.")), `missing ${fragment}`);
+	for (const fragment of ["cua.observe", "act(action | action[], expect)", "eval(expression)", "cua.state("]) {
+		assert.ok(tool.description.includes(fragment), `missing ${fragment}`);
 	}
+	// The full tutorial lives in the computer-use skill; the schema pays for
+	// the API surface only, on every request.
+	assert.ok(tool.description.length < 1800, `description is ${tool.description.length} chars`);
 });
 
 test("guidelines name the tool explicitly so bullets are unambiguous", () => {

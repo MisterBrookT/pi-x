@@ -27,68 +27,18 @@ import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
 const BACKEND = "@injaneity/pi-computer-use";
 
 const API_DOC = `
-Write JavaScript. Available: \`cua\`, \`log(...)\`, \`signal\`. Use \`return\` for the result.
+Write JavaScript with \`cua\`, \`log(...)\`, \`signal\`; \`return\` the result. One browser launch per script; reuse it with \`page.navigate(url)\` or \`cua.state(id)\` later. Keep scripts short: they hold pointer, keyboard, and focus, and stop after two minutes.
 
-  const roots = await cua.roots({ app: "Notes" });   // text listing of @r refs
+  const roots = await cua.roots({ app: "Notes" });   // @r refs
   const state = await cua.observe({ root: "@r1" });  // -> CuaState
   const page  = await cua.launchBrowser("https://example.com");
+  const again = await cua.state("S3");               // state from an earlier call
 
-Launch at most one browser per script; each launch opens another Chrome window
-that stays open. To visit another page, reuse the one you have with
-\`page.navigate(url)\`, or \`cua.state(id)\` in a later call.
+CuaState: id, text; search({ text, role, capability }), expand(ref, depth), inspect(ref), read(ref, offset), waitFor({ text, ref, until, timeoutMs }), act(action | action[], expect) -> next state, navigate(url) and eval(expression) on browser pages.
 
-Keep a script short. It holds the pointer, the keyboard, and window focus while
-it runs, so long waits and long loops make the machine unusable. Observe, return
-what you found, and continue in the next call. Scripts are stopped after two
-minutes.
+Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse, e.g. { action: "setText", ref: "@e7", text: "hello" }. Prefer refs; use x/y only without an accessibility element. keypress and typeText need a ref, coordinates, or a preceding click in the same act array.
 
-State persists across calls: a stateId returned by an earlier call can be picked
-up with \`await cua.state("S3")\` instead of observing the root again.
-
-CuaState:
-  state.id                          // stateId owning its @e refs
-  state.text                        // the folded outline
-  await state.search({ text, role, capability })
-  await state.expand(ref, depth)
-  await state.inspect(ref)
-  await state.read(ref, offset)
-  await state.waitFor({ text, ref, until, timeoutMs })
-  await state.act(action | action[], expect)   // -> successor CuaState
-  await state.navigate(url)                    // browser pages only
-  await state.eval(expression)                 // browser pages only; returns the value
-
-Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse.
-  { action: "press", ref: "@e9" }
-  { action: "setText", ref: "@e7", text: "hello" }
-  { action: "keypress", ref: "@e7", keys: ["cmd", "s"] }
-  { action: "click", x: 420, y: 300 }           // only when a ref does not exist
-
-\`keypress\` and \`typeText\` need a ref, coordinates, or a click earlier in the
-same \`act\` array that established focus. A bare \`{ action: "keypress", keys }\`
-is rejected:
-
-  await state.act([
-    { action: "click", ref: "@e7" },
-    { action: "typeText", text: "hello" },      // follows the click's focus
-    { action: "keypress", keys: ["Return"] },
-  ]);
-
-Rules:
-- \`act\` returns the next state. Use it directly; do not observe again unless
-  something changed outside your control.
-- Batch deterministic actions into one \`act\` call, then read the returned state.
-  Send a step alone only when it can change the meaning of later refs or when
-  you need its result to decide what to do next.
-- Prefer ref-based actions over coordinates. Use x/y only when no accessibility
-  element exists for the target.
-- Attempting an action is not completing it. Finish only when the returned state
-  visibly shows the requested result, or report a concrete blocker.
-- Attach \`expect\` to any action with an observable result. A delivered click is
-  not a completed action.
-- Use \`eval\` for extraction on browser pages and \`act\` for anything the user
-  must be able to see happen.
-- Irreversible actions (send, delete, pay, publish) prompt the user once per
-  distinct action.
+Use the state act returns instead of observing again. Batch deterministic steps into one act. Use eval to extract from pages and act for what the user must see happen. Irreversible actions (send, delete, pay, publish) prompt the user once each.
 `.trim();
 
 const Params = Type.Object({
