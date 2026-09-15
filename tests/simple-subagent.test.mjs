@@ -10,11 +10,15 @@ test('full subagent definition fits the 2000 estimated token budget',()=>{
  assert.ok(estimateTokens(toolChars(tool)) <= 2000);
  console.log('Compact subagent estimated tokens:',estimateTokens(toolChars(tool)));
 });
-test('delegation guidance keeps the main assistant working on the critical path',()=>{
- assert.match(tool.description, /Keep the critical path with the main assistant/);
- assert.match(tool.description, /Do not hand the whole task to one child just to wait/);
- assert.match(tool.description, /no useful independent work remains/);
+test('delegation guidance lives in the guideline once, and the description keeps only what the schema cannot say',()=>{
+ assert.match(tool.promptGuidelines.join(' '), /Keep the critical path with the main assistant/);
  assert.match(tool.promptGuidelines.join(' '), /not whole-task handoff followed by waiting/);
+ assert.doesNotMatch(tool.description, /Keep the critical path/, 'not repeated in the description');
+ assert.match(tool.description, /NOT merged/);
+ assert.match(tool.description, /never overlap writers/);
+ assert.match(tool.description, /do not undo work already done/);
+ assert.match(tool.description, /delegation does not grant permission/);
+ assert.doesNotMatch(tool.description, /configuration|configured model|resolved at launch/, 'no internals the model cannot act on');
 });
 test('only worker and scout can be delegated, in both schema and executor',()=>{
  for(const agent of ['worker', 'scout']) {
@@ -28,10 +32,9 @@ test('only worker and scout can be delegated, in both schema and executor',()=>{
   assert.throws(()=>subagentRequest(args), /Available subagent roles: worker and scout/);
  }
 });
-test('the main agent sees role responsibilities and configuration-based model selection',()=>{
- assert.match(tool.description, /Choose worker for scoped implementation/);
- assert.match(tool.description, /Choose scout for codebase discovery and navigation/);
- assert.match(tool.description, /Choose the role by task, not by model/);
+test('the main agent sees one line per role and no other agent names',()=>{
+ assert.match(tool.description, /scout explores the codebase and reports/);
+ assert.match(tool.description, /worker makes scoped edits, runs checks/);
  assert.doesNotMatch(JSON.stringify(tool.parameters), /reviewer|researcher|configured agent/);
 });
 test('single task uses the upstream async child interface without overriding policy',()=>{
