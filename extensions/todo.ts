@@ -219,7 +219,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "todo",
     label: "Todo",
-    description: "Track non-trivial work. Prefer replace(items) to create a whole plan in one call (replaces existing todos, resets IDs and statuses); add(text) appends one item, set(updates) batches progress changes (prefer it for multiple changes); set(id,status) updates one item; list/clear inspect/reset. Optional parentId groups subtasks; dependsOn controls readiness, not automatic execution. Optional agent assigns an item to a subagent role at planning time. Plan output names the ready set and the waves of a non-linear graph. Reset active/done dependents to pending before reopening a prerequisite, or together in one batch.",
+    description: "Track non-trivial work as a plan. replace(items) writes a whole plan; add(text) appends one item; set(updates) batches progress, set(id,status) updates one item; list/clear inspect or reset. Items may declare dependsOn, parentId, and agent.",
     promptSnippet: "Track pending, active, and completed steps for non-trivial work",
     promptGuidelines: [
       "Use todo for non-trivial multi-step work; keep statuses current and batch multiple status changes with set(updates). Plan with dependsOn so independent items are visible; when several are ready, consider running them concurrently.",
