@@ -104,8 +104,9 @@ Workflow scripting, scheduling, missions, and administrative actions are not
 exposed through this tool. Models and safety controls remain backend-configured.
 The full definition has a tested budget of 2,000 estimated tokens; estimates are
 character-based, not provider token counts. Subagents notify the parent automatically;
-Pix does not expose a separate `bg_wait` tool. The `subagent_supervisor` tool
-remains available for child communication. Explicit blocking waits and external-job
+Pix does not expose a separate `bg_wait` tool. `subagent_supervisor` stays on:
+a child that hits a decision it cannot make pauses and asks, and this is how the
+main agent answers. Explicit blocking waits and external-job
 wait subscriptions are not part of Pix's tool surface.
 
 ## Goal mode

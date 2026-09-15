@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
@@ -39,4 +40,13 @@ test("the installed subagent completion notifier wakes without registering any w
 	assert.equal(messages.length, 1);
 	assert.equal(messages[0].message.customType, "subagent-notify");
 	assert.equal(messages[0].options.triggerTurn, true);
+});
+
+test("the supervisor channel is described by when to use it, not by upstream internals", async () => {
+	const { supervisorDescription } = await import("../src/subagent-policy.ts");
+	assert.match(supervisorDescription, /^Answer a subagent that has paused for a decision/);
+	assert.doesNotMatch(supervisorDescription, /pi-intercom|Native/);
+	for (const action of ["pending", "reply", "send", "ask", "list", "status"]) assert.ok(supervisorDescription.includes(action), action);
+	const source = await readFile(new URL("../extensions/upstream-tools.ts", import.meta.url), "utf8");
+	assert.match(source, /tool\.name === "subagent_supervisor"[\s\S]*description: supervisorDescription/, "the override is wired into upstream registration");
 });

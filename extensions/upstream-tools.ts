@@ -3,6 +3,7 @@ import registerLsp from "../node_modules/@narumitw/pi-lsp/dist/index.ts";
 import registerSubagents from "pi-subagents";
 import registerWebAccess from "pi-web-access";
 import { simplifySubagent } from "../src/simple-subagent.ts";
+import { supervisorDescription } from "../src/subagent-policy.ts";
 import { registerCapabilityAction } from "../src/capability-actions.ts";
 import { configureSubagentRoles } from "../src/subagent-roles.ts";
 import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
@@ -14,6 +15,10 @@ type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
   // Native completion notifications remain upstream-owned; no separate wait tool.
   if (tool.name === "bg_wait") return;
+  if (tool.name === "subagent_supervisor") {
+    pi.registerTool({ ...tool, description: supervisorDescription });
+    return;
+  }
   if (tool.name !== "subagent") {
     for (const profile of webProfiles(tool)) pi.registerTool(profile);
     return;
