@@ -31,6 +31,7 @@
   "dependencies": {
     "@narumitw/pi-lsp": "0.49.6",
     "jsonc-parser": "3.3.1",
+    "lovely-mermaid": "^0.3.3",
     "pi-subagents": "0.63.0",
     "pi-web-access": "0.27.0"
   },
@@ -60,6 +61,7 @@
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
       "./extensions/goal.ts",
+      "./extensions/mermaid.ts",
       "./extensions/prompt-compact.ts",
       "./extensions/question.ts",
       "./extensions/smart-editor.ts",
