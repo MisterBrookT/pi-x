@@ -546,3 +546,94 @@ test("cancelling stops the script at the next backend call", async () => {
 test("the default budget bounds duration as well as calls and actions", () => {
 	assert.ok(DEFAULT_BUDGET.maxDurationMs > 0, "a script cannot run unbounded by default");
 });
+
+test("a backend call the script forgot to await cannot crash the host", async () => {
+	let reject;
+	const { operations } = createFakeOperations({
+		search: () => new Promise((_resolve, fail) => { reject = fail; }),
+	});
+	const runtime = createCuaRuntime({ operations });
+	const rejections = [];
+	const onRejection = (reason) => rejections.push(reason);
+	process.on("unhandledRejection", onRejection);
+	try {
+		// No `await` on search, so the call is still in flight when the script
+		// ends. It then fails the way the real backend does between tool calls.
+		const run = runScript(
+			`const state = await cua.observe();\n state.search({ text: "App" });\n return "done";`,
+			runtime,
+		);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		reject(new Error("No current controlled window. Call observe_ui first to choose a target window."));
+		const outcome = await run;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.equal(outcome.value, "done");
+		assert.deepEqual(rejections, [], "a forgotten call must not reach the host as an unhandled rejection");
+	} finally {
+		process.off("unhandledRejection", onRejection);
+	}
+});
+
+test("a call that never returns cannot hold the agent open", async () => {
+	const { operations } = createFakeOperations({ search: () => new Promise(() => {}) });
+	const runtime = createCuaRuntime({ operations });
+	const started = Date.now();
+	const outcome = await runScript(
+		`const state = await cua.observe();\n state.search({ text: "App" });\n return "done";`,
+		runtime,
+		undefined,
+		{ settleGraceMs: 20 },
+	);
+	assert.equal(outcome.value, "done");
+	assert.ok(Date.now() - started < 1_000, "settle is bounded, not an unbounded wait");
+});
+
+test("runScript waits for calls the script left in flight", async () => {
+	let finish;
+	const pending = new Promise((resolve) => { finish = resolve; });
+	let settled = false;
+	const { operations } = createFakeOperations({
+		search: async (params) => {
+			await pending;
+			settled = true;
+			return { content: [{ type: "text", text: "@e1 window \"App\"" }], details: { stateId: "S9" }, params };
+		},
+	});
+	const runtime = createCuaRuntime({ operations });
+	const run = runScript(`const state = await cua.observe();\n state.search({ text: "App" });\n return "done";`, runtime);
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(settled, false, "the call is still in flight while the script body is done");
+	finish();
+	const outcome = await run;
+	assert.equal(settled, true, "runScript drained the forgotten call before returning");
+	assert.equal(outcome.error, undefined);
+});
+
+test("cua.state re-observes when the backend forgot its controlled window", async () => {
+	let searches = 0;
+	const calls = [];
+	const { operations } = createFakeOperations({
+		observe: (params) => {
+			calls.push({ name: "observe", params });
+			return Promise.resolve({ content: [{ type: "text", text: `@e1 window "App"` }], details: { stateId: "S1" } });
+		},
+		search: (params) => {
+			calls.push({ name: "search", params });
+			searches += 1;
+			if (searches === 1) return Promise.reject(new Error("No current controlled window. Call observe_ui first to choose a target window."));
+			return Promise.resolve({ content: [{ type: "text", text: `@e1 window "App"` }], details: { stateId: params.stateId } });
+		},
+	});
+	const runtime = createCuaRuntime({ operations });
+	const state = await runtime.cua.state("S4");
+	assert.equal(state.id, "S4");
+	assert.deepEqual(calls.map((call) => call.name), ["search", "observe", "search"]);
+});
+
+test("cua.state still surfaces failures it cannot recover from", async () => {
+	const { operations } = createFakeOperations({
+		search: () => Promise.reject(new Error("State 'S4' is unavailable or was evicted. Observe the root again.")),
+	});
+	const runtime = createCuaRuntime({ operations });
+	await assert.rejects(() => runtime.cua.state("S4"), /unavailable or was evicted/);
+});

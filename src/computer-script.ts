@@ -193,6 +193,12 @@ export const isIrreversible = (actions: UiAction[], stateText: string): boolean 
 		return label !== undefined && IRREVERSIBLE.test(label);
 	});
 
+/** The backend's "no controlled window" refusal, which a rebind can recover. */
+const MISSING_TARGET_RE = /no current controlled window/i;
+
+/** How long a finished script waits for calls it forgot to await. */
+const SETTLE_GRACE_MS = 2_000;
+
 /** Find the outline label for a ref, e.g. `@e9 button "Send"` -> `button "Send"`. */
 export const labelForRef = (stateText: string, ref: string | undefined): string | undefined => {
 	if (!ref) return undefined;
@@ -234,10 +240,49 @@ export interface CuaRuntime {
 	events: ScriptEvent[];
 	/** Mutating actions performed so far. */
 	actionCount: () => number;
+	/** Briefly wait for backend calls the script left un-awaited. */
+	settle: (graceMs?: number) => Promise<void>;
 }
 
 export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
-	const { operations } = options;
+	const pending = new Set<Promise<unknown>>();
+	/**
+	 * A script that forgets an `await` leaves a backend call in flight. Once
+	 * the script returns, its rejection has nobody to catch it and reaches the
+	 * host as an unhandled rejection, which terminates the whole agent. Track
+	 * every call so `settle()` can drain them, and neutralise the rejection
+	 * here: a forgotten promise must degrade to a trace line, never a crash.
+	 */
+	const track = <T>(promise: Promise<T>): Promise<T> => {
+		pending.add(promise);
+		const done = () => pending.delete(promise);
+		promise.then(done, done);
+		promise.catch(() => {});
+		return promise;
+	};
+	/**
+	 * Replace every async method in place with a tracked version. Tracking the
+	 * backend call alone is not enough: the promise the script drops is the one
+	 * returned by `state.search(...)`, one layer above it. Rewriting in place
+	 * rather than proxying keeps these objects structured-cloneable, which the
+	 * host requires for anything a script returns.
+	 */
+	const trackMethods = <T extends object>(subject: T): T => {
+		for (const key of Reflect.ownKeys(subject)) {
+			const descriptor = Object.getOwnPropertyDescriptor(subject, key);
+			if (!descriptor || typeof descriptor.value !== "function" || !descriptor.writable) continue;
+			const original = descriptor.value as (...a: unknown[]) => unknown;
+			Object.defineProperty(subject, key, {
+				...descriptor,
+				value: (...args: unknown[]) => {
+					const result = original.apply(subject, args);
+					return result instanceof Promise ? track(result) : result;
+				},
+			});
+		}
+		return subject;
+	};
+	const operations = trackMethods({ ...options.operations });
 	const budget = options.budget ?? DEFAULT_BUDGET;
 	const approved = options.approved ?? new Set<string>();
 	const events: ScriptEvent[] = [];
@@ -361,7 +406,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				Object.defineProperty(state, key, { enumerable: false });
 			}
 		}
-		return state;
+		return trackMethods(state);
 	};
 
 	const cua: CuaApi = {
@@ -392,16 +437,41 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			// A scoped query is the cheapest way to prove the state is still live and
 			// recover its outline; the backend rejects an evicted id.
 			spend("search_ui", `rebind ${stateId}`);
-			const result = await operations.search({ stateId, capability: "actionable" });
-			return makeState({ ...result, details: { ...(result.details as object), stateId } }, stateId);
+			try {
+				const result = await operations.search({ stateId, capability: "actionable" });
+				return makeState({ ...result, details: { ...(result.details as object), stateId } }, stateId);
+			} catch (error) {
+				// The backend forgets which window it controls between tool calls, so
+				// a rebind in a later call can fail even though the state is fine.
+				// That is ordinary, not an error the script should have to handle:
+				// re-observe to re-establish the target, then rebind once more.
+				if (!MISSING_TARGET_RE.test(error instanceof Error ? error.message : String(error))) throw error;
+				spend("observe_ui", "rebind recovery");
+				await operations.observe({});
+				const result = await operations.search({ stateId, capability: "actionable" });
+				return makeState({ ...result, details: { ...(result.details as object), stateId } }, stateId);
+			}
 		},
 	};
 
 	return {
-		cua,
+		cua: trackMethods(cua),
 		log: (...values) => record({ kind: "log", name: values.map(stringify).join(" ") }),
 		events,
 		actionCount: () => actions,
+		settle: async (graceMs = SETTLE_GRACE_MS) => {
+			// Rejections are already neutralised by `track`, so a straggler can no
+			// longer crash the host. This only gives in-flight calls a brief chance
+			// to finish inside the run; a hung one must not hold the agent, so the
+			// wait is bounded rather than unbounded.
+			const deadline = (options.now?.() ?? Date.now()) + graceMs;
+			while (pending.size > 0 && (options.now?.() ?? Date.now()) < deadline) {
+				await Promise.race([
+					Promise.allSettled([...pending]),
+					new Promise((resolve) => setTimeout(resolve, graceMs)),
+				]);
+			}
+		},
 	};
 };
 

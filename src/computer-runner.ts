@@ -42,6 +42,7 @@ export const runScript = async (
 	source: string,
 	runtime: CuaRuntime,
 	signal?: AbortSignal,
+	options?: { settleGraceMs?: number },
 ): Promise<ScriptOutcome> => {
 	const fn = compileScript(source);
 	try {
@@ -54,6 +55,11 @@ export const runScript = async (
 			actions: runtime.actionCount(),
 			error: error instanceof Error ? error : new Error(String(error)),
 		};
+	} finally {
+		// A script that forgot an `await` can leave a call in flight. Draining
+		// here keeps its failure inside this run instead of surfacing later as
+		// an unhandled rejection that would take the host process down.
+		await runtime.settle(options?.settleGraceMs);
 	}
 };
 
