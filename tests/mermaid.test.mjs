@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorize, preprocessEntities, renderFitted, renderMermaid } from "../src/mermaid.ts";
+import { colorize, preprocessEntities, renderFitted, renderMermaid, stylesToClassDefs } from "../src/mermaid.ts";
 import { transformMermaidBlocks } from "../extensions/mermaid.ts";
 
 const AUTH_DIAGRAM = `flowchart TD
@@ -152,4 +152,44 @@ test("an uncoloured diagram is unchanged apart from theme styling", () => {
 	const lines = colorize(art);
 	assert.equal(lines.length, art.plain.length);
 	assert.ok(lines.some((line) => line.includes("One")));
+});
+
+// The shorthand models actually reach for, taken from a real session.
+const STYLE_DIAGRAM = `flowchart LR
+    A["Your dashboard"] -->|freeze| B["Snapshot"]
+    B -->|store it WHERE| C[("Storage")]
+    C -->|read| D["OUR code"]
+
+    style C fill:#ffe9b0,stroke:#d39e00,stroke-width:2px
+    style D fill:#d4f5d4,stroke:#2d8a2d`;
+
+test("per-node style statements colour the diagram, not just classDef", () => {
+	const art = renderMermaid(STYLE_DIAGRAM);
+	assert.deepEqual(art.warnings, []);
+	const fills = Object.values(art.classDefs ?? {}).map((def) => def.fill).sort();
+	assert.deepEqual(fills, ["#d4f5d4", "#ffe9b0"], "each style line becomes a usable class");
+	const lines = colorize(art).join("\n");
+	assert.ok(lines.includes(`${ESC}[38;2;0;0;0;48;2;255;233;176m`), "the open box keeps its yellow fill");
+	assert.ok(lines.includes(`${ESC}[38;2;0;0;0;48;2;212;245;212m`), "the owned box keeps its green fill");
+});
+
+test("style rewriting keeps nodes distinct and survives a top-down reflow", () => {
+	const rewritten = stylesToClassDefs(STYLE_DIAGRAM);
+	assert.match(rewritten, /classDef \w+ fill:#ffe9b0/);
+	assert.match(rewritten, /class C \w+/);
+	assert.doesNotMatch(rewritten, /^\s*style /m, "the unsupported statement must be gone");
+	const fitted = renderFitted(STYLE_DIAGRAM, 40);
+	assert.ok(fitted.width <= 40, "the diagram must have been re-laid out");
+	assert.ok(colorize(fitted).join("\n").includes(`${ESC}[48;2;`) || colorize(fitted).join("\n").includes("48;2;255;233;176"));
+});
+
+test("a diagram without style statements is passed through untouched", () => {
+	const plain = "flowchart TD\n  A[One] --> B[Two]";
+	assert.equal(stylesToClassDefs(plain), plain);
+});
+
+test("a style statement naming an edge or unknown id does not break rendering", () => {
+	const art = renderMermaid("flowchart TD\n  A[One] --> B[Two]\n  style Z fill:#eeeeee");
+	assert.deepEqual(art.warnings, []);
+	assert.ok(art.plain.some((line) => line.includes("One")));
 });

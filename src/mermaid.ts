@@ -129,6 +129,30 @@ export interface MermaidArt {
 }
 
 /**
+ * A per-node `style ID fill:#rrggbb,...` statement. Mermaid accepts this as a
+ * shorthand for a one-off `classDef`, and models reach for it constantly, but
+ * `lovely-mermaid` only understands `classDef` plus `class`.
+ */
+const STYLE = /^([ \t]*)style[ \t]+([\w-]+)[ \t]+([^\n]+)$/gm;
+
+/**
+ * Rewrite `style X fill:...` into the `classDef`/`class` pair that the
+ * renderer understands, so a diagram coloured the common way is not drawn as
+ * undifferentiated boxes. Each node gets its own generated class, which keeps
+ * per-node styles distinct even when two nodes share no properties.
+ */
+export function stylesToClassDefs(src: string): string {
+  const defs: string[] = [];
+  const body = src.replace(STYLE, (_raw, indent: string, id: string, props: string) => {
+    const name = `pixstyle${defs.length}`;
+    defs.push(`${indent}classDef ${name} ${props.trim()}`, `${indent}class ${id} ${name}`);
+    return "";
+  });
+  if (defs.length === 0) return src;
+  return `${body.replace(/\n{3,}/g, "\n\n").trimEnd()}\n${defs.join("\n")}`;
+}
+
+/**
  * Header of a flowchart/graph declaration, capturing its direction keyword.
  * Also matches a nested `direction LR` inside subgraphs.
  */
@@ -163,7 +187,7 @@ export function renderFitted(src: string, width: number): MermaidArt {
 }
 
 export function renderMermaid(src: string): MermaidArt {
-  const { src: prepared, swaps } = preprocessEntities(src);
+  const { src: prepared, swaps } = preprocessEntities(stylesToClassDefs(src));
   const art = lovelyRender(prepared) as MermaidArt;
   return {
     plain: art.plain.map((line) => restore(line, swaps)),
