@@ -205,8 +205,14 @@ export function renderMermaid(src: string): MermaidArt {
  * undifferentiated boxes without this.
  */
 export function colorize(art: MermaidArt): string[] {
+  // An empty theme, not the library default. The default dims borders and
+  // paints arrows cyan whether or not the author asked for anything, which
+  // invents meaning the model never expressed. Only colour the author wrote
+  // should reach the screen, so an uncoloured diagram stays uncoloured and
+  // inherits the surrounding text style.
+  if (Object.keys(art.classDefs ?? {}).length === 0) return art.plain;
   try {
-    const lines = toAnsi(art as never) as string[];
+    const lines = toAnsi(art as never, {}) as string[];
     return lines.length === art.plain.length ? lines : art.plain;
   } catch {
     return art.plain;

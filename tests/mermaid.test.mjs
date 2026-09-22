@@ -193,3 +193,21 @@ test("a style statement naming an edge or unknown id does not break rendering", 
 	assert.deepEqual(art.warnings, []);
 	assert.ok(art.plain.some((line) => line.includes("One")));
 });
+
+test("a diagram the model did not colour gets no colour from us", () => {
+	// Fidelity to the model's output: colour carries meaning, so inventing it
+	// (dim borders, cyan arrows) asserts a distinction the author never made.
+	const art = renderMermaid("flowchart TD\n  A[One] -->|label| B[Two]");
+	const lines = colorize(art);
+	assert.deepEqual(lines, art.plain);
+	assert.ok(!lines.join("").includes(ESC), "no escape sequences at all");
+});
+
+test("only the nodes the model styled are coloured", () => {
+	const art = renderMermaid("flowchart TD\n  A[One] -->|label| B[Two]\n  style B fill:#d4f5d4,stroke:#2d8a2d");
+	const lines = colorize(art);
+	const boxA = lines.find((line) => line.includes("One"));
+	const boxB = lines.find((line) => line.includes("Two"));
+	assert.ok(!boxA.includes(ESC), "an unstyled node stays plain");
+	assert.ok(boxB.includes(`${ESC}[38;2;0;0;0;48;2;212;245;212m`), "a styled node keeps its fill");
+});
