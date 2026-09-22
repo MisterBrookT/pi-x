@@ -139,13 +139,92 @@ test("a blocked address is surfaced as an error, not a throw", async () => {
 	assert.equal(result.status, 0);
 });
 
-test("a slow response times out with a clear message", async () => {
+test("a response that never arrives times out with a clear message", async () => {
 	const fetchImpl = (_url, init) =>
 		new Promise((_resolve, reject) => {
 			init.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
 		});
 	const result = await fetchUrl("https://example.com/slow", { fetch: fetchImpl, lookup, timeoutMs: 40 });
+	assert.match(result.error ?? "", /Timed out fetching .*no data for 40ms/);
+});
+
+/**
+ * Deliver a complete HTML document in `chunks` pieces `gapMs` apart, so the
+ * download is slow but never stalled.
+ */
+function trickle({ chunks, gapMs, headers }) {
+	const body = `<p>This paragraph is a chunk of slowly delivered prose, repeated so the extractor keeps it as article content. ${"Padding sentence for article scoring. ".repeat(6)}</p>`;
+	return async () => {
+		let sent = 0;
+		return new Response(
+			new ReadableStream({
+				async pull(controller) {
+					await new Promise((r) => setTimeout(r, gapMs));
+					if (sent === 0) controller.enqueue(new TextEncoder().encode("<html><head><title>Slow paper</title></head><body>"));
+					else if (sent <= chunks) controller.enqueue(new TextEncoder().encode(body));
+					else {
+						controller.enqueue(new TextEncoder().encode("</body></html>"));
+						controller.close();
+					}
+					sent++;
+				},
+			}),
+			{ headers },
+		);
+	};
+}
+
+test("a slow but progressing download is not killed by the idle timeout", async () => {
+	// Ten chunks 60ms apart take ~600ms, far beyond the 250ms idle budget,
+	// yet no single gap reaches it.
+	const result = await fetchUrl("https://example.com/slow-paper", {
+		fetch: trickle({ chunks: 10, gapMs: 60, headers: { "content-type": "text/html" } }),
+		lookup,
+		timeoutMs: 250,
+	});
+	assert.equal(result.error, undefined, "progress must renew the deadline");
+	assert.match(result.content, /slowly delivered prose/);
+});
+
+test("a download that stalls mid-body is still abandoned", async () => {
+	let sent = false;
+	const fetchImpl = async () =>
+		new Response(
+			new ReadableStream({
+				pull(controller) {
+					if (sent) return new Promise(() => {});
+					sent = true;
+					controller.enqueue(new TextEncoder().encode("<p>start</p>"));
+				},
+			}),
+			{ headers: { "content-type": "text/html" } },
+		);
+	const result = await fetchUrl("https://example.com/stalled", { fetch: fetchImpl, lookup, timeoutMs: 60 });
+	assert.match(result.error ?? "", /no data for/);
+});
+
+test("an absolute ceiling still bounds an endlessly trickling response", async () => {
+	const result = await fetchUrl("https://example.com/endless-trickle", {
+		fetch: trickle({ chunks: Number.POSITIVE_INFINITY, gapMs: 5, headers: { "content-type": "text/html" } }),
+		lookup,
+		timeoutMs: 250,
+		maxTotalMs: 300,
+	});
 	assert.match(result.error ?? "", /Timed out fetching/);
+});
+
+test("a paper larger than the HTML ceiling is not refused on size", async () => {
+	const big = new Uint8Array(6 * 1024 * 1024);
+	const fetchImpl = async () => new Response(big, { headers: { "content-type": "application/pdf" } });
+	const result = await fetchUrl("https://arxiv.test/paper.pdf", { fetch: fetchImpl, lookup });
+	assert.doesNotMatch(result.error ?? "", /too large/i);
+});
+
+test("a configured pdf.maxSizeMB still bounds the download", async () => {
+	const big = new Uint8Array(3 * 1024 * 1024);
+	const fetchImpl = async () => new Response(big, { headers: { "content-type": "application/pdf" } });
+	const result = await fetchUrl("https://arxiv.test/paper.pdf", { fetch: fetchImpl, lookup, pdf: { maxSizeMB: 1 } });
+	assert.match(result.error ?? "", /too large/i);
 });
 
 test("X gets a browser user agent so it does not answer 403", async () => {

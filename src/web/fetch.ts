@@ -9,6 +9,13 @@
 import { fetchRemoteUrl, type GuardOptions } from "./ssrf.ts";
 
 const MAX_BYTES = 5 * 1024 * 1024;
+/** Papers routinely exceed the HTML ceiling, so PDFs get their own. */
+const MAX_PDF_BYTES = 30 * 1024 * 1024;
+
+/** Render a timeout budget readably, so sub-second limits do not print "0s". */
+function formatDuration(ms: number): string {
+  return ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`;
+}
 const CHROME_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -33,8 +40,19 @@ function requestHeaders(url: URL): Record<string, string> {
   };
 }
 
-/** Read a body with a hard ceiling, cancelling as soon as it is exceeded. */
-async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+/**
+ * Read a body with a hard ceiling, cancelling as soon as it is exceeded.
+ *
+ * `onProgress` reports each chunk so the caller can distinguish a stalled
+ * connection from a slow but healthy one. A large PDF over a slow link is
+ * still making progress and must not be treated as a timeout.
+ */
+async function readCapped(
+  response: Response,
+  maxBytes: number,
+  onProgress?: () => void,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > maxBytes) throw sizeError(maxBytes);
   const reader = response.body?.getReader();
@@ -45,11 +63,23 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
   }
   const chunks: Uint8Array[] = [];
   let total = 0;
+  // Watch the deadline directly: a body that never yields another chunk must
+  // not depend on the fetch implementation rejecting the pending read for us.
+  const aborted = signal
+    ? new Promise<never>((_resolve, reject) => {
+        const fail = () => reject(new DOMException("Aborted", "AbortError"));
+        if (signal.aborted) fail();
+        else signal.addEventListener("abort", fail, { once: true });
+      })
+    : undefined;
+  if (aborted) aborted.catch(() => {});
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const next = reader.read();
+      const { done, value } = aborted ? await Promise.race([next, aborted]) : await next;
       if (done) break;
       if (!value) continue;
+      onProgress?.();
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
@@ -57,6 +87,9 @@ async function readCapped(response: Response, maxBytes: number): Promise<Uint8Ar
       }
       chunks.push(value);
     }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -118,11 +151,14 @@ export interface FetchResult {
 
 export interface FetchArgs extends GuardOptions {
   mode?: "readable" | "raw";
+  /** Time allowed with no progress at all. Renewed by each chunk received. */
   timeoutMs?: number;
+  /** Absolute ceiling regardless of progress. */
+  maxTotalMs?: number;
   maxBytes?: number;
   signal?: AbortSignal;
   fetch?: typeof fetch;
-  pdf?: { enabled?: boolean; maxPages?: number };
+  pdf?: { enabled?: boolean; maxPages?: number; maxSizeMB?: number };
 }
 
 /** Readability plus Turndown; loaded lazily so a plain fetch stays cheap. */
@@ -173,8 +209,25 @@ async function pdfToMarkdown(bytes: Uint8Array, url: string, maxPages: number): 
 /** Fetch one URL and return markdown, raw text, or a described failure. */
 export async function fetchUrl(rawUrl: string, args: FetchArgs = {}): Promise<FetchResult> {
   const maxBytes = args.maxBytes ?? MAX_BYTES;
+  const idleMs = args.timeoutMs ?? 30_000;
+  // The deadline covers connecting and waiting for headers, then each chunk
+  // renews it. A slow download therefore survives; a dead one still dies.
+  const totalMs = args.maxTotalMs ?? Math.max(idleMs, 300_000);
   const timeout = new AbortController();
-  const timer = setTimeout(() => timeout.abort(), args.timeoutMs ?? 30_000);
+  const startedAt = Date.now();
+  let timer = setTimeout(() => timeout.abort(), idleMs);
+  let receiving = true;
+  const keepAlive = () => {
+    if (!receiving || Date.now() - startedAt >= totalMs) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => timeout.abort(), idleMs);
+  };
+  /** Stop the clock once the bytes are in: parsing is not a network stall. */
+  const finishReceiving = <T>(body: T): T => {
+    receiving = false;
+    clearTimeout(timer);
+    return body;
+  };
   const onAbort = () => timeout.abort();
   args.signal?.addEventListener("abort", onAbort, { once: true });
   try {
@@ -195,7 +248,7 @@ export async function fetchUrl(rawUrl: string, args: FetchArgs = {}): Promise<Fe
       if (!isTextual(mime) && mime !== "") {
         return { url: rawUrl, content: "", mime, status: response.status, error: `Cannot return ${mime} as raw text` };
       }
-      const bytes = await readCapped(response, maxBytes);
+      const bytes = finishReceiving(await readCapped(response, maxBytes, keepAlive, timeout.signal));
       return { url: rawUrl, content: decodeBody(bytes, contentType), mime, status: response.status };
     }
 
@@ -203,20 +256,21 @@ export async function fetchUrl(rawUrl: string, args: FetchArgs = {}): Promise<Fe
       if (args.pdf?.enabled === false) {
         return { url: rawUrl, content: "", mime, status: response.status, error: "PDF extraction is disabled" };
       }
-      const bytes = await readCapped(response, maxBytes);
+      const pdfMax = args.maxBytes ?? (args.pdf?.maxSizeMB ? args.pdf.maxSizeMB * 1024 * 1024 : MAX_PDF_BYTES);
+      const bytes = finishReceiving(await readCapped(response, pdfMax, keepAlive, timeout.signal));
       const { markdown } = await pdfToMarkdown(bytes, rawUrl, args.pdf?.maxPages ?? 100);
       return { url: rawUrl, content: markdown, mime: "application/pdf", status: response.status };
     }
 
     if (isHtml(mime) || mime === "") {
-      const bytes = await readCapped(response, maxBytes);
+      const bytes = finishReceiving(await readCapped(response, maxBytes, keepAlive, timeout.signal));
       const html = decodeBody(bytes, contentType);
       const { title, markdown } = await htmlToMarkdown(html, rawUrl);
       return { url: rawUrl, title, content: markdown, mime: mime || "text/html", status: response.status };
     }
 
     if (isTextual(mime)) {
-      const bytes = await readCapped(response, maxBytes);
+      const bytes = finishReceiving(await readCapped(response, maxBytes, keepAlive, timeout.signal));
       return { url: rawUrl, content: decodeBody(bytes, contentType), mime, status: response.status };
     }
 
@@ -224,7 +278,8 @@ export async function fetchUrl(rawUrl: string, args: FetchArgs = {}): Promise<Fe
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const timedOut = timeout.signal.aborted && !args.signal?.aborted;
-    return { url: rawUrl, content: "", mime: "", status: 0, error: timedOut ? `Timed out fetching ${rawUrl}` : message };
+    const stalled = `Timed out fetching ${rawUrl} (no data for ${formatDuration(idleMs)})`;
+    return { url: rawUrl, content: "", mime: "", status: 0, error: timedOut ? stalled : message };
   } finally {
     clearTimeout(timer);
     args.signal?.removeEventListener("abort", onAbort);
