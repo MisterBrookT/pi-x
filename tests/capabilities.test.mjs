@@ -9,7 +9,7 @@ import { settingsFor } from "./helpers/tool-settings.mjs";
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, createEventBus } from "@earendil-works/pi-coding-agent";
 import registerCapabilities from "../extensions/capabilities.ts";
 
 const ALL = [
@@ -24,8 +24,11 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	let activeTools = [...active];
 	const handlers = new Map();
 	const commands = new Map();
+	const registered = new Map();
 	const pi = {
-		getAllTools: () => all.map((name) => ({ name })),
+		events: createEventBus(),
+		registerTool: tool => registered.set(tool.name, tool),
+		getAllTools: () => [...all.map((name) => ({ name, description: name, parameters: { type: "object" } })), ...registered.values()],
 		getActiveTools: () => [...activeTools],
 		setActiveTools: (names) => { activeTools = [...names]; },
 		registerCommand: (name, value) => commands.set(name, value),
@@ -52,7 +55,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 test("everyday tools are on by default", () => {
 	const h = harness();
 	h.start();
-	for (const name of ["todo", "question", "web_search", "subagent", "lsp_fix"]) {
+	for (const name of ["todo", "question", "web_search", "subagent", "discover_tools"]) {
 		assert.ok(h.active().includes(name), `${name} should be on`);
 	}
 });
@@ -74,11 +77,12 @@ test("MCP is off by default, including per-server tools", () => {
 	assert.ok(!h.active().includes("mcp__excalidraw"), "server tools cannot be listed ahead of time");
 });
 
-test("subagent internals are on, because the family is on by default", () => {
-	const h = harness();
+test("specialist schemas are absent until discovered", () => {
+	const h = harness({ active: ALL });
 	h.start();
-	for (const name of ["subagent", "subagent_supervisor"]) {
-		assert.ok(h.active().includes(name), `${name} should be on`);
+	assert.ok(h.active().includes("subagent"));
+	for (const name of ["subagent_supervisor", "lsp_diagnostics", "lsp_fix", "computer"]) {
+		assert.ok(!h.active().includes(name), `${name} should be deferred`);
 	}
 });
 

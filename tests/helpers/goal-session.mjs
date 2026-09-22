@@ -3,7 +3,7 @@ import { EventEmitter, once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AssistantMessageEventStream, InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { AssistantMessageEventStream, InMemoryCredentialStore, getCurrentSystemPrompt, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import registerGoal from "../../extensions/goal.ts";
 import registerBackground from "../../extensions/background.ts";
@@ -23,8 +23,10 @@ export async function goalSession(t, script, { sessionManager, extensions = [], 
 	const requests = [];
 	const events = new EventEmitter();
 	runtime.streamSimple = (_model, context, options) => {
+		// Match ModelRuntime's public Context -> provider TranscriptContext boundary.
+		context = normalizeContext(context);
 		const index = requests.length;
-		requests.push({ messages: structuredClone(context.messages), systemPrompt: context.systemPrompt, tools: (context.tools ?? []).map((tool) => tool.name) });
+		requests.push({ messages: structuredClone(context.messages), systemPrompt: getCurrentSystemPrompt(context.messages), tools: getCurrentTools(context.messages).map((tool) => tool.name) });
 		events.emit("changed");
 		const stream = new AssistantMessageEventStream();
 		(async () => {
@@ -54,7 +56,7 @@ export async function goalSession(t, script, { sessionManager, extensions = [], 
 	};
 	const loader = new DefaultResourceLoader({ cwd: dir, agentDir: dir, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, additionalExtensionPaths: goalExtensionPath ? [goalExtensionPath] : [], extensionFactories: [registerBackground, ...(goalExtensionPath ? [] : [registerGoal]), ...extensions] });
 	await loader.reload();
-	const { session, extensionsResult } = await createAgentSession({ cwd: dir, agentDir: dir, model, modelRuntime: runtime, resourceLoader: loader, settingsManager, sessionManager: sm, tools });
+	const { session, extensionsResult } = await createAgentSession({ cwd: dir, agentDir: dir, model, modelRuntime: runtime, resourceLoader: loader, settingsManager, sessionManager: sm, tools: tools ?? undefined });
 	assert.deepEqual(extensionsResult.errors, []);
 	const extensionErrors = [];
 	let settledCount = 0;

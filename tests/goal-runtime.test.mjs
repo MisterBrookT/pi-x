@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { goalSession, call, finish, say } from "./helpers/goal-session.mjs";
@@ -183,7 +184,7 @@ test("real public compaction retains an active goal and reinjects it afterward",
 	const pendingExtension = pi => pi.events.on("pix:background-state:query", query => { if (pending) query.running += 1; });
 	const h = await goalSession(t, ({ index, goal, context }) => {
 		if (index === 0) return say(`Initial work remains pending. ${"context ".repeat(5000)}`);
-		if (!context.tools?.length) return say("Compaction summary deliberately omits the private objective.");
+		if (!getCurrentTools(context.messages).length) return say("Compaction summary deliberately omits the private objective.");
 		if (goal.status === "active") return finish(goal, "completed", "Goal context was reinjected after real compaction.");
 		return say("Verified after compaction.");
 	}, { extensions: [pendingExtension], settings: { compaction: { enabled: false, keepRecentTokens: 1, reserveTokens: 1 }, retry: { enabled: false } } });

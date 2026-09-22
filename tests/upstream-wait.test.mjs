@@ -25,6 +25,11 @@ test("real upstream registration omits bg_wait but retains delegation and other 
 		const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
 		assert.ok(!tools.includes("bg_wait"), "removed rather than merely disabled by default");
 		for (const name of ["subagent", "web_search", "lsp_diagnostics"]) assert.ok(tools.includes(name), name);
+		const definitions = loaded.extensions.flatMap(extension => [...extension.tools.values()].map(tool => tool.definition));
+		const diagnostics = definitions.find(tool => tool.name === "lsp_diagnostics");
+		assert.deepEqual(diagnostics.promptGuidelines, ["Use configured LSP servers for targeted diagnostics. If a server is unavailable, report that and use the project's checks."]);
+		assert.equal(definitions.find(tool => tool.name === "lsp_fix").promptGuidelines.length, 1);
+		assert.doesNotMatch(definitions.find(tool => tool.name === "subagent").promptGuidelines.join("\n"), /workflowScript/);
 		loaded.runtime.invalidate();
 	}
 });

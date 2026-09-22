@@ -6,6 +6,7 @@ import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../src/background-
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
 import { createStateReminder } from "../src/state-reminder.ts";
+import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION } from "../src/tool-discovery.ts";
 
 const WAKE = "pix-goal-wake";
 const commands = ["status", "pause", "stop", "resume", "clear"];
@@ -26,6 +27,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 	};
 
 	const show = (ctx: ExtensionContext, waiting = false) => {
+		pi.events.emit(GOAL_TOOL_STATE, { active: goal?.status === "active" });
 		if (ctx.hasUI) ctx.ui.setStatus("pix-goal", goal?.status === "active"
 			? `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}` : undefined);
 	};
@@ -168,7 +170,9 @@ export default function goalExtension(pi: ExtensionAPI) {
 				ctx.ui.notify("Wait for the current turn to finish or press Esc before starting/resuming a goal.", "warning");
 				return;
 			}
-			if (!pi.getActiveTools().includes("goal")) {
+			const permission: { allowed?: boolean } = {};
+			pi.events.emit(GOAL_TOOL_PERMISSION, permission);
+			if (!(permission.allowed ?? pi.getActiveTools().includes("goal"))) {
 				ctx.ui.notify("Enable the goal tool with /tool goal on first.", "error");
 				return;
 			}

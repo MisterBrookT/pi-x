@@ -3,7 +3,7 @@
  *
  * Pi's `SettingsList` routes Space and Enter to the same action, so a row can
  * either toggle or open a submenu but never both. This panel needs both on one
- * row: Space flips a capability, Enter opens its tools. That difference is the
+ * row: Space cycles its policy, Enter opens its tools. That difference is the
  * whole point of the design, so the list is rendered here instead.
  *
  * Rendering is kept free of terminal state: `render` returns lines and
@@ -11,7 +11,7 @@
  * be driven directly by a test.
  */
 
-import { Input, getKeybindings, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
+import { Input, getKeybindings, matchesKey, truncateToWidth, visibleWidth, type KeyId } from "@earendil-works/pi-tui";
 import type { PanelModel, PanelRow } from "./tool-panel.ts";
 import { formatTokens, panelGroup, panelSummary } from "./tool-panel.ts";
 
@@ -30,7 +30,7 @@ export interface PanelTheme {
 	title: (text: string) => string;
 	muted: (text: string) => string;
 	label: (text: string, selected: boolean) => string;
-	value: (text: string, on: boolean) => string;
+	value: (text: string, on: boolean, mode?: string) => string;
 	cursor: string;
 }
 
@@ -45,6 +45,7 @@ export const plainTheme: PanelTheme = {
 
 export type PanelAction =
 	| { type: "toggle"; row: PanelRow }
+	| { type: "reset"; row: PanelRow }
 	| { type: "enter"; row: PanelRow }
 	| { type: "action"; verb: string }
 	| { type: "back" }
@@ -139,6 +140,7 @@ export class ToolPanelView {
 			this.index = this.index === rows.length - 1 ? 0 : this.index + 1;
 			return { type: "move" };
 		}
+		if (matchesKey(data, "delete") && this.selected?.mode) return { type: "reset", row: this.selected };
 		if (matchesKey(data, "space")) {
 			const row = this.selected;
 			return row ? { type: "toggle", row } : { type: "none" };
@@ -147,7 +149,7 @@ export class ToolPanelView {
 			const row = this.selected;
 			// Enter opens a capability. On a plain tool there is nothing to open,
 			// so it toggles instead of doing nothing, which is the least surprising
-			// behaviour for a row that shows an on/off value.
+			// behaviour for a row that shows a policy value.
 			if (!row) return { type: "none" };
 			return row.kind === "capability" ? { type: "enter", row } : { type: "toggle", row };
 		}
@@ -203,7 +205,7 @@ export class ToolPanelView {
 			return lines.map((line) => truncate(line, width));
 		}
 
-		const labelWidth = Math.min(28, Math.max(...rows.map((row) => rowLabel(row).length)));
+		const labelWidth = Math.min(28, Math.max(1, width - 12), Math.max(...rows.map((row) => visibleWidth(rowLabel(row)))));
 		const { start, end } = this.window();
 		for (let i = start; i < end; i += 1) {
 			const row = rows[i];
@@ -212,8 +214,9 @@ export class ToolPanelView {
 			}
 			const selected = i === this.index;
 			const marker = selected ? this.theme.cursor : " ";
-			const label = this.theme.label(rowLabel(row).padEnd(labelWidth), selected);
-			const state = this.theme.value(rowOn(row) ? "on " : "off", rowOn(row));
+			const shortLabel = truncate(rowLabel(row), labelWidth);
+			const label = this.theme.label(shortLabel + " ".repeat(Math.max(0, labelWidth - visibleWidth(shortLabel))), selected);
+			const state = this.theme.value(row.mode ? row.mode.padEnd(5) : rowOn(row) ? "on " : "off", rowOn(row), row.mode);
 			const detail = this.theme.muted(rowDetail(row));
 			lines.push(truncate(`${marker} ${label}  ${state}  ${detail}`, width));
 		}
@@ -233,7 +236,8 @@ export class ToolPanelView {
 		const selected = this.selected;
 		const canEnter = selected?.kind === "capability";
 		return [
-			"Space toggle",
+			selected?.mode ? (selected.defaultMode === "auto" || selected.discoverable) ? "Space cycle auto/on/off" : "Space toggle on/off" : "Space toggle",
+			selected?.mode ? "Delete default" : undefined,
 			...(this.scope?.shortcuts ?? []).map(entry => `${entry.key.toUpperCase()} ${entry.verb}`),
 			canEnter ? "Enter open" : undefined,
 			this.scope ? "Esc back" : this.search.getValue() ? "Esc clear search" : "Esc close",
@@ -258,11 +262,12 @@ export const rowOn = (row: PanelRow): boolean => row.on;
  * provenance answers.
  */
 export const rowDetail = (row: PanelRow): string => {
+	const policy = row.inherited ? "default · " : "";
 	if (row.kind === "capability") {
 		const arrow = "▸";
-		return `${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}  ${arrow}`;
+		return `${policy}${row.activeCount}/${row.toolCount} tools · ${formatTokens(row.activeTokens)} · ${row.origin}  ${arrow}`;
 	}
-	return `${formatTokens(row.tokens)} · ${row.origin}`;
+	return `${policy}${row.mode ? `${row.on ? "active" : "inactive"} · ` : ""}${formatTokens(row.tokens)} · ${row.origin}`;
 };
 
 /**

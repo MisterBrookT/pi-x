@@ -8,11 +8,13 @@ import { registerCapabilityAction } from "../src/capability-actions.ts";
 import { configureSubagentRoles } from "../src/subagent-roles.ts";
 import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
 import { webProfiles } from "../src/web-profiles.ts";
+import { withPixToolGuidance } from "../src/tool-guidance.ts";
 import { configureWeb, readWebSettings } from "../src/web-settings.ts";
 
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 
 function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
+  tool = withPixToolGuidance(tool);
   // Native completion notifications remain upstream-owned; no separate wait tool.
   if (tool.name === "bg_wait") return;
   if (tool.name === "subagent_supervisor") {

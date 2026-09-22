@@ -3,12 +3,11 @@ import { Type } from "typebox";
 import { subagentRoles, subagentRoleGuidance } from "./subagent-policy.ts";
 
 type Tool = Parameters<ExtensionAPI["registerTool"]>[0];
-const text = () => Type.String({ minLength: 1 });
 export const simpleSubagentParameters = Type.Object({
   action: Type.Union(["start", "status", "steer", "stop"].map(value => Type.Literal(value))),
   tasks: Type.Optional(Type.Array(Type.Object({
     agent: Type.Union(subagentRoles.map(role => Type.Literal(role))),
-    task: text(),
+    task: Type.String({ minLength: 1, description: "Task and relevant context." }),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 8,
     description: "For start: one task, or independent tasks to run in parallel. Available roles: worker and scout." })),
   id: Type.Optional(Type.String({ minLength: 1, description: "Run ID returned by start. Required for steer/stop; omit for status to list runs." })),
@@ -16,11 +15,10 @@ export const simpleSubagentParameters = Type.Object({
   index: Type.Optional(Type.Integer({ minimum: 0, description: "Optional zero-based child index for status or steer within a parallel run." })),
 }, { additionalProperties: false });
 
-export const simpleSubagentDescription = `Delegate independent tasks to configured agents. Actions: start, status, steer, stop.
+export const simpleSubagentDescription = `Delegate tasks to configured agents.
 ${subagentRoleGuidance}
-Up to four tasks run concurrently, eight per run, each in its own git worktree; their changes are NOT merged — review and integrate them yourself. A single task runs in the current directory; never overlap writers there.
-Runs finish asynchronously and notify this session; keep working meanwhile rather than polling. Stop and steer do not undo work already done.
-Give each task full context and a concrete deliverable; delegation does not grant permission. Sequence with todo: start A and B, read both results, then start C.`;
+Up to four tasks run concurrently. Multiple tasks use separate git worktrees; changes are NOT merged automatically. A single task runs in the current directory; never overlap writers there.
+Completion notifies this session; delegation does not grant permission. Stop and steer do not undo work already done.`;
 
 /** Translate a small public contract into the upstream executor's existing API. */
 export function subagentRequest(input: Record<string, unknown>): Record<string, unknown> {
@@ -64,8 +62,8 @@ export function simplifySubagent(tool: Tool): Tool {
     ...tool,
     parameters: simpleSubagentParameters,
     description: simpleSubagentDescription,
-    promptSnippet: "Start, inspect, guide, or stop subagents; independent tasks can run in parallel",
-    promptGuidelines: ["Keep the critical path with the main assistant; use subagent for bounded independent work, not whole-task handoff followed by waiting. Read results before dependent work and keep one writer per worktree."],
+    promptSnippet: "Delegate tasks to other agents",
+    promptGuidelines: ["Use subagents when delegation or parallel work would help."],
     // Old normalizers/renderers expect the old schema. Keep result rendering,
     // but use Pi's generic call rendering for the new arguments.
     prepareArguments: undefined,

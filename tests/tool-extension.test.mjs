@@ -52,13 +52,13 @@ const harness = ({ all = ["read", "bash", HEAVY], active = ["read", "bash", HEAV
 		 * `KeybindingsManager` and a real theme shape, so the keys the panel reads
 		 * are the keys the host would actually give it.
 		 */
-		mountPanel: async () => {
+		mountPanel: async ({ theme } = {}) => {
 			await commands.get("tool").handler("", ctx);
 			const { factory } = custom.at(-1);
 			const results = [];
 			const component = await factory(
 				{ requestRender: () => {} },
-				{ fg: (_colour, text) => text, bold: (text) => text },
+				theme ?? { fg: (_colour, text) => text, bold: (text) => text },
 				new KeybindingsManager(TUI_KEYBINDINGS),
 				(result) => results.push(result),
 			);
@@ -86,6 +86,110 @@ test('Subagent roles shortcut closes the panel before opening its picker', async
  await h.run();
  assert.equal(ran, true);
  assert.ok(h.completions('subagent r').some(item => item.value === 'subagent roles'));
+});
+
+test("interactive policy cycles auto/on/off/auto independently of runtime activation", async () => {
+ const h = harness({ all: ["computer"], active: [] });
+ const { component } = await h.mountPanel();
+ const screen = () => component.render(120).join("\n");
+ assert.match(screen(), /Computer\s+auto\s+default · 0\/1 tools/);
+ assert.match(screen(), /Space cycle auto\/on\/off/);
+ component.handleInput(" ");
+ assert.match(screen(), /Computer\s+on\s+1\/1 tools/);
+ assert.deepEqual(h.settings.read(), { computer: true });
+ component.handleInput("\x1b[32u");
+ assert.match(screen(), /Computer\s+off\s+0\/1 tools/);
+ assert.deepEqual(h.settings.read(), { computer: false });
+ component.handleInput(" ");
+ assert.match(screen(), /Computer\s+auto\s+default · 0\/1 tools/);
+ assert.deepEqual(h.settings.read(), {});
+ assert.ok(!h.activeTools().includes("computer"));
+});
+
+test("advanced tools cycle with Enter and show active separately from saved policy", async () => {
+ const h = harness({ all: ["computer", "act_ui"], active: [] });
+ const { component } = await h.mountPanel();
+ component.handleInput("\r");
+ component.handleInput("\x1b[B"); // computer follows act_ui alphabetically
+ assert.match(component.render(120).join("\n"), /computer\s+auto\s+default · inactive/);
+ for (const mode of ["on", "off", "auto"]) {
+   component.handleInput("\r");
+   assert.match(component.render(120).join("\n"), new RegExp(`computer\\s+${mode}\\s+${mode === "auto" ? "default · " : ""}${mode === "on" ? "active" : "inactive"}`));
+ }
+ assert.deepEqual(h.settings.read(), {});
+ component.handleInput("\x1b");
+ assert.match(component.render(120).join("\n"), /Computer\s+auto/);
+ const everyday = harness({ all: ["bash"], active: ["bash"] });
+ const mounted = await everyday.mountPanel();
+ assert.match(mounted.component.render(120).join("\n"), /bash\s+on\s+default · active/);
+});
+
+test("mixed family policies are visible and cycling restores automatic defaults", async () => {
+ const h = harness({ all: ["web_search", "fetch_content", "get_search_content"], active: [] });
+ await h.run("web_search off");
+ const { component } = await h.mountPanel();
+ assert.match(component.render(120).join("\n"), /Web\s+mixed/);
+ component.handleInput(" ");
+ assert.match(component.render(120).join("\n"), /Web\s+on\s+default/);
+ assert.deepEqual(h.settings.read(), {});
+ assert.equal(h.activeTools().length, 3);
+});
+
+test("optional built-ins default off, toggle on, and Delete restores off without a saved override", async () => {
+ const h = harness({ all: ["read", "grep", "find", "ls"], active: ["read", "grep", "find", "ls"] });
+ const { component } = await h.mountPanel();
+ const screen = () => component.render(120).join("\n");
+ assert.match(screen(), /read\s+on\s+default · active/);
+ assert.match(screen(), /Optional built-ins/);
+ assert.match(screen(), /grep\s+off\s+default · inactive/);
+ assert.deepEqual(h.activeTools(), ["read"]);
+ for (const key of "grep") component.handleInput(key);
+ component.handleInput(" ");
+ assert.match(screen(), /grep\s+on\s+active/);
+ assert.equal(h.settings.read().grep, true);
+ component.handleInput("\x1b[3~"); // Delete: default
+ assert.match(screen(), /grep\s+off\s+default · inactive/);
+ assert.deepEqual(h.settings.read(), {});
+ await h.run("grep on");
+ await h.run("grep auto");
+ assert.ok(!h.activeTools().includes("grep"), "CLI reset follows the same off default");
+});
+
+test("core on/off toggles can return to their on default without persisting a preference", async () => {
+ const h = harness({ all: ["read"], active: ["read"] });
+ const { component } = await h.mountPanel();
+ component.handleInput(" ");
+ assert.equal(h.settings.read().read, false);
+ component.handleInput("\x1b[3~");
+ assert.deepEqual(h.settings.read(), {});
+ assert.ok(h.activeTools().includes("read"));
+ assert.match(component.render(100).join("\n"), /read\s+on\s+default · active/);
+});
+
+test("Web cycles on/off/auto, persists auto, and colors auto independently of activity", async () => {
+ const names = ["web_search", "fetch_content", "get_search_content"];
+ const h = harness({ all: names, active: names });
+ const theme = { fg: (color, text) => `<${color}>${text}</${color}>`, bold: text => text };
+ const { component } = await h.mountPanel({ theme });
+ const screen = () => component.render(200).join("\n");
+ assert.ok(screen().includes("<success>on   </success>"));
+ component.handleInput(" ");
+ assert.ok(screen().includes("<muted>off  </muted>"));
+ component.handleInput(" ");
+ assert.ok(screen().includes("<accent>auto </accent>"));
+ assert.deepEqual(h.settings.read(), Object.fromEntries(names.map(name => [name, "auto"])));
+ assert.deepEqual(h.activeTools(), []);
+ const reloaded = harness({ all: names, active: names, sessionManager: h.sessionManager });
+ await reloaded.emit("session_start");
+ assert.deepEqual(reloaded.activeTools(), []);
+ component.handleInput("\x1b[3~");
+ assert.deepEqual(h.settings.read(), {});
+ assert.deepEqual(h.activeTools().sort(), [...names].sort());
+ await h.run("web auto");
+ assert.deepEqual(h.activeTools(), []);
+ await h.run("web default");
+ assert.deepEqual(h.settings.read(), {});
+ assert.deepEqual(h.activeTools().sort(), [...names].sort());
 });
 
 test("/tool registers one command", () => {
@@ -169,6 +273,7 @@ test("a saved choice for a tool that no longer exists is ignored", async () => {
 
 test("querying one tool reports its state without changing anything", async () => {
 	const h = harness();
+	h.settings.update({ grep: true });
 	await h.run(HEAVY);
 	assert.match(h.notices.at(-1).message, /grep is on · ~[\d,]+ est\. tokens · builtin/);
 	assert.deepEqual(h.activeTools().sort(), ["bash", "grep", "read"]);
@@ -209,7 +314,7 @@ test("an unknown capability verb is refused and names the ones that exist", asyn
 	registerCapabilityAction(h.pi, "computer", { verb: "check", description: "Check permissions", run: () => {} });
 	await h.run("computer restart");
 	assert.equal(h.notices.at(-1).level, "error");
-	assert.match(h.notices.at(-1).message, /No Computer action named restart. Use: on, off, check/);
+	assert.match(h.notices.at(-1).message, /No Computer action named restart. Use: on, off, auto, check/);
 });
 
 test("capability actions are offered as completions", async () => {
@@ -306,7 +411,7 @@ test("the mounted panel shows provenance on capability and tool rows alike", asy
 	const h = harness({ all: ["read", "computer", "act_ui"], active: ["read"] });
 	const { component } = await h.mountPanel();
 	const text = component.render(80).join("\n");
-	assert.match(text, /^› read\s+\S+\s+~[\d,]+ est\. tokens · builtin$/m);
+	assert.match(text, /^› read\s+on\s+default · active · ~[\d,]+ est\. tokens · builtin$/m);
 	assert.match(text, /^ {2}Computer\s.*· builtin {2}▸$/m, "a capability names its packages too");
 });
 
@@ -314,8 +419,8 @@ test("the mounted panel filters, toggles the matching row, and preserves search 
 	const h = harness({ all: ["read", "bash", "computer", "act_ui"], active: ["read", "bash"] });
 	const { component, results } = await h.mountPanel();
 	for (const key of "read") component.handleInput(key);
-	assert.match(component.render(100).join("\n"), /^› read\s+on/m);
-	component.handleInput(" ");
+	assert.match(component.render(100).join("\n"), /^› read\s+on\s+default · active/m);
+	component.handleInput(" "); // on -> off
 	assert.ok(!h.activeTools().includes("read"));
 	assert.ok(h.activeTools().includes("bash"), "the unfiltered first row is untouched");
 	assert.match(component.render(100).join("\n"), /Search: read/);

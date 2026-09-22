@@ -22,6 +22,7 @@
     "url": "https://github.com/MisterBrookT/pi-x/issues"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-web-access.mjs",
     "bench": "node scripts/bench.mjs",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
@@ -29,6 +30,19 @@
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "^1.2.2",
+    "@napi-rs/keyring": "^1.3.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "cross-spawn": "^7.0.6",
+    "open": "^10.2.0",
+    "recheck": "^4.5.0",
+    "smol-toml": "^1.6.1",
+    "strip-json-comments": "^5.0.3",
+    "undici": "^6.28.1",
+    "zod": "^3.25.0 || ^4.0.0",
     "@narumitw/pi-lsp": "0.49.6",
     "jsonc-parser": "3.3.1",
     "lovely-mermaid": "^0.3.3",
@@ -36,11 +50,15 @@
     "pi-web-access": "0.27.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
+    "@earendil-works/pi-ai": ">=0.86.1",
+    "@earendil-works/pi-coding-agent": ">=0.86.1",
+    "@earendil-works/pi-tui": ">=0.86.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
@@ -58,11 +76,12 @@
       "./extensions/pix-anthropic/index.ts",
       "./extensions/computer.ts",
       "./extensions/context.ts",
+      "./extensions/export.ts",
       "./extensions/fast-mode.ts",
       "./extensions/footer.ts",
       "./extensions/goal.ts",
       "./extensions/mermaid.ts",
-      "./extensions/prompt-compact.ts",
+      "./extensions/mcp.ts",
       "./extensions/question.ts",
       "./extensions/smart-editor.ts",
       "./extensions/todo.ts",
@@ -79,6 +98,7 @@
     "extensions",
     "scripts",
     "src",
+    "vendor",
     "tests",
     "LICENSE",
     "README.md",

@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { hasTodoDependencyCycle, readyTodos, todoWaves, unmetTodoDependencies } from "../extensions/todo.ts";
+import registerTodo, { hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
 
 const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;
@@ -14,7 +14,7 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   const handlers = new Map();
   const notifications = [];
   const theme = new Theme(
-    { accent: "#00ffff", text: "#ffffff", muted: "#888888", error: "#ff0000", toolTitle: "#00ffff", thinkingXhigh: "#ffffff" },
+    { accent: "#00ffff", text: "#ffffff", muted: "#888888", success: "#00ff00", error: "#ff0000", toolTitle: "#00ffff", thinkingXhigh: "#ffffff" },
     { selectedBg: "#000000" }, "truecolor",
   );
   const pi = {
@@ -52,9 +52,17 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
     command: (args) => command.handler(args, ctx),
     activeTools: () => activeTools,
     widget: () => widget,
-    render: (width = 100) => widget?.render(width).map(stripVTControlCharacters) ?? [],
+    render: (width = 100) => widget?.render(width).map(line => stripVTControlCharacters(line).trimEnd()) ?? [],
   };
 };
+
+test("todo guidance stays concise without prescribing scheduling", () => {
+  const { tool } = createTodoHarness();
+  assert.deepEqual(tool.promptGuidelines, ["Use todo to track multi-step work and keep progress current."]);
+  assert.equal(tool.promptSnippet, "Track tasks and progress");
+  assert.match(tool.parameters.properties.text.description, /required for add/);
+  assert.doesNotMatch(tool.description, /replace\(items\)|set\(updates\)/, "argument instructions belong with parameters");
+});
 
 const text = (result) => result.content[0].text;
 
@@ -120,7 +128,7 @@ test("batch set finishes prerequisites and starts a dependent regardless of upda
   assert.deepEqual(result.details.items.map(item => item.status), ["done", "done", "active"]);
   assert.equal(result.details.nextId, 4);
   assert.deepEqual(original.details.items.map(item => item.status), ["pending", "pending", "pending"]);
-  assert.deepEqual(h.render(), ["› #3 Integrate", "  └─ after #1 ✓, #2 ✓"]);
+  assert.deepEqual(h.render(24), ["✓ #1 Backend", "│", "│ ✓ #2 Frontend", "├─┘", "› #3 Integrate"]);
   assert.match(h.reminders().at(-1).content, /\[active\] #3/);
   const restored = createTodoHarness(h.sessionManager);
   restored.event("session_start");
@@ -304,7 +312,7 @@ test("restores legacy numeric IDs and todos without dependencies", async () => {
   const items = (await h.call({ action: "list" })).details.items;
   assert.deepEqual(items[1], { id: "1.1", parentId: "1", text: "Child", status: "pending", dependsOn: ["2"] });
   assert.equal(items[0].dependsOn, undefined);
-  assert.match(h.render().join("\n"), /◌ #1.1 Child\n\s+└─ waiting on #2/);
+  assert.match(h.render().join("\n"), /○ #2 Other───◌ #1.1 Child/);
 });
 
 test("widget and slash command show readiness, progress and toggling", async () => {
@@ -312,9 +320,10 @@ test("widget and slash command show readiness, progress and toggling", async () 
   await h.call({ action: "replace", items: [
     { text: "Inspect" }, { text: "Independent child", parentId: "1" }, { text: "Summarize", dependsOn: ["1"] },
   ] });
-  assert.deepEqual(h.render(), ["○ #1 Inspect", "  ○ #1.1 Independent child", "┈┈", "◌ #2 Summarize", "  └─ waiting on #1"]);
+  assert.deepEqual(h.render(), ["○ #1 Inspect───────────────◌ #2 Summarize", "○ #1.1 Independent child"]);
   await h.call({ action: "set", id: "1", status: "active" });
   assert.match(h.render()[0], /^› #1/);
+  assert.ok(h.widget().render(100)[0].includes(h.theme.fg("accent", "› #1 Inspect")), "active node uses the theme accent");
   assert.ok(h.widget().render(12).every(line => visibleWidth(line) <= 12));
   await h.command("");
   assert.match(h.notifications.at(-1).message, /\[blocked: #1\] #2/);
@@ -324,10 +333,10 @@ test("widget and slash command show readiness, progress and toggling", async () 
   assert.equal(h.widget(), undefined);
   await h.command("on");
   assert.deepEqual(h.activeTools(), ["read", "todo"]);
-  assert.equal(h.render().length, 5);
+  assert.equal(h.render().length, 2);
 
   await h.call({ action: "set", id: "1", status: "done" });
-  assert.deepEqual(h.render(), ["  ○ #1.1 Independent child", "○ #2 Summarize", "  └─ ready · after #1 ✓"]);
+  assert.deepEqual(h.render(), ["✓ #1 Inspect───────────────○ #2 Summarize", "○ #1.1 Independent child"]);
   await h.command("");
   assert.match(h.notifications.at(-1).message, /\[pending\] #2 Summarize/);
   for (const id of ["1.1", "2"]) await h.call({ action: "set", id, status: "done" });
@@ -343,17 +352,17 @@ test("long todo titles cannot hide fan-in dependencies, including after resize",
   for (const width of [32, 80, 18]) {
     const lines = h.render(width);
     assert.ok(lines.every(line => visibleWidth(line) <= width));
-    const detail = lines.slice(3).join(" ");
-    assert.match(detail, /waiting on/);
+    const detail = lines.join(" ");
+    assert.match(detail, /├─┘/);
     assert.match(detail, /#1/);
     assert.match(detail, /#2/);
   }
   await h.call({ action: "set", id: "1", status: "done" });
-  assert.match(h.render().join("\n"), /waiting on #1 ✓, #2/);
+  assert.match(h.render().join("\n"), /✓ #1 Backend\n│\n│ ○ #2 Frontend\n├─┘\n◌ #3/);
   await h.call({ action: "set", id: "2", status: "done" });
-  assert.match(h.render().join("\n"), /ready · after #1 ✓, #2 ✓/);
+  assert.match(h.render().join("\n"), /│ ✓ #2 Frontend\n├─┘\n○ #3/);
   await h.call({ action: "set", id: "3", status: "active" });
-  assert.match(h.render().join("\n"), /└─ after #1 ✓, #2 ✓/);
+  assert.match(h.render().join("\n"), /├─┘\n› #3/);
 });
 
 test("tool result rendering reads failure status from Pi's renderer context", () => {
@@ -372,7 +381,9 @@ test("tool result rendering reads failure status from Pi's renderer context", ()
 test("widget stays bounded and clear resets the whole plan", async () => {
   const h = createTodoHarness();
   await h.call({ action: "replace", items: Array.from({ length: 8 }, (_, i) => ({ text: `Step ${i + 1}` })) });
-  assert.equal(h.render().length, 6);
+  assert.equal(h.render(24).length, 7);
+  assert.equal(h.render().length, 2, "independent tasks use one row when they fit");
+  assert.equal(h.render().at(-1), "… 2 hidden · /todo");
   await h.call({ action: "clear" });
   assert.equal(h.widget(), undefined);
   assert.equal(text(await h.call({ action: "list" })), "No todos");
@@ -452,24 +463,14 @@ test("starting work retires the ready line instead of inviting a second start", 
   assert.doesNotMatch(text(await h.call({ action: "list" })), /Ready now/, "one remaining item is not a frontier");
 });
 
-test("waves are the topological layers of the plan", () => {
-  const items = [
-    { id: "1", text: "search a", status: "pending" },
-    { id: "2", text: "search b", status: "pending" },
-    { id: "3", text: "implement a", status: "pending", dependsOn: ["1"] },
-    { id: "4", text: "implement b", status: "pending", dependsOn: ["2"] },
-    { id: "5", text: "merge", status: "pending", dependsOn: ["3", "4"] },
-  ];
-  assert.deepEqual(todoWaves(items).map((wave) => wave.map((item) => item.id)), [["1", "2"], ["3", "4"], ["5"]]);
-});
-
-test("a graph with width shows its waves; a chain does not", async () => {
+test("plan output states actual dependencies without wave-wide barriers", async () => {
   const h = createTodoHarness();
   const graph = text(await h.call({
     action: "replace",
     items: [{ text: "search a" }, { text: "search b" }, { text: "merge", dependsOn: ["1", "2"] }],
   }));
-  assert.match(graph, /Waves: \[#1, #2\] → \[#3\]/);
+  assert.match(graph, /#3 merge \(depends on #1, #2\)/);
+  assert.doesNotMatch(graph, /Waves:/);
   const chain = text(await h.call({ action: "replace", items: [{ text: "a" }, { text: "b", dependsOn: ["1"] }] }));
   assert.doesNotMatch(chain, /Waves:/);
 });
@@ -483,24 +484,37 @@ test("todo has no field for a run id: status is written only by the model", () =
   assert.doesNotMatch(JSON.stringify(h.tool.description), /runId|closes itself/);
 });
 
-test("the widget reads a wide plan in waves and a chain as a list", async () => {
+test("the widget draws fan-in edges without stage separators", async () => {
   const h = createTodoHarness();
   await h.call({ action: "replace", items: [
     { text: "search a", agent: "scout" }, { text: "search b", agent: "scout" },
     { text: "implement", dependsOn: ["1", "2"] }, { text: "test", dependsOn: ["3"] },
   ] });
   assert.deepEqual(h.render(), [
-    "○ #1 search a · scout", "○ #2 search b · scout",
-    "┈┈", "◌ #3 implement", "  └─ waiting on #1, #2",
-    "┈┈", "◌ #4 test", "  └─ waiting on #3",
+    "○ #1 search a · scout─┬─◌ #3 implement───◌ #4 test",
+    "                      │",
+    "○ #2 search b · scout─┘",
   ]);
   assert.ok(h.widget().render(14).every(line => visibleWidth(line) <= 14));
-  // Once the remaining work is a chain the separators disappear.
+  // Completed prerequisites remain visible as checked nodes, exactly once.
   await h.call({ action: "set", updates: [{ id: "1", status: "done" }, { id: "2", status: "done" }] });
-  assert.deepEqual(h.render(), ["○ #3 implement", "  └─ ready · after #1 ✓, #2 ✓", "◌ #4 test", "  └─ waiting on #3"]);
+  assert.deepEqual(h.render(), ["✓ #1 search a · scout─┬─○ #3 implement───◌ #4 test", "                      │", "✓ #2 search b · scout─┘"]);
 });
 
-test("a planned agent is carried through plan output, ready set, waves, and restore", async () => {
+test("independent branches draw only their own incoming edges, even while another branch runs", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [
+    { text: "A" }, { text: "B" }, { text: "C", dependsOn: ["1"] }, { text: "D", dependsOn: ["2"] },
+  ] });
+  await h.call({ action: "set", updates: [{ id: "1", status: "done" }, { id: "2", status: "active" }] });
+  assert.deepEqual(h.render(), ["✓ #1 A───○ #3 C", "› #2 B───◌ #4 D"]);
+  assert.deepEqual(h.render(0), []);
+  for (const width of [1, 5, 12, 80]) assert.ok(h.render(width).every(line => visibleWidth(line) <= width));
+  await h.call({ action: "set", id: "3", status: "active" });
+  assert.match(h.render().join("\n"), /✓ #1 A───› #3 C/, "C starts without waiting for B");
+});
+
+test("a planned agent is carried through plan output, ready set, and restore", async () => {
   const manager = SessionManager.inMemory();
   const h = createTodoHarness(manager);
   const plan = text(await h.call({ action: "replace", items: [
@@ -508,7 +522,6 @@ test("a planned agent is carried through plan output, ready set, waves, and rest
   ] }));
   assert.match(plan, /\[pending\] #1 search a · scout$/m);
   assert.match(plan, /#3 merge \(depends on/, "self is the default and stays silent");
-  assert.match(plan, /Waves: \[#1 \(scout\), #2 \(scout\)\] → \[#3\]/);
   assert.match(plan, /Ready now, no dependency between them: #1 \(scout\), #2 \(scout\)/);
   await rejectsWithoutChange(h.call, { action: "add", text: "x", agent: "manager" }, /agent/);
   const restored = createTodoHarness(manager);

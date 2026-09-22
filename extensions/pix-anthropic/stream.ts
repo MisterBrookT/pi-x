@@ -29,6 +29,9 @@ import {
 	type ToolResultMessage,
 	calculateCost,
 	createAssistantMessageEventStream,
+	getCurrentSystemPrompt,
+	getCurrentTools,
+	normalizeContext,
 } from "@earendil-works/pi-ai";
 import fs from "node:fs";
 import {
@@ -474,6 +477,16 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 		options?: SimpleStreamOptions,
 	): AssistantMessageEventStream {
 		const stream = createAssistantMessageEventStream();
+		// Pi 0.86 stores instructions and tool deltas in system messages. This
+		// transport has no in-place delta protocol, so replay them into a complete
+		// request checkpoint. Keep legacy Context callers (including the smoke CLI)
+		// working by treating their top-level fields as the initial system message.
+		const { messages } = normalizeContext(context);
+		context = {
+			systemPrompt: getCurrentSystemPrompt(messages),
+			tools: getCurrentTools(messages),
+			messages: messages.filter(message => message.role !== "system"),
+		};
 
 		(async () => {
 			const output: AssistantMessage = {

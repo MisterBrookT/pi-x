@@ -49,7 +49,8 @@ test("rows use fixed functional groups and alphabetical names, not schema cost",
 test("the delegation capability is called Subagent, not Delegation", () => {
 	const subagent = CAPABILITIES.find((capability) => capability.id === "subagent");
 	assert.equal(subagent.label, "Subagent");
-	assert.deepEqual(subagent.primary.sort(), ["subagent", "subagent_supervisor"]);
+	assert.deepEqual(subagent.primary, ["subagent"]);
+	assert.deepEqual(subagent.secondary, ["subagent_supervisor"]);
 	assert.ok(!CAPABILITIES.some((capability) => /delegation/i.test(capability.label)));
 });
 

@@ -29,7 +29,7 @@ export const LEGACY_FAMILY_ENTRY = "pix-capability-enabled";
 
 /** Explicit per-tool choices; absent tools keep whatever default applies. */
 export interface Overrides {
-	[tool: string]: boolean;
+	[tool: string]: boolean | "auto";
 }
 
 /** The minimum of a session entry this module needs, so tests need no session. */

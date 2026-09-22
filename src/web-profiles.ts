@@ -2,6 +2,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { compactWebTool } from "./compact-web.ts";
 type Tool = Parameters<ExtensionAPI["registerTool"]>[0];
 
+const snippets: Record<string, string> = {
+  web_search: "Search the web",
+  fetch_content: "Fetch content from URLs",
+  get_search_content: "Retrieve stored search and fetch results",
+};
+
 const coreFields: Record<string, string[]> = {
   web_search: ["query", "queries", "numResults", "recencyFilter", "domainFilter"],
   fetch_content: ["url", "urls", "mode", "prompt"],
@@ -28,15 +34,16 @@ export function webProfiles(original: Tool): Tool[] {
   const compact = compactWebTool(original);
   if (!coreFields[original.name]) return [compact];
   const core = selectFields(compact, coreFields[original.name]);
-  if (original.name === "web_search") core.description = "Search the web using configured provider/network defaults. Returns summaries and source links. Use 2–4 distinct queries for research. Fetch important sources to inspect their evidence.";
+  core.promptSnippet = snippets[original.name];
+  if (original.name === "web_search") core.description = "Search the web and return summaries with source links. Retrieve stored results with get_search_content.";
   if (original.name !== "fetch_content") return [core];
-  core.description = "Read webpages, PDFs, images or repositories from URLs. readable (default) extracts text; raw returns textual HTTP content; answer answers prompt using only fetched content. Large content is stored; use get_search_content for more. Use video_content for video analysis.";
+  core.description = "Read webpages, PDFs, images, or repositories from URLs. Large content is stored for get_search_content. Use video_content for video analysis.";
   const video = selectFields(compact, ["url", "prompt", "timestamp", "frames"]);
   return [core, {
     ...video, name: "video_content", label: "Video",
     parameters: { ...video.parameters, required: ["url"] },
-    description: "Analyze a YouTube or local video using the configured backend. Supply url and optionally a question, timestamp/range or frame count. Uses the same fetching backend as fetch_content; results are stored for get_search_content.",
-    promptSnippet: "Analyze videos or extract frames (optional)",
+    description: "Analyze a YouTube or local video, or extract frames. Results are stored for get_search_content.",
+    promptSnippet: "Analyze videos or extract frames",
     promptGuidelines: [],
     renderCall: undefined,
     async execute(id, args, signal, update, ctx) {

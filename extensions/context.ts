@@ -11,7 +11,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { compactPixPrompt } from "../src/compact-prompt.ts";
 import { renderContextHtml } from "../src/context-html.ts";
 import { buildReport, renderReport, sizeOf } from "../src/context-usage.ts";
 import { originOf, toolChars } from "../src/tool-inventory.ts";
@@ -109,7 +108,7 @@ export const exportHtml = async (pi: ExtensionAPI, ctx: ExtensionContext): Promi
 export const exportPrompt = async (ctx: ExtensionContext): Promise<string> => {
 	const path = resolve(ctx.cwd, PROMPT_EXPORT_PATH);
 	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, compactPixPrompt(ctx.getSystemPrompt()), "utf8");
+	await writeFile(path, ctx.getSystemPrompt(), "utf8");
 	return path;
 };
 

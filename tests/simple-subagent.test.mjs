@@ -11,9 +11,10 @@ test('full subagent definition fits the 2000 estimated token budget',()=>{
  console.log('Compact subagent estimated tokens:',estimateTokens(toolChars(tool)));
 });
 test('delegation guidance lives in the guideline once, and the description keeps only what the schema cannot say',()=>{
- assert.match(tool.promptGuidelines.join(' '), /Keep the critical path with the main assistant/);
- assert.match(tool.promptGuidelines.join(' '), /not whole-task handoff followed by waiting/);
- assert.doesNotMatch(tool.description, /Keep the critical path/, 'not repeated in the description');
+ assert.deepEqual(tool.promptGuidelines, ['Use subagents when delegation or parallel work would help.']);
+ assert.doesNotMatch(tool.description, /Keep the critical path|Sequence with todo|keep working meanwhile/, 'no duplicated workflow prescriptions');
+ assert.equal(tool.promptSnippet, 'Delegate tasks to other agents');
+ assert.ok(tool.description.length < 650, 'retain operational caveats without an instruction essay');
  assert.match(tool.description, /NOT merged/);
  assert.match(tool.description, /never overlap writers/);
  assert.match(tool.description, /do not undo work already done/);

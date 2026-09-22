@@ -9,7 +9,7 @@ Detailed usage, configuration, and design boundaries.
 - `web_search` and content fetching through `pi-web-access`
   - Normal Web exposes Search → Fetch → Retrieve, with a tested 1,000 estimated-token budget.
   - Provider, proxy, and model selection use backend configuration rather than per-call overrides.
-  - `source_check` and `video_content` are optional and off by default; enable them under `/tool` → Web → Enter. Explicit saved choices still win.
+  - `source_check` and `video_content` are discovered on demand; explicit activation is also available under `/tool` → Web → Enter. Explicit saved choices still win.
   - Video timestamp/frame controls are exposed only by `video_content`. This is an interface split, not a security restriction on which URLs the fetch backend can read.
   - Ordinary fetching does not expose browser-cookie opt-in or forced large repository cloning.
 - `subagent` through `pi-subagents`
@@ -21,6 +21,7 @@ Detailed usage, configuration, and design boundaries.
 - `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
 - `/fast` for persistent priority-processing control on supported providers
+- `/export` to save and open the full recorded session, current system prompt, and tool definitions in your browser
 - `/context` for the context-window breakdown, `Alt+E` to export the exact active prompt, and `/context html` (`Alt+H`) to open the whole context as a readable page in your browser
 - a configurable footer with cache efficiency and latest-response token speed
 
@@ -49,8 +50,9 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/goal [objective]` | Open goal configuration, or start with an objective; also `status`, `pause` (`stop`), `resume`, and `clear` |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
-| `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off]`, and capability actions such as `/tool computer check` |
-| `/context` | Show what is filling the context window; `/context html` writes and opens the full context as an HTML page |
+| `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off\|auto\|default]`, and capability actions such as `/tool computer check` |
+| `/export [path]` | Save Pi’s session viewer and open it in your browser: current effective system prompt, tools, and recorded conversation history. `.jsonl` exports remain save-only |
+| `/context` | Show what fills the current context window; `/context html` opens that window as an HTML page, with compaction applied |
 | `/subagent-config` | Alias for `/tool subagent roles`: configure role models, effort, and fallback |
 
 | Shortcut | Purpose |
@@ -58,27 +60,35 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `Alt+E` | Export the effective Pix system prompt to `.pix/system-prompt.md` |
 | `Alt+H` | Write the full context — prompt, tool schemas, and messages — to `.pix/context.html` and open it in your browser |
 
-`/tool` is the single place tools are turned on and off. Everyday tools are
+`/tool` is the single place for persistent tool preferences. Everyday tools are
 listed individually; Web, Subagent, Computer, and MCP are one row each, because
 choosing what the assistant may do should not require knowing that computer use
 ships eleven backend primitives. Rows use fixed functional groups (Core tools,
-Workflow, Code checks, Capabilities, Other), alphabetically within each group,
+Workflow, Code checks, Capabilities, Optional built-ins, Other), alphabetically within each group,
 not ordered by changing token costs. Type in the top-level panel to search names,
 groups, origins, or hidden child-tool names; Backspace edits and Esc clears the
-search before closing. Arrow keys select, `Space` toggles the row, and `Enter`
-opens a capability to reach its individual tools. Inside a capability, `Esc`
-returns to the previous search. A
+search before closing. Arrow keys select; `Space` toggles ordinary tools on/off, or cycles on-demand tools **auto → on → off → auto**. `Enter` opens a capability, or changes an individual tool. `Delete` (forward delete) restores the default without saving an override. Inside a capability, `Esc` returns to the previous search. Auto uses the theme's accent color, distinct from muted off and green on. Rows show the effective policy and mark inherited choices `default`: Read is `on · default`, Computer is `auto · default`, and Grep is `off · default`. Policy is separate from runtime state: an `auto` tool may already be active. Individual rows show active/inactive; capability rows show active counts. A capability's policy reflects its primary tools; differing primary policies show `mixed`, and cycling restores defaults. Secondary tools retain their own policies in the advanced view. A
 capability can also offer maintenance actions as verbs on its own row, which the
 capability view lists: `/tool computer check` reports backend and permission
 state, and `/tool computer stop` closes the managed browser and releases its
 resources. Keeping them there avoids naming one optional capability twice in the
 command list.
 
-Computer and MCP start off. Every active tool's schema is re-sent on every
-request, so a capability most sessions never touch is a standing charge on the
-context window and on the model's attention. Turning Computer on enables the
-`computer` script wrapper alone, which calls its primitives internally, so the
-capability costs one schema rather than twelve. Choices are shared across sessions in `~/.pi/agent/pix-tools.json` (or the configured Pi agent directory). Opening `/tool`, interacting with its panel, or starting a model turn rereads the file. Changes survive reloads, restarts, and branch navigation. Old per-session tool records are ignored so opening an older conversation cannot undo current settings. Existing session-only preferences must be chosen once again; MCP remains off until explicitly enabled in shared settings.
+### Tools in model context
+
+Everyday tools stay available: Pi's `read`, `bash`, `edit`, and `write`, Todo, Subagent, web search and retrieval, Background, and Question. One `discover_tools` entry point activates specialists by capability description or exact tool name, for example `{query:"browser interaction"}`. It uses bounded keyword matching (two matches by default, at most five), not another model call. The selected tools become callable on the next model request.
+
+Pi's separate `grep`, `find`, and `ls` tools are off by default, grouped under Optional built-ins, and not discoverable. Use Bash (`rg`, `find`, `ls`) without loading extra schemas, or explicitly enable those tool alternatives through `/tool`.
+
+Computer, LSP diagnostics/fixes, subagent supervisor communication, specialist source/video analysis, and configured MCP tools start deferred. Computer discovery exposes only the script wrapper, not its backend primitives. Missing integrations are not installed automatically, and activation does not grant system permissions. The Goal tool is exposed while goal mode is active, unless explicitly overridden.
+
+Web stays on by default but also supports on-demand activation: choose `auto` in the panel or run `/tool web auto`. This preference persists; search and retrieval schemas remain absent until discovered. Individual web tools can be configured separately.
+
+Discovery is session-local: it survives subsequent turns and branch navigation, but resets on reload or a new session. It never writes preferences. `/tool <name|capability> on` keeps tools enabled; `off` blocks discovery; `auto` selects on-demand activation for discoverable tools. `/tool <name|capability> default` (or Delete in the panel) removes overrides and restores defaults. For ordinary tools without discovery, the older `auto` command remains a default-reset alias. Existing saved on/off choices remain authoritative. Choices live in `~/.pi/agent/pix-tools.json` (or the configured Pi agent directory) and survive reloads, restarts, and branch navigation. Opening the panel or starting a turn rereads them; old conversation entries cannot undo current preferences.
+
+This reduces initially exposed tool schemas and their tool-specific guidance, not conversation history or global/project instructions. UI features such as the footer, graph layout, and editor suggestions are unchanged. Pi records tool changes in its transcript; provider support determines how those changes affect prompt caching.
+
+`/export` preserves recorded history, including older turns that compaction removed from the active window. Its prompt and tool definitions describe the current state, not an exact reconstruction of every historical provider request. If browser opening fails, the saved HTML path is shown. `/context html` instead describes the current window after compaction.
 
 Token figures in `/tool` and `/context` are estimates from serialized schema
 length, not counts from the provider's tokenizer. They are accurate enough to
@@ -88,7 +98,9 @@ Fast mode uses OpenAI's `service_tier: "priority"`, Anthropic's `speed: "fast"`,
 
 Pix exposes only two built-in roles from `pi-subagents`: `worker` for scoped implementation and verification, and `scout` for codebase discovery and navigation. The main agent sees these responsibilities in the tool description and chooses a role by task; the role's configured model is resolved at launch. Each can use a different model, effort, and cross-provider fallback through `/tool subagent roles` (or the `/subagent-config` alias). In `/tool`, open Subagent and press **R** to edit roles. The picker shows resolved mappings and saves only the chosen field in user settings; existing fallback and permission settings stay unchanged. Changes affect new children, not running ones; project/provider overrides can take precedence. Turning subagents on or off is also done in `/tool`.
 
-Delegation guidance keeps the critical path with the main assistant: delegate bounded independent side tasks, continue useful work, and wait only when child results are required and no useful independent work remains. Small or tightly coupled tasks should stay with the main assistant.
+If `subagents.defaultExtensions` is configured, children use that explicit extension list rather than inheriting ambient parent extensions. Roles using `pix-anthropic/*` must include the installed Pix `extensions/pix-anthropic/index.ts` path in that list. Loading only this provider extension keeps the child tool surface small; no model-name change is needed.
+
+Delegation guidance leaves organization to the model: use subagents when delegation or parallel work would help. Todo guidance asks only to track multi-step work and keep progress current.
 
 The `subagent` tool exposes four actions: `start`, `status`, `steer`, and `stop`.
 For example, `{action:"start", tasks:[{agent:"scout", task:"Locate the parser"}]}`
@@ -104,9 +116,7 @@ Workflow scripting, scheduling, missions, and administrative actions are not
 exposed through this tool. Models and safety controls remain backend-configured.
 The full definition has a tested budget of 2,000 estimated tokens; estimates are
 character-based, not provider token counts. Subagents notify the parent automatically;
-Pix does not expose a separate `bg_wait` tool. `subagent_supervisor` stays on:
-a child that hits a decision it cannot make pauses and asks, and this is how the
-main agent answers. Explicit blocking waits and external-job
+Pix does not expose a separate `bg_wait` tool. `subagent_supervisor` is discovered when needed: a child that hits a decision it cannot make pauses and asks, and this is how the main agent answers. Explicit blocking waits and external-job
 wait subscriptions are not part of Pix's tool surface.
 
 ## Goal mode
@@ -221,6 +231,14 @@ Updates are atomic: an invalid ID, duplicate ID, or blocked transition leaves ev
 
 Optional `dependsOn` IDs block work until all prerequisites are done. Independent ready items may be delegated in parallel, but Todo never launches subagents automatically. To reopen a completed prerequisite, reset its active/done dependents to pending first or in the same batch; Todo does not silently reset other tasks.
 
+## MCP
+
+Pix owns the MCP entry point, backed by a pinned, MIT-attributed `pi-mcp-adapter` 2.34.0 source snapshot in `vendor/mcp/`. Existing configuration discovery, authentication stores, `/mcp` commands, direct-tool names, and scripting are retained. Remove the standalone `npm:pi-mcp-adapter` entry from Pi's package settings and reload; do not load both. Configuration and credentials do not need conversion.
+
+MCP defaults to **auto**. Startup and reconnect cannot activate deferred or disabled tools. Discover `mcp` for gateway calls or `mcpScript` for scripts; exact-name discovery loads only that tool. Configured search-mode direct tools can still be activated by an explicit MCP search. Custom-prefix tools share the MCP panel and policy.
+
+See `vendor/mcp/UPSTREAM.md` for provenance and updates. Integration tests cover Pi 0.86.1, a local stdio server, and the scripting worker—not live remote OAuth providers.
+
 ## LSP
 
 Pix does not download language servers. Install only what your projects need. For TypeScript, either Biome or `typescript-language-server` can provide diagnostics; repository typecheck and tests remain authoritative.
@@ -229,9 +247,9 @@ Pix does not download language servers. Install only what your projects need. Fo
 
 - Delegate only genuinely independent or context-heavy work.
 - Default limits: 4 concurrent children, 8 per run, 24 per session, and one level of delegation.
-- Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG and an optional `agent` assigns an item to a subagent role at planning time. The plan output names the ready set and the waves of a non-linear graph. Nothing is scheduled or updated automatically; the model owns every status change.
-- No autonomous memory, MCP umbrella, agent hub, or plan framework.
-- Pix compresses verbose upstream prompt guidance into three short rules for todo, subagents, and LSP.
+- Use todo for meaningful multi-step work, not every response; optional dependencies form a validated DAG and an optional `agent` assigns an item to a subagent role at planning time. The plan output names prerequisites and the ready set. The compact widget uses a left-to-right graph when it fits, packing parallel tasks into the same column; narrow terminals use a top-to-bottom graph. Each task appears once, with rails for branches and joins. Completed prerequisites remain checked nodes. It focuses on six open tasks plus immediate prerequisites (at most twelve nodes), and reports omitted tasks or dependencies. Unrelated line crossings use `╳`, distinct from joins. If even the vertical graph cannot fit the terminal, an explicitly labelled list replaces it; `/todo` always shows the full dependency list. Connections express only actual dependencies, not wave-wide barriers. Nothing is scheduled or updated automatically; the model owns every status change.
+- No autonomous memory, agent hub, or plan framework.
+- Pix registers concise guidance on its own tools using Pi's `promptSnippet` and `promptGuidelines`. Discovery has one always-available rule; specialist guidance joins the effective prompt only while its tool is active. Pix does not rewrite the assembled system prompt or personal/project instructions. Context exports show the actual effective prompt unchanged.
 - Dependency administration commands are hidden; Pix keeps eight user-facing commands, with related actions as verbs on the command that already owns them and rare inspection on a shortcut.
 
 ## Development
@@ -259,7 +277,7 @@ Pix keeps Pi's small, understandable core and supplies the practical missing pie
 
 In the input editor, Pix shows a subtle but readable inline suggestion: zsh-style prefix matching reuses the newest matching prompt from the current session, with lightweight macOS dictionary completion as a fallback for prose words. Tab accepts the suggestion. `/complete on` adds AI completion: a small cloud model (Haiku 4.5 through `pix-anthropic` by default; `/complete model` picks another) predicts what you will type next from the last few turns, in your own voice, and proposes a likely next message when the editor is empty. Longer predictions wrap onto up to three lines below the cursor. While it is on, the history and dictionary suggestions step aside so the ghost text always comes from the model. Requests are debounced and cancelled on every keystroke, send only the last few turns, and the feature stays off until you enable it. Pix commands still use menus to complete supported arguments such as `/tool computer off`. `Shift+Enter` continues ordered and bullet lists. Pasted images and substantial text appear as compact rows such as `▣ image 1  294×490` and `▤ paste 1  42 lines`; Pix restores their full content before Pi processes the prompt. Image detection uses the actual pasted file, not terminal-specific paths or filenames.
 
-Pix deliberately does not include unevaluated complexity: autonomous memory, an MCP umbrella, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
+Pix deliberately does not include unevaluated complexity: autonomous memory, nested agent hierarchies, persistent planning machinery, or broad automation frameworks. A feature belongs in Pix only when it solves a recurring coding need and its value can be measured against its prompt, latency, and maintenance cost.
 
 | | Naive Pi | Pix | OMP |
 | --- | --- | --- | --- |

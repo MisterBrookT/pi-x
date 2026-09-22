@@ -16,11 +16,10 @@ import {
 	getAgentDir,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { compactPixPrompt } from "../src/compact-prompt.ts";
 import { renderBenchmarkHtml, summarize, summaryLines } from "../src/benchmark.ts";
 
 const exec = promisify(execFile);
-const REQUIRED_TOOLS = ["web_search", "fetch_content", "subagent", "todo", "question", "lsp_diagnostics", "lsp_fix"];
+const REQUIRED_TOOLS = ["web_search", "fetch_content", "subagent", "todo", "question", "discover_tools"];
 const RUNS = 3;
 
 const timed = async (args) => {
@@ -53,6 +52,7 @@ const session = async ({ naive }) => {
 				}
 			: {}),
 	});
+	await agentSession.bindExtensions({ mode: "print", onError: error => { throw new Error(error.message); } });
 	const result = { prompt: agentSession.systemPrompt, tools: agentSession.getActiveToolNames() };
 	agentSession.dispose();
 	return result;
@@ -74,7 +74,7 @@ const result = summarize({
 	naiveStartupMs,
 	pixStartupMs,
 	naivePrompt: naive.prompt,
-	pixPrompt: compactPixPrompt(pix.prompt),
+	pixPrompt: pix.prompt,
 });
 
 const reportPath = join(process.cwd(), ".pix/benchmark.html");

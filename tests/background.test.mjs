@@ -50,6 +50,12 @@ async function gate(t) {
 test("one small tool returns before completion and wakes once with stdout and stderr", { timeout: 15000 }, async (t) => {
 	const h = harness(t);
 	assert.equal(h.tool.name, "background");
+	assert.match(h.tool.description, /Completion notifies automatically/);
+	assert.match(h.tool.description, /stopped on exit, reload, or branch switch/);
+	assert.match(h.tool.description, /No stdin.*bash-only extension hooks/);
+	assert.doesNotMatch(h.tool.description, /do other work|do not poll|start requires command/);
+	assert.match(h.tool.parameters.properties.command.description, /required for start/);
+	assert.match(h.tool.parameters.properties.id.description, /required for stop/);
 	assert.ok(JSON.stringify({ description: h.tool.description, parameters: h.tool.parameters }).length / 3.7 < 400);
 	const g = await gate(t);
 	const requested = g.request();

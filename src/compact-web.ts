@@ -10,8 +10,8 @@ const descriptions: Record<string, string> = {
 };
 
 const common = {
-  query: "Single search query; prefer queries for research.",
-  queries: "Search 2–4 distinct angles, not rephrasings. Each query gets its own answer.",
+  query: "Single search query.",
+  queries: "Batch of search queries; each gets its own answer.",
   numResults: "Results per query; default 5, maximum 20.",
   domainFilter: "Include domains; prefix with - to exclude.",
 };

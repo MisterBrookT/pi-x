@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import registerPixAnthropic from "../extensions/pix-anthropic/index.ts";
 import { createPixAnthropicStream } from "../extensions/pix-anthropic/stream.ts";
 import { clearFastModeFallbacks, fastModeActiveFor, setFastModeEnabled } from "../src/fast-mode.ts";
@@ -37,6 +38,36 @@ async function collect(stream) {
   const events = [];
   for await (const event of stream) events.push(event);
   return events;
+}
+
+for (const apiKey of ["test-api-key", "sk-ant-oat01-test"]) {
+  test(`transcript instructions and tool deltas survive ${apiKey.startsWith("sk-ant") ? "OAuth" : "API-key"} serialization`, async () => {
+    const oldTool = { name: "old_tool", description: "old", parameters: { type: "object", properties: {} } };
+    const newTool = { ...oldTool, name: "new_tool", description: "new" };
+    // Pi 0.86 provider inputs contain only messages, with system/tool deltas.
+    const transcript = { messages: [
+      { role: "system", content: "Base instruction", sections: { rules: "Old rule", obsolete: "Remove me" }, toolsAdded: [oldTool], timestamp: 0 },
+      { role: "user", content: "hello", timestamp: 1 },
+      { role: "system", content: "Added instruction", sections: { rules: "Current rule", obsolete: null }, toolsRemoved: [{ name: "old_tool" }], toolsAdded: [newTool], timestamp: 2 },
+    ] };
+    const before = structuredClone(transcript);
+    let body;
+    const events = await collect(createPixAnthropicStream()(model, transcript, {
+      apiKey,
+      fetch: async (_url, init) => {
+        body = JSON.parse(init.body);
+        return new Response(SSE, { status: 200 });
+      },
+    }));
+    assert.equal(events.at(-1).type, "done");
+    const prompt = getCurrentSystemPrompt(transcript.messages);
+    const wireText = JSON.stringify(apiKey.startsWith("sk-ant") ? body.messages : body.system);
+    assert.ok(wireText.includes(JSON.stringify(prompt).slice(1, -1)), "complete replayed instructions reach the provider");
+    assert.doesNotMatch(wireText, /Old rule|Remove me/);
+    assert.deepEqual(body.tools.map(t => t.name), getCurrentTools(transcript.messages).map(t => apiKey.startsWith("sk-ant") ? `_${t.name}` : t.name));
+    assert.ok(body.messages.every(m => m.role !== "system"));
+    assert.deepEqual(transcript, before, "serialization must not mutate session history");
+  });
 }
 
 test("registers an isolated Pix provider using Pi's current provider contract", () => {

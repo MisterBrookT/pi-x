@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import { CombinedAutocompleteProvider, Editor } from "@earendil-works/pi-tui";
 import registerCapabilities from "../extensions/capabilities.ts";
@@ -20,6 +21,8 @@ const theme = {
 test("subagent configuration completes in Pi's editor", async () => {
   const commands = new Map();
   registerCapabilities({
+    events: createEventBus(),
+    registerTool() {},
     on() {},
     registerCommand(name, options) { commands.set(name, options); },
   });

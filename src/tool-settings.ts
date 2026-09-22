@@ -1,12 +1,13 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { CAPABILITIES, isMcpServerTool } from "./tool-panel.ts";
+import { defaultToolMode, toolChoice } from "./tool-panel.ts";
 import type { Overrides } from "./tool-overrides.ts";
 
 export interface ToolSettings {
   read(): Overrides;
-  update(changes: Overrides): Overrides;
+  /** undefined restores the default by removing the explicit choice. */
+  update(changes: Record<string, boolean | "auto" | undefined>): Overrides;
 }
 
 /** Shared across sessions. Old conversation entries deliberately have no authority. */
@@ -18,7 +19,7 @@ export function toolSettings(directory = getAgentDir()): ToolSettings {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw error; }
     const parsed = JSON.parse(raw);
     if (parsed?.version !== 1 || !parsed.overrides || typeof parsed.overrides !== "object" || Array.isArray(parsed.overrides)
-      || Object.values(parsed.overrides).some(v => typeof v !== "boolean")) {
+      || Object.values(parsed.overrides).some(v => typeof v !== "boolean" && v !== "auto")) {
       throw new Error(`Invalid tool settings: ${file}. Fix the file before changing tools.`);
     }
     return parsed.overrides;
@@ -26,7 +27,7 @@ export function toolSettings(directory = getAgentDir()): ToolSettings {
   return {
     read,
     update(changes) {
-      if (Object.values(changes).some(v => typeof v !== "boolean")) throw new Error("Tool choices must be booleans");
+      if (Object.values(changes).some(v => v !== undefined && typeof v !== "boolean" && v !== "auto")) throw new Error("Tool choices must be booleans or auto");
       mkdirSync(directory, { recursive: true });
       const lock = `${file}.lock`;
       // Fail explicitly on contention rather than losing another process's write.
@@ -38,7 +39,10 @@ export function toolSettings(directory = getAgentDir()): ToolSettings {
       }
       const temporary = join(lock, "settings.json");
       try {
-        const merged = { ...read(), ...changes };
+        const merged = { ...read() };
+        for (const [name, value] of Object.entries(changes)) {
+          if (value === undefined) delete merged[name]; else merged[name] = value;
+        }
         writeFileSync(temporary, JSON.stringify({ version: 1, overrides: merged }, null, 2) + "\n", { mode: 0o600 });
         renameSync(temporary, file);
         return merged;
@@ -48,13 +52,14 @@ export function toolSettings(directory = getAgentDir()): ToolSettings {
 }
 
 /** Apply explicit choices and opt-in defaults to the current runtime set. */
-export function selectedTools(known: Iterable<string>, current: Iterable<string>, overrides: Overrides): string[] {
+export function selectedTools(known: Iterable<string>, current: Iterable<string>, overrides: Overrides, discovered: Iterable<string> = [], mcpNames?: ReadonlySet<string>): string[] {
   const available = new Set(known);
-  const active = new Set(current);
-  const withheld = new Set(CAPABILITIES.flatMap(c => c.defaultOn ? c.secondary : [...c.primary, ...c.secondary]));
+  const loaded = new Set(discovered);
+  const active = new Set([...current, ...[...loaded].filter(name => available.has(name))]);
   for (const name of active) {
-    if (overrides[name] === false || (overrides[name] !== true && (withheld.has(name) || isMcpServerTool(name)))) active.delete(name);
+    const choice = toolChoice(name, overrides, mcpNames);
+    if (choice === false || (choice !== true && !loaded.has(name) && (choice === "auto" || defaultToolMode(name, mcpNames) !== "on"))) active.delete(name);
   }
-  for (const [name, on] of Object.entries(overrides)) if (on && available.has(name)) active.add(name);
+  for (const [name, on] of Object.entries(overrides)) if (on === true && available.has(name)) active.add(name);
   return [...active];
 }

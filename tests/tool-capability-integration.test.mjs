@@ -34,9 +34,11 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	let activeTools = [...active];
 	const handlers = { session_start: [], before_agent_start: [], session_tree: [] };
 	const commands = new Map();
+	const registered = new Map();
 	const pi = {
 		events: createEventBus(),
-		getAllTools: () => all.map(describe),
+		registerTool: tool => registered.set(tool.name, tool),
+		getAllTools: () => [...all.map(describe), ...registered.values()],
 		getActiveTools: () => [...activeTools],
 		setActiveTools: (names) => { activeTools = [...names]; },
 		registerCommand: (name, value) => commands.set(name, value),
@@ -56,6 +58,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	return {
 		settings,
 		notices,
+		discover: (query, limit) => registered.get("discover_tools").execute("discover", { query, limit }),
 		sessionManager,
 		active: () => activeTools,
 		setActive: (names) => { activeTools = [...names]; },
@@ -67,6 +70,23 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 		commandNames: () => [...commands.keys()].sort(),
 	};
 };
+
+test("auto removes persisted choices and restores discovery across turns and branches", async () => {
+  const h = harness(); h.start();
+  await h.tool("computer off");
+  assert.deepEqual((await h.discover("browser")).details.blocked, ["computer"]);
+  await h.tool("computer auto");
+  assert.equal(Object.hasOwn(h.settings.read(), "computer"), false);
+  assert.ok(!h.active().includes("computer"));
+  assert.deepEqual((await h.discover("browser")).details.activated, ["computer"]);
+  h.turn(); h.navigate(); await h.tool("list");
+  assert.ok(h.active().includes("computer"));
+  await h.tool("subagent off");
+  await h.tool("subagent auto");
+  assert.ok(h.active().includes("subagent"));
+  assert.ok(!h.active().includes("subagent_supervisor"));
+  assert.deepEqual(h.settings.read(), {});
+});
 
 test("the redundant family toggles are gone; /tool is the only switch", () => {
 	// /computer, /mcp, and /websearch duplicated what /tool does, and wrote to a
@@ -82,10 +102,10 @@ test("subagent role configuration survives as its own command", () => {
 test("a session starts with everyday tools on and the situational ones off", async () => {
 	const h = harness();
 	h.start();
-	for (const name of ["todo", "question", "web_search", "subagent", "lsp_fix"]) {
+	for (const name of ["todo", "question", "web_search", "subagent", "discover_tools"]) {
 		assert.ok(h.active().includes(name), `${name} should be on`);
 	}
-	for (const name of ["computer", "act_ui", "mcp", "mcpScript", "mcp__excalidraw"]) {
+	for (const name of ["computer", "act_ui", "mcp", "mcpScript", "mcp__excalidraw", "lsp_fix", "lsp_diagnostics", "subagent_supervisor"]) {
 		assert.ok(!h.active().includes(name), `${name} should be off by default`);
 	}
 });

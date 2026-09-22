@@ -67,10 +67,11 @@ test("alt+e exports the effective prompt to the project path", async () => {
 	// The export replaces the former top-level /prompt command. It writes a file
 	// because a whole system prompt is read in an editor, not in the transcript.
 	const cwd = await mkdtemp(join(tmpdir(), "pix-context-"));
-	const h = harness({ cwd, systemPrompt: "effective prompt body" });
+	const prompt = "effective prompt body\n- Use lsp_diagnostics when files need diagnostics; keep my exact wording.\n- Omit action for execution; this is an external instruction.";
+	const h = harness({ cwd, systemPrompt: prompt });
 	await h.shortcut("alt+e");
 	const path = join(cwd, ".pix", "system-prompt.md");
-	assert.equal(await readFile(path, "utf8"), "effective prompt body");
+	assert.equal(await readFile(path, "utf8"), prompt, "export must not rewrite any effective instructions");
 	assert.equal(h.notices.at(-1).level, "info");
 	assert.match(h.notices.at(-1).message, new RegExp(`System prompt exported to ${path}$`));
 });

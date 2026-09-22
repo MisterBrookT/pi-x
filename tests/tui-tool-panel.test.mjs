@@ -49,6 +49,15 @@ const view = (active = ["read", "bash"]) => new ToolPanelView({ model: buildPane
 
 const screen = (panel) => panel.render(100).join("\n");
 
+test("saved policy remains visible at narrow widths and differs from runtime activity", () => {
+ const model = buildPanel([tool("lsp_diagnostics")], ["lsp_diagnostics"]);
+ model.rows[0].mode = "auto";
+ const panel = new ToolPanelView({ model });
+ assert.match(screen(panel), /lsp_diagnostics\s+auto\s+active/);
+ assert.match(panel.render(24).join("\n"), /auto/);
+ for (const width of [12, 24, 80]) assert.ok(panel.render(width).every(line => visibleWidth(line) <= width));
+});
+
 test("the panel lists basic tools individually and capabilities as single rows", () => {
 	const text = screen(view());
 	assert.match(text, /^> bash /m, "a basic tool has its own row");

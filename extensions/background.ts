@@ -67,12 +67,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "background",
 		label: "Background",
-		description: "Run long shell commands without blocking (TUI/RPC only). start requires command; status lists jobs or returns output for id; stop requires id. Completion/failure automatically wakes the agent once; do other work or yield, do not poll or ask the user to continue. Output: last 2000 lines/50KB, with a full log path when truncated. Up to 4 running jobs; latest 32 retained. Jobs stop on session exit, reload or branch switch. Not for interactive commands; no stdin. Shell permissions apply as for bash, but bash-only extension hooks do not cover background.",
+		description: "Run shell commands in the background (TUI/RPC only). Completion notifies automatically. Up to 4 jobs; stopped on exit, reload, or branch switch. Output: last 2000 lines/50KB, with a full log when truncated. No stdin or interactive commands. Bash permissions apply, but bash-only extension hooks do not.",
 		promptSnippet: "Run long commands in the background with automatic completion wake-up",
 		parameters: Type.Object({
 			action: StringEnum(["start", "status", "stop"] as const),
-			command: Type.Optional(Type.String({ minLength: 1, maxLength: 8192 })),
-			id: Type.Optional(Type.String()),
+			command: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, description: "Shell command; required for start." })),
+			id: Type.Optional(Type.String({ description: "Job ID; required for stop. Omit for status to list recent jobs (up to 32)." })),
 			timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Command timeout in seconds (optional)." })),
 		}),
 		async execute(callId, params, signal, _onUpdate, ctx) {

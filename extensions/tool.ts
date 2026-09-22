@@ -1,8 +1,8 @@
 /**
  * `/tool` — the one place tools are configured.
  *
- * Tool schemas are re-sent on every request, so the active set is a standing
- * charge on both the context window and the model's attention. This panel is
+ * Active tool schemas occupy the context window and the model's attention.
+ * This panel is
  * the single control surface for it: everyday tools individually, and a knob
  * per capability for the families whose internals nobody should have to learn.
  *
@@ -19,15 +19,19 @@ import { capabilityActions as queryCapabilityActions, type CapabilityAction } fr
 import { inventory, renderTable } from "../src/tool-inventory.ts";
 import {
 	buildPanel,
-	capabilityById,
+	capabilityById as baseCapabilityById,
 	capabilityTargets,
 	formatTokens,
 	panelSummary,
+	toolMode,
+  toolChoice,
+	nextToolMode,
 	type PanelModel,
 } from "../src/tool-panel.ts";
 import { ToolPanelView } from "../src/tool-panel-view.ts";
 import type { Overrides } from "../src/tool-overrides.ts";
 import { selectedTools, toolSettings, type ToolSettings } from "../src/tool-settings.ts";
+import { discoveredTools, isDiscoverable, ownedMcpTools } from "../src/tool-discovery.ts";
 
 /**
  * Name a package from its directory, so a local checkout of pix reports the
@@ -47,20 +51,35 @@ const packageName = (baseDir: string): string | undefined => {
 };
 
 export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSettings()) {
+  const capabilityById = (id: string) => baseCapabilityById(id, ownedMcpTools(pi));
+  const modeOf = (names: string[], overrides: Overrides) => toolMode(names, overrides, ownedMcpTools(pi));
+  const discoverable = (name: string) => isDiscoverable(name, ownedMcpTools(pi));
   const capabilityActions = (id: string) => queryCapabilityActions(pi, id);
   const knownNames = (): Set<string> => new Set(pi.getAllTools().map(entry => entry.name));
   const sync = () => {
-    pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read()));
+    pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read(), discoveredTools(pi), ownedMcpTools(pi)));
   };
   const panel = (): PanelModel => {
     sync();
-    return buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName);
+    const model = buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName, ownedMcpTools(pi));
+    const overrides = settings.read();
+    for (const row of model.rows) {
+      const capability = row.kind === "capability" ? capabilityById(row.id) : undefined;
+      const primary = capability ? capabilityTargets(capability, true, knownNames()) : [];
+      const names = row.kind === "tool" ? [row.name] : primary.length ? primary : row.tools.map(tool => tool.name);
+      row.discoverable = names.length > 0 && names.every(discoverable);
+      row.mode = modeOf(names, overrides);
+      row.defaultMode = modeOf(names, {});
+      row.inherited = names.every(name => toolChoice(name, overrides, ownedMcpTools(pi)) === undefined);
+    }
+    return model;
   };
   pi.on("session_start", sync);
   pi.on("session_tree", sync);
   const setTools = (changes: Overrides) => {
     if (!Object.keys(changes).length) return;
     settings.update(changes);
+    for (const [name, on] of Object.entries(changes)) if (!on) discoveredTools(pi).delete(name);
     sync();
   };
 
@@ -73,6 +92,13 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 		setTools(Object.fromEntries(targets.map((name) => [name, on])));
 		return targets;
 	};
+
+  const resetTools = (names: string[], auto = false) => {
+    settings.update(Object.fromEntries(names.map(name => [name, auto && discoverable(name) && modeOf([name], {}) === "on" ? "auto" : undefined])));
+    const loaded = discoveredTools(pi);
+    for (const name of names) if (name !== "goal") loaded.delete(name);
+    pi.setActiveTools(selectedTools(knownNames(), [...pi.getActiveTools(), ...names], settings.read(), loaded, ownedMcpTools(pi)));
+  };
 
 	pi.registerCommand("tool", {
 		description: "Configure which tools the assistant can use, and see what each costs",
@@ -124,11 +150,20 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
             sync();
 			const args = rawArgs.trim().split(/\s+/).filter(Boolean);
 
-			// `/tool <name|capability> [on|off]` stays scriptable and works headless.
+			// `/tool <name|capability> [on|off|auto]` stays scriptable and works headless.
 			if (args.length && args[0] !== "list") {
 				const [target, verb] = args;
 				const capability = capabilityById(target);
 				const model = panel();
+
+				if (verb === "auto" || verb === "default") {
+					const names = capability ? capabilityTargets(capability, false, knownNames())
+						: knownNames().has(target) ? [target] : [];
+					if (!names.length) { ctx.ui.notify(`${target} is not available.`, "error"); return; }
+					resetTools(names, verb === "auto");
+					ctx.ui.notify(`${target}: ${verb === "auto" ? "on-demand policy applied where supported" : "default policy restored"}.`, "info");
+					return;
+				}
 
 				if (capability) {
 					const row = model.rows.find((entry) => entry.kind === "capability" && entry.id === target);
@@ -145,7 +180,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 						const verbs = capabilityActions(target).map((entry) => entry.verb);
 						if (verb !== undefined) {
 							ctx.ui.notify(
-								`No ${row.label} action named ${verb}. Use: on, off${verbs.map((name) => `, ${name}`).join("")}`,
+								`No ${row.label} action named ${verb}. Use: on, off, auto${verbs.map((name) => `, ${name}`).join("")}`,
 								"error",
 							);
 							return;
@@ -202,7 +237,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 					title: (text: string) => theme.fg("accent", theme.bold(text)),
 					muted: (text: string) => theme.fg("muted", text),
 					label: (text: string, selected: boolean) => theme.fg(selected ? "accent" : "text", text),
-					value: (text: string, on: boolean) => theme.fg(on ? "success" : "muted", text),
+					value: (text: string, on: boolean, mode?: string) => theme.fg(mode === "auto" ? "accent" : on ? "success" : "muted", text),
 					cursor: "›",
 				};
 
@@ -217,6 +252,10 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 							id: entry.name,
 							name: entry.name,
 							on: entry.active,
+							discoverable: discoverable(entry.name),
+							mode: modeOf([entry.name], settings.read()),
+							defaultMode: modeOf([entry.name], {}),
+							inherited: toolChoice(entry.name, settings.read(), ownedMcpTools(pi)) === undefined,
 							tokens: entry.tokens,
 							origin: entry.origin,
 						})),
@@ -246,10 +285,13 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 							done(capabilityActions(scopeId).find(entry => entry.verb === action.verb));
 							return;
 						}
-						if (action.type === "toggle") {
+						if (action.type === "toggle" || action.type === "reset") {
 							const row = action.row;
-							if (row.kind === "capability") toggleCapability(row.id, !row.on);
-							else setTool(row.name, !row.on);
+							const mode = action.type === "reset" || row.mode === "mixed" ? "auto" : nextToolMode(row.mode ?? "auto", row.defaultMode, row.discoverable);
+							const capability = row.kind === "capability" ? capabilityById(row.id) : undefined;
+							if (mode === "auto") resetTools(capability ? capabilityTargets(capability, false, knownNames()) : [row.id], action.type !== "reset" && row.mode !== "mixed");
+							else if (capability) toggleCapability(capability.id, mode === "on");
+							else setTool(row.id, mode === "on");
 							refresh();
 							return;
 						}

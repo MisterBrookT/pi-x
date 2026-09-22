@@ -19,8 +19,14 @@ test('normal Web enables three tools; source checking and video remain optional'
  assert.deepEqual(web.secondary,['source_check','video_content']);
  assert.equal(capabilityTargets(web,false,known).length,5);
 });
-test('web search does not advertise the interactive curator',()=>{
+test('web descriptions and prompt snippets stay brief without hiding argument caveats',()=>{
  assert.doesNotMatch(byName.web_search.description,/curator|review interface|browser/i);
+ assert.equal(byName.web_search.promptSnippet, 'Search the web');
+ assert.equal(byName.fetch_content.promptSnippet, 'Fetch content from URLs');
+ assert.equal(byName.get_search_content.promptSnippet, 'Retrieve stored search and fetch results');
+ assert.doesNotMatch(byName.web_search.parameters.properties.queries.description, /2[–-]4|prefer/);
+ assert.match(byName.fetch_content.parameters.properties.mode.description, /only fetched content/);
+ assert.match(byName.fetch_content.description, /get_search_content.*video_content/);
 });
 test('core Web meets the 1000 estimated token budget',()=>{
  const total=['web_search','fetch_content','get_search_content'].reduce((sum,name)=>sum+estimateTokens(toolChars(byName[name])),0);
@@ -60,7 +66,8 @@ test('actual capability lifecycle withholds optional research tools and respects
  const {default:register}=await import('../extensions/capabilities.ts');
  let active=profiles.map(t=>t.name);const handlers=new Map();const entries=[];
  const settings=settingsFor({});
- register({on:(n,h)=>handlers.set(n,h),registerCommand(){},getAllTools:()=>profiles,getActiveTools:()=>active,setActiveTools:n=>{active=n;}},settings);
+ const {createEventBus}=await import('@earendil-works/pi-coding-agent');
+ register({events:createEventBus(),registerTool(){},on:(n,h)=>handlers.set(n,h),registerCommand(){},getAllTools:()=>profiles,getActiveTools:()=>active,setActiveTools:n=>{active=n;}},settings);
  const ctx={sessionManager:{getBranch:()=>entries}};
  handlers.get('session_start')({},ctx);
  assert.ok(!active.includes('source_check'));assert.ok(!active.includes('video_content'));

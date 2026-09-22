@@ -36,7 +36,6 @@ test("slash commands stay minimal", async () => {
   assert.doesNotMatch(todo, /registerCommand\("todos"/);
   assert.match(todo, /Usage: \/todo \[on\|off\]/);
   assert.match(todo, /parentId/);
-  assert.match(todo, /theme\.fg\("accent"/);
   assert.match(todo, /prepareArguments/);
   assert.match(todo, /getArgumentCompletions/);
   const historyCompletion = await readFile(new URL("extensions/history-completion.ts", root), "utf8");

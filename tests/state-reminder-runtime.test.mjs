@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 import registerTodo from "../extensions/todo.ts";
 import { goalSession, say, call, finish } from "./helpers/goal-session.mjs";
 
@@ -10,7 +11,8 @@ const assertAppendOnly = (requests) => {
   for (let i = 1; i < requests.length; i++) {
     assert.deepEqual(requests[i].messages.slice(0, requests[i - 1].messages.length), requests[i - 1].messages,
       `request ${i} must retain every message from request ${i - 1}, including state reminders`);
-    assert.equal(requests[i].systemPrompt, requests[i - 1].systemPrompt);
+    // Pi 0.86 appends structured system/tool patches. The replayed effective
+    // prompt may change; the cache contract is the unchanged transcript prefix.
   }
 };
 
@@ -100,7 +102,7 @@ test("automatic overflow recovery restores goal and todo before the retry", opti
   const h = await goalSession(t, ({ index, goal, context }) => {
     if (index === 0) return call("todo", { action: "replace", items: [{ text: "Retain the plan" }] });
     if (index === 1) throw new Error("prompt is too long: 40000 tokens > 32768 maximum");
-    if (!context.tools?.length) return say("Summary with no goal or plan details.");
+    if (!getCurrentTools(context.messages).length) return say("Summary with no goal or plan details.");
     if (goal.status === "active") {
       retryIndex = index;
       assert.equal(compactions, 1);
