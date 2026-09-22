@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { renderFitted } from "../src/mermaid.ts";
+import { colorize, renderFitted } from "../src/mermaid.ts";
 
 /**
  * Render ```mermaid blocks with the current `lovely-mermaid` instead of the
@@ -12,6 +12,9 @@ import { renderFitted } from "../src/mermaid.ts";
  *
  * A diagram too wide for the pane is re-laid out top-down before giving up,
  * since models habitually emit `flowchart LR` regardless of terminal width.
+ *
+ * `classDef` colours are kept, because a legend like "green = done, yellow =
+ * open question" is unreadable once every box looks the same.
  *
  * Pi's `markdown.mermaid` setting still applies: `off` leaves blocks alone
  * and `final` waits for the finished message.
@@ -24,7 +27,7 @@ export function transformMermaidBlocks(markdown: string, availableWidth: number)
   return markdown.replace(FENCE, (raw, indent: string, _fence: string, src: string) => {
     const art = renderFitted(src, availableWidth);
     if (art.warnings.length > 0 || art.plain.length === 0 || art.width > availableWidth) return raw;
-    return `${indent}\`\`\`text\n${art.plain.map((line) => indent + line).join("\n")}\n${indent}\`\`\``;
+    return `${indent}\`\`\`text\n${colorize(art).map((line) => indent + line).join("\n")}\n${indent}\`\`\``;
   });
 }
 

@@ -7,7 +7,7 @@
  * (xl0/lovely-mermaid#7): an HTML entity's `;` must not end a statement.
  */
 
-import { render as lovelyRender } from "lovely-mermaid";
+import { render as lovelyRender, toAnsi } from "lovely-mermaid";
 
 /** Longest entity body kept intact, e.g. `&thinsp;`. */
 const ENTITY_MAX = 10;
@@ -114,11 +114,16 @@ function restore(line: string, swaps: Map<string, string>): string {
   return result;
 }
 
-interface StyledSpan { cls: string; text: string }
+interface StyledSpan { cls: string; text: string; role?: string; classes?: string[]; href?: string }
+
+/** `classDef` fills and colours, keyed by class name, as the author wrote them. */
+type ClassDefs = Record<string, Record<string, string>>;
 
 export interface MermaidArt {
   plain: string[];
   styled: StyledSpan[][];
+  /** Needed to turn a span's class names into colour; dropping it loses styling. */
+  classDefs?: ClassDefs;
   width: number;
   warnings: string[];
 }
@@ -163,7 +168,23 @@ export function renderMermaid(src: string): MermaidArt {
   return {
     plain: art.plain.map((line) => restore(line, swaps)),
     styled: art.styled.map((row) => row.map((span) => ({ ...span, text: restore(span.text, swaps) }))),
+    classDefs: art.classDefs,
     width: art.width,
     warnings: art.warnings ?? [],
   };
+}
+
+/**
+ * The diagram as ANSI-coloured lines, so `classDef` fills and font colours
+ * survive into the terminal. `plain` carries no styling at all, so a diagram
+ * whose meaning depends on colour ("green = done, yellow = open") reads as
+ * undifferentiated boxes without this.
+ */
+export function colorize(art: MermaidArt): string[] {
+  try {
+    const lines = toAnsi(art as never) as string[];
+    return lines.length === art.plain.length ? lines : art.plain;
+  } catch {
+    return art.plain;
+  }
 }

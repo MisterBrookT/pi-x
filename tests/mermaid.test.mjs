@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preprocessEntities, renderFitted, renderMermaid } from "../src/mermaid.ts";
+import { colorize, preprocessEntities, renderFitted, renderMermaid } from "../src/mermaid.ts";
 import { transformMermaidBlocks } from "../extensions/mermaid.ts";
 
 const AUTH_DIAGRAM = `flowchart TD
@@ -112,4 +112,44 @@ test("a diagram that fits in no layout is left to the caller", () => {
 	const src = "flowchart LR\n  A --> B";
 	const art = renderFitted(src, 3);
 	assert.ok(art.width > 3);
+});
+
+const LEGEND = `flowchart LR
+  A[We own this] -->|freeze| B[Snapshot]
+  B --> C(Open question)
+  classDef owned fill:#2ea043,color:#fff
+  classDef open fill:#d29922,color:#000
+  class A,B owned
+  class C open`;
+
+const ESC = String.fromCharCode(27);
+
+test("classDef colours survive rendering, so a colour legend still means something", () => {
+	const art = renderMermaid(LEGEND);
+	assert.deepEqual(Object.keys(art.classDefs ?? {}).sort(), ["open", "owned"], "class definitions must reach the caller");
+	const lines = colorize(art).join("\n");
+	assert.ok(lines.includes(`${ESC}[38;2;255;255;255;48;2;46;160;67m`), "the owned class keeps its green fill");
+	assert.ok(lines.includes(`${ESC}[38;2;0;0;0;48;2;210;153;34m`), "the open class keeps its yellow fill");
+});
+
+test("re-laying a diagram top-down preserves its colours", () => {
+	const wide = renderMermaid(LEGEND);
+	const fitted = renderFitted(LEGEND, 40);
+	assert.ok(fitted.width <= 40 && fitted.width < wide.width, "the diagram must actually have been re-laid out");
+	const classesOf = (art) => [...new Set(art.styled.flat().flatMap((span) => span.classes ?? []))].sort();
+	assert.deepEqual(classesOf(fitted), classesOf(wide), "a reflow must not drop class assignments");
+	assert.ok(colorize(fitted).join("\n").includes(`${ESC}[38;2;0;0;0;48;2;210;153;34m`));
+});
+
+test("colorize keeps one line per plain line and falls back rather than throwing", () => {
+	const art = renderMermaid(LEGEND);
+	assert.equal(colorize(art).length, art.plain.length);
+	assert.deepEqual(colorize({ ...art, styled: null }), art.plain, "a broken art object degrades to plain text");
+});
+
+test("an uncoloured diagram is unchanged apart from theme styling", () => {
+	const art = renderMermaid("flowchart TD\n  A[One] --> B[Two]");
+	const lines = colorize(art);
+	assert.equal(lines.length, art.plain.length);
+	assert.ok(lines.some((line) => line.includes("One")));
 });
