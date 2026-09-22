@@ -42,6 +42,7 @@ Pix is under active development. macOS and Linux are supported; Windows is not y
 ## What you get
 
 - **Practical tools.** Web search and source retrieval, parallel subagents, and optional language-server diagnostics and fixes.
+- **Web access Pix owns.** Search runs through your Pi OpenAI or Codex login, pages and PDFs are extracted to markdown, and large results are stored for retrieval by slice or passage. Requests are guarded against private-network access on every redirect.
 - **Less babysitting.** Visible todos, structured questions, background jobs that wake the agent when finished, and opt-in goal mode for unfinished work.
 - **A more comfortable editor.** Inline history suggestions, optional AI completion, list continuation, and compact pasted text and images.
 - **Control over the setup.** One tool panel, context inspection, and a configurable footer. Computer use and MCP start on demand.
@@ -81,6 +82,6 @@ Use `/login pix-anthropic`, then select a model under `pix-anthropic`.
 
 ## Thanks
 
-Built on [Pi](https://github.com/earendil-works/pi-mono) and its extension community, especially LazyPi, pi-web-access, pi-subagents, and pi-lsp.
+Built on [Pi](https://github.com/earendil-works/pi-mono) and its extension community, especially LazyPi, pi-web-access, pi-subagents, and pi-lsp. See [third-party notices](THIRD_PARTY_NOTICES.md).
 
 [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for credits and licenses.

@@ -1,15 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import registerLsp from "../node_modules/@narumitw/pi-lsp/dist/index.ts";
 import registerSubagents from "pi-subagents";
-import registerWebAccess from "pi-web-access";
 import { simplifySubagent } from "../src/simple-subagent.ts";
 import { supervisorDescription } from "../src/subagent-policy.ts";
 import { registerCapabilityAction } from "../src/capability-actions.ts";
 import { configureSubagentRoles } from "../src/subagent-roles.ts";
 import { withAnimatedSubagentWidgets } from "../src/subagent-spinner.ts";
-import { webProfiles } from "../src/web-profiles.ts";
 import { withPixToolGuidance } from "../src/tool-guidance.ts";
-import { configureWeb, readWebSettings } from "../src/web-settings.ts";
+import { configureWeb } from "../src/web-settings.ts";
+import { readWebConfig } from "../src/web/config.ts";
+import { registerWebTools } from "../src/web/tools.ts";
 
 type RegisteredTool = Parameters<ExtensionAPI["registerTool"]>[0];
 
@@ -22,7 +22,7 @@ function boundedSubagentTool(pi: ExtensionAPI, tool: RegisteredTool) {
     return;
   }
   if (tool.name !== "subagent") {
-    for (const profile of webProfiles(tool)) pi.registerTool(profile);
+    pi.registerTool(tool);
     return;
   }
   tool = simplifySubagent(tool);
@@ -71,32 +71,27 @@ export default function (pi: ExtensionAPI) {
   });
   const api = toolsOnly(pi);
   registerSubagents(api);
-  // A reopened panel must not test a saved config against stale upstream caches.
-  let loadedWebSettings: string | undefined;
-  try { loadedWebSettings = JSON.stringify(readWebSettings()); } catch { /* Configuration UI reports malformed files. */ }
+  // Settings are read per call, so a saved change applies without /reload.
   const webTools = new Map<string, RegisteredTool>();
-  registerWebAccess(new Proxy(api, {
+  registerWebTools(new Proxy(api, {
     get(target, property, receiver) {
       if (property === "registerTool") return (tool: RegisteredTool) => {
         webTools.set(tool.name, tool);
-        target.registerTool(tool);
+        target.registerTool(withPixToolGuidance(tool));
       };
       return Reflect.get(target, property, receiver);
     },
-  }));
+  }) as ExtensionAPI, () => readWebConfig());
   registerCapabilityAction(pi, "web", {
     verb: "configure",
-    description: "Choose search source, test access, and configure web settings",
+    description: "Test web access and configure fetching limits",
     shortcut: "c",
     run: ctx => configureWeb(ctx, async (kind, context) => {
-      if (JSON.stringify(readWebSettings()) !== loadedWebSettings) {
-        throw new Error("Run /reload before testing changed web settings.");
-      }
       const name = kind === "search" ? "web_search" : "fetch_content";
       const tool = webTools.get(name);
       if (!tool) throw new Error(`${name} is not registered`);
       const args = kind === "search"
-        ? { query: "example domain", numResults: 1, workflow: "none" }
+        ? { query: "example domain", numResults: 1 }
         : { url: "https://example.com", mode: "readable" };
       const result = await tool.execute(`web-test-${Date.now()}`, args, AbortSignal.timeout(30000), undefined, context);
       const details = result.details as { error?: string; successful?: number } | undefined;

@@ -11,7 +11,10 @@ test("slash commands stay minimal", async () => {
   const upstream = await readFile(new URL("extensions/upstream-tools.ts", root), "utf8");
   const todo = await readFile(new URL("extensions/todo.ts", root), "utf8");
   const smartEditor = await readFile(new URL("extensions/smart-editor.ts", root), "utf8");
-  for (const dependency of ["pi-subagents", "pi-web-access", "@narumitw/pi-lsp"]) assert.match(upstream, new RegExp(dependency));
+  for (const dependency of ["pi-subagents", "@narumitw/pi-lsp"]) assert.match(upstream, new RegExp(dependency));
+  // Web access is Pix's own engine now, not a bundled upstream package.
+  assert.match(upstream, /registerWebTools/);
+  assert.doesNotMatch(upstream, /pi-web-access/);
   assert.match(upstream, /property === "registerCommand"/);
   assert.match(upstream, /PI_SUBAGENT_MAX_DEPTH/);
   assert.match(upstream, /Math\.min\(requestedConcurrency, 4\)/);

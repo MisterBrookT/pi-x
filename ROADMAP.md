@@ -27,7 +27,7 @@ Add the best preview to the package gallery metadata in `package.json`.
 ## 3. Distribution and community launch
 
 - Publish a scoped npm package after npm credentials are configured.
-- Decide whether to keep bundling `pi-subagents`, `pi-web-access`, and `pi-lsp` (14 MB, works first time) or depend on them normally (small, but the relative `pi-lsp` import must change and clean installs need re-testing).
+- Decide whether to keep bundling `pi-subagents` and `pi-lsp` (works first time) or depend on them normally (small, but the relative `pi-lsp` import must change and clean installs need re-testing).
 - Verify the listing and preview on the Pi package gallery.
 - Refresh the `awesome-pi-coding-agent` entry.
 - Announce the reproducible benchmark and demo in the Pi community, then share them through broader developer channels.

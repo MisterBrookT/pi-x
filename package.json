@@ -22,7 +22,6 @@
     "url": "https://github.com/MisterBrookT/pi-x/issues"
   },
   "scripts": {
-    "postinstall": "node scripts/patch-web-access.mjs",
     "bench": "node scripts/bench.mjs",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
@@ -33,21 +32,24 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/core": "2.0.0",
     "@modelcontextprotocol/ext-apps": "^1.2.2",
+    "@mozilla/readability": "^0.6.0",
     "@napi-rs/keyring": "^1.3.0",
+    "@narumitw/pi-lsp": "0.49.6",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "cross-spawn": "^7.0.6",
+    "jsonc-parser": "3.3.1",
+    "linkedom": "^0.16.11",
+    "lovely-mermaid": "^0.3.3",
     "open": "^10.2.0",
+    "pi-subagents": "0.63.0",
     "recheck": "^4.5.0",
     "smol-toml": "^1.6.1",
     "strip-json-comments": "^5.0.3",
+    "turndown": "^7.2.4",
     "undici": "^6.28.1",
-    "zod": "^3.25.0 || ^4.0.0",
-    "@narumitw/pi-lsp": "0.49.6",
-    "jsonc-parser": "3.3.1",
-    "lovely-mermaid": "^0.3.3",
-    "pi-subagents": "0.63.0",
-    "pi-web-access": "0.27.0"
+    "unpdf": "^1.8.1",
+    "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.86.1",
@@ -107,12 +109,14 @@
   ],
   "bundledDependencies": [
     "@narumitw/pi-lsp",
-    "pi-subagents",
-    "pi-web-access"
+    "pi-subagents"
   ],
   "bundleDependencies": [
     "@narumitw/pi-lsp",
-    "pi-subagents",
-    "pi-web-access"
-  ]
+    "pi-subagents"
+  ],
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.86.1",
+    "@earendil-works/pi-tui": "^0.86.1"
+  }
 }

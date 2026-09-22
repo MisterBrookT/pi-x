@@ -53,14 +53,18 @@ test('Pi separately loads the role action and /tool, including after reload', as
     assert.ok(tool.getArgumentCompletions('web ').some(item => item.value === 'web configure'));
     await tool.handler('web configure', ctx);
     assert.match(notices.at(-1).text, /Web configuration requires an interactive UI/);
-    const picks = ['Search source', 'duckduckgo', undefined, 'Test connection', 'Search:'];
-    const webCtx = { ...ctx, hasUI: true, ui: { ...ctx.ui, select: async (_title, options) => {
-      const prefix = picks.shift();
-      return prefix === undefined ? undefined : options.find(option => option.startsWith(prefix));
-    } } };
+    // A saved setting applies immediately, so a probe runs without /reload.
+    const picks = ['Page size limit', undefined, 'Test connection', 'Search:', undefined];
+    const webCtx = { ...ctx, hasUI: true, ui: { ...ctx.ui,
+      select: async (_title, options) => {
+        const prefix = picks.shift();
+        return prefix === undefined ? undefined : options.find(option => option.startsWith(prefix));
+      },
+      input: async () => '30000',
+    } };
     await tool.handler('web configure', webCtx);
     await tool.handler('web configure', webCtx);
-    assert.match(notices.at(-1).text, /reload before testing changed web settings/);
+    assert.ok(notices.some(notice => /web_search is not registered|search test result|Testing web connection/.test(notice.text)));
     rmSync(join(agentDir, 'web-search.json'), { force: true });
     const beforeReload = [];
     bus.emit('pix:capability-actions:query', { capabilityId: 'subagent', actions: beforeReload });

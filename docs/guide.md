@@ -6,12 +6,12 @@ Detailed usage, configuration, and design boundaries.
 
 ## What it adds
 
-- `web_search` and content fetching through `pi-web-access`
-  - Normal Web exposes Search → Fetch → Retrieve, with a tested 1,000 estimated-token budget.
-  - Provider, proxy, and model selection use backend configuration rather than per-call overrides.
-  - `source_check` and `video_content` are discovered on demand; explicit activation is also available under `/tool` → Web → Enter. Explicit saved choices still win.
-  - Video timestamp/frame controls are exposed only by `video_content`. This is an interface split, not a security restriction on which URLs the fetch backend can read.
-  - Ordinary fetching does not expose browser-cookie opt-in or forced large repository cloning.
+- `web_search`, `fetch_content`, and `get_search_content`, implemented in Pix's own `src/web/`
+  - Search runs through your Pi `openai-codex` or `openai` login; a Codex subscription needs no separate API key. Set `openaiApiKey` in `web-search.json` to use a key instead.
+  - Fetching extracts readable markdown, returns raw bodies on request, and converts PDFs to text. Large results are stored for an hour and read back by slice or by `findText`.
+  - Every request, including each redirect hop, is checked against private, loopback, link-local, and reserved addresses, and DNS answers are validated in full so a rebind cannot reach an internal service. Exempt a range you control with `ssrf.allowRanges`, for example `["198.18.0.0/15"]` for a TUN/fake-IP proxy.
+  - `/tool` → Web → **C** tests access and adjusts the inline size limit, allowed ranges, and proxy. Settings are read per call, so a saved change applies without `/reload`.
+  - Video analysis, GitHub repository cloning, browser-cookie fetching, and the interactive search curator are not included.
 - `subagent` through `pi-subagents`
 - `background` for long shell commands: start, inspect, or stop a job; completion or failure automatically wakes the agent
 - opt-in `/goal` mode to continue unfinished work, with explicit completion/blockers and a continuation limit
