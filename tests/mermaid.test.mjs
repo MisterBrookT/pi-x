@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preprocessEntities, renderMermaid } from "../src/mermaid.ts";
+import { preprocessEntities, renderFitted, renderMermaid } from "../src/mermaid.ts";
 import { transformMermaidBlocks } from "../extensions/mermaid.ts";
 
 const AUTH_DIAGRAM = `flowchart TD
@@ -78,4 +78,38 @@ test("the transformer leaves a diagram alone when it cannot render it", () => {
 test("non-mermaid fences are untouched", () => {
 	const md = "```js\nconst mermaid = 1;\n```";
 	assert.equal(transformMermaidBlocks(md, 200), md);
+});
+
+test("a wide LR diagram is re-laid out top-down to fit", () => {
+	const src = [
+		"flowchart LR",
+		'    A["Your dashboard<br/>(on your laptop)"] -->|freeze into<br/>a snapshot| B["Snapshot<br/>&ge; data"]',
+		'    B -->|store it<br/>&#63; WHERE| C[("Storage")]',
+		'    C -->|read| D["agent.minara.ai<br/>apps/docs &mdash; OUR code"]',
+		'    D --> E["Public link<br/>+ preview card"]',
+	].join("\n");
+	assert.ok(renderMermaid(src).width > 80);
+	const fitted = renderFitted(src, 80);
+	assert.ok(fitted.width <= 80, `width ${fitted.width}`);
+	assert.deepEqual(fitted.warnings, []);
+	const text = fitted.plain.join("\n");
+	for (const label of ["Storage", "agent.minara.ai", "Public link"]) {
+		assert.ok(text.includes(label), `missing ${label}`);
+	}
+
+	const md = "```mermaid\n" + src + "\n```";
+	const out = transformMermaidBlocks(md, 80);
+	assert.ok(!out.includes("```mermaid"), "wide LR diagram fell back to source");
+	for (const line of out.split("\n")) assert.ok(line.length <= 80, `long line: ${line}`);
+});
+
+test("reflow keeps a diagram that already fits untouched", () => {
+	const src = "flowchart LR\n  A --> B";
+	assert.deepEqual(renderFitted(src, 80).plain, renderMermaid(src).plain);
+});
+
+test("a diagram that fits in no layout is left to the caller", () => {
+	const src = "flowchart LR\n  A --> B";
+	const art = renderFitted(src, 3);
+	assert.ok(art.width > 3);
 });

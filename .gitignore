@@ -4,3 +4,4 @@ node_modules/
 npm-debug.log*
 .brookdev/
 .private/
+pi-session-*.html

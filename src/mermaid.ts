@@ -123,6 +123,40 @@ export interface MermaidArt {
   warnings: string[];
 }
 
+/**
+ * Header of a flowchart/graph declaration, capturing its direction keyword.
+ * Also matches a nested `direction LR` inside subgraphs.
+ */
+const DIRECTION = /^([ \t]*)(flowchart|graph|direction)([ \t]+)(LR|RL|TB|TD|BT)\b/gm;
+
+/** Rewrite every horizontal direction in `src` to top-down. */
+function toVertical(src: string): string | null {
+  let changed = false;
+  const out = src.replace(DIRECTION, (raw, indent, kw, gap, dir) => {
+    if (dir !== "LR" && dir !== "RL") return raw;
+    changed = true;
+    return `${indent}${kw}${gap}${dir === "LR" ? "TD" : "BT"}`;
+  });
+  return changed ? out : null;
+}
+
+/**
+ * Render `src`, falling back to a top-down layout when the requested
+ * horizontal one does not fit in `width`. Terminal art cannot be scaled down
+ * like an image, so re-laying the diagram out is the only way to keep it
+ * readable in a narrow pane. Returns the widest rendering that fits, or the
+ * original when nothing does, so the caller can decide what to do.
+ */
+export function renderFitted(src: string, width: number): MermaidArt {
+  const art = renderMermaid(src);
+  if (art.warnings.length > 0 || art.width <= width) return art;
+  const vertical = toVertical(src);
+  if (vertical === null) return art;
+  const alt = renderMermaid(vertical);
+  if (alt.warnings.length > 0 || alt.plain.length === 0 || alt.width > width) return art;
+  return alt;
+}
+
 export function renderMermaid(src: string): MermaidArt {
   const { src: prepared, swaps } = preprocessEntities(src);
   const art = lovelyRender(prepared) as MermaidArt;
