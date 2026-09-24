@@ -7,24 +7,38 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerBackground from "../extensions/background.ts";
+import registerBackground, { reminderDelaySeconds } from "../extensions/background.ts";
+import { BACKGROUND_STATE_QUERY } from "../src/background-state.ts";
 
 const quote = (text) => `'${text.replaceAll("'", `'\\''`)}'`;
 const node = (script) => `${quote(process.execPath)} -e ${quote(script)}`;
 const text = (result) => result.content.map((part) => part.text ?? "").join("\n");
 
-function harness(t, mode = "tui") {
+function clock() {
+	const pending = new Map();
+	let next = 0;
+	return {
+		setTimeout(callback, delay) { const id = ++next; pending.set(id, { callback, delay }); return id; },
+		clearTimeout(id) { pending.delete(id); },
+		get delays() { return [...pending.values()].map(({ delay }) => delay); },
+		fire() { const [id, item] = pending.entries().next().value ?? []; assert.ok(item, "expected a pending reminder"); pending.delete(id); item.callback(); },
+	};
+}
+
+function harness(t, mode = "tui", timers, goalRef) {
 	let tool;
 	const statuses = new Map();
 	const handlers = new Map();
 	const messages = [];
 	const events = new EventEmitter();
+	const bus = createEventBus();
+	if (goalRef) bus.on(BACKGROUND_STATE_QUERY, (state) => { state.goal = goalRef.current; });
 	registerBackground({
-		events: createEventBus(),
+		events: bus,
 		registerTool(value) { assert.equal(tool, undefined); tool = value; },
 		on(name, handler) { handlers.set(name, handler); },
 		sendMessage(message, options) { messages.push({ message, options }); events.emit("wake", message); },
-	});
+	}, timers);
 	const ctx = {
 		cwd: process.cwd(), mode, hasUI: true, sessionManager: SessionManager.inMemory(), thinkingLevel: "off",
 		ui: { notify() {}, setStatus: (key, value) => { if (value === undefined) statuses.delete(key); else statuses.set(key, value); } },
@@ -46,6 +60,75 @@ async function gate(t) {
 		request: () => once(requests, "request", { signal: AbortSignal.timeout(10000) }).then(([res]) => res),
 	};
 }
+
+test("reminder schedule supports fixed, capped exponential, and off", () => {
+	assert.equal(reminderDelaySeconds("off", 60, 0), undefined);
+	assert.deepEqual([0, 1, 2, 3, 4].map((n) => reminderDelaySeconds("exponential", 60, n)), [60, 120, 240, 480, 480]);
+	assert.deepEqual([0, 1, 2].map((n) => reminderDelaySeconds("fixed", 90, n)), [90, 90, 90]);
+	assert.equal(reminderDelaySeconds("exponential", 900, 0), 900);
+});
+
+test("running job sends exponential health wakes, then completion cancels the timer", { timeout: 15000 }, async (t) => {
+	const timers = clock();
+	const h = harness(t, "tui", timers);
+	const g = await gate(t);
+	const requested = g.request();
+	await h.call({ action: "start", command: g.command });
+	const response = await requested;
+	assert.deepEqual(timers.delays, [60000]);
+	for (const [index, next] of [120000, 240000, 480000, 480000].entries()) {
+		timers.fire();
+		assert.equal(h.messages[index].message.customType, "pix-background-health");
+		assert.equal(h.messages[index].message.display, false);
+		assert.deepEqual(h.messages[index].options, { triggerTurn: true, deliverAs: "followUp" });
+		assert.deepEqual(timers.delays, [next]);
+	}
+	const wake = h.wake();
+	response.end("done");
+	assert.equal((await wake).details.state, "completed");
+	assert.deepEqual(timers.delays, []);
+	assert.equal(h.messages.filter(({ message }) => message.customType === "pix-background").length, 1);
+});
+
+test("fixed reminders and off mode; stopping clears future wakes", { timeout: 15000 }, async (t) => {
+	const timers = clock();
+	const h = harness(t, "tui", timers);
+	const g = await gate(t);
+	const first = g.request();
+	const started = await h.call({ action: "start", command: g.command, reminder: "fixed", intervalSeconds: 30 });
+	await first;
+	assert.deepEqual(timers.delays, [30000]);
+	timers.fire();
+	assert.deepEqual(timers.delays, [30000]);
+	assert.equal(h.messages.length, 1);
+	await h.call({ action: "stop", id: started.details.id });
+	assert.deepEqual(timers.delays, []);
+	const second = g.request();
+	await h.call({ action: "start", command: g.command, reminder: "off" });
+	const response = await second;
+	assert.deepEqual(timers.delays, []);
+	const wake = h.wake();
+	response.end("done");
+	await wake;
+	assert.equal(h.messages.filter(({ message }) => message.customType === "pix-background-health").length, 1);
+});
+
+test("paused goal suppresses health wakes and branch navigation cancels reminders", { timeout: 15000 }, async (t) => {
+	const timers = clock();
+	const goal = { current: { id: "goal-1", active: true } };
+	const h = harness(t, "tui", timers, goal);
+	const g = await gate(t);
+	const requested = g.request();
+	await h.call({ action: "start", command: g.command });
+	await requested;
+	goal.current.active = false;
+	timers.fire();
+	assert.equal(h.messages.length, 0);
+	assert.deepEqual(timers.delays, [120000]);
+	await h.handlers.get("session_tree")();
+	assert.deepEqual(timers.delays, []);
+	assert.equal(h.messages.length, 0);
+});
 
 test("one small tool returns before completion and wakes once with stdout and stderr", { timeout: 15000 }, async (t) => {
 	const h = harness(t);

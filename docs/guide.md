@@ -153,6 +153,7 @@ fails. There is no need to say “continue,” poll, or watch every log line.
 
 ```json
 {"action":"start","command":"npm run check"}
+{"action":"start","command":"long-benchmark","reminder":"fixed","intervalSeconds":120}
 {"action":"status","id":"1"}
 {"action":"stop","id":"1"}
 ```
@@ -160,13 +161,19 @@ fails. There is no need to say “continue,” poll, or watch every log line.
 Omit `id` from `status` to list jobs. Up to four run at once; the latest 32 are
 retained in memory. Completion includes a short output tail; `status` provides
 Pi's bounded Bash output and a full log path when truncated. An optional
-`timeout` is in seconds. Explicitly stopped jobs do not wake the agent.
+`timeout` is in seconds. While a job runs, hidden health-check messages wake
+the agent at 1, 2, 4, then every 8 minutes by default (intervals, not elapsed
+times). Set `reminder: "fixed"` and `intervalSeconds` (10–3600) for a steady
+interval, or `reminder: "off"` for completion-only wakes. Exponential checks
+start at the chosen interval and double up to at least 8 minutes. Completion,
+stop, exit, reload, and branch changes cancel future checks; an inactive goal
+does not wake. Explicitly stopped jobs do not wake the agent.
 
 This minimal version requires a persistent TUI or RPC session. Jobs stop on exit,
 reload, session replacement, or branch navigation; they do not survive restarts.
 Use ordinary `bash` in print/JSON mode. There is no stdin interaction, output
-watcher, or scheduler. Toggle the tool with `/tool background off` (this prevents
-new tool calls, not existing jobs). Like Bash, it executes local commands with
+output watcher or persistent scheduler. Toggle the tool with
+`/tool background off` (this prevents new tool calls, not existing jobs). Like Bash, it executes local commands with
 Pi's permissions; extensions that guard or sandbox only the `bash` tool must
 also cover `background` before enabling it.
 

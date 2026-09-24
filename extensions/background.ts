@@ -4,6 +4,15 @@ import { Type } from "typebox";
 import { BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../src/background-state.ts";
 
 type State = "running" | "completed" | "failed" | "stopped";
+type Reminder = "off" | "fixed" | "exponential";
+const DEFAULT_INTERVAL_SECONDS = 60;
+const MAX_EXPONENTIAL_SECONDS = 480;
+
+export function reminderDelaySeconds(mode: Reminder, intervalSeconds: number, checkpoint: number): number | undefined {
+	if (mode === "off") return undefined;
+	return mode === "fixed" ? intervalSeconds : Math.min(intervalSeconds * 2 ** checkpoint, Math.max(intervalSeconds, MAX_EXPONENTIAL_SECONDS));
+}
+
 interface Job {
 	id: string;
 	goalId?: string;
@@ -13,13 +22,14 @@ interface Job {
 	fullOutputPath?: string;
 	controller: AbortController;
 	done: Promise<void>;
+	reminderTimer?: ReturnType<typeof setTimeout>;
 }
 
 const MAX_RUNNING = 4;
 const MAX_HISTORY = 32;
 
 /** Session-scoped jobs; Pi owns shell execution, output limits and process-tree cleanup. */
-export default function backgroundExtension(pi: ExtensionAPI) {
+export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeof globalThis, "setTimeout" | "clearTimeout"> = globalThis) {
 	const jobs = new Map<string, Job>();
 	let nextId = 0;
 	let closed = false;
@@ -46,6 +56,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	const stop = (job: Job) => {
 		if (job.state !== "running") return;
 		job.state = "stopped";
+		timers.clearTimeout(job.reminderTimer);
 		job.controller.abort();
 	};
 	const cleanup = async (_event: unknown, ctx?: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
@@ -67,13 +78,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "background",
 		label: "Background",
-		description: "Run shell commands in the background (TUI/RPC only). Completion notifies automatically. Up to 4 jobs; stopped on exit, reload, or branch switch. Output: last 2000 lines/50KB, with a full log when truncated. No stdin or interactive commands. Bash permissions apply, but bash-only extension hooks do not.",
+		description: "Run shell commands in the background (TUI/RPC only). Completion notifies automatically; running jobs can wake for fixed or exponential health checks (1/2/4/8 minutes by default). Up to 4 jobs; stopped on exit, reload, or branch switch. Output: last 2000 lines/50KB, with a full log when truncated. No stdin or interactive commands. Bash permissions apply, but bash-only extension hooks do not.",
 		promptSnippet: "Run long commands in the background with automatic completion wake-up",
 		parameters: Type.Object({
 			action: StringEnum(["start", "status", "stop"] as const),
 			command: Type.Optional(Type.String({ minLength: 1, maxLength: 8192, description: "Shell command; required for start." })),
 			id: Type.Optional(Type.String({ description: "Job ID; required for stop. Omit for status to list recent jobs (up to 32)." })),
 			timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Command timeout in seconds (optional)." })),
+			reminder: Type.Optional(StringEnum(["off", "fixed", "exponential"] as const, { description: "Health-check wake-up schedule; exponential by default." })),
+			intervalSeconds: Type.Optional(Type.Number({ minimum: 10, maximum: 3600, description: "First health check in seconds (default 60); fixed repeats at this interval, exponential doubles up to at least 8 minutes." })),
 		}),
 		async execute(callId, params, signal, _onUpdate, ctx) {
 			signal?.throwIfAborted();
@@ -112,6 +125,33 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			};
 			jobs.set(job.id, job);
 			showStatus(ctx);
+			const reminder = params.reminder ?? "exponential";
+			const interval = params.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
+			let checkpoint = 0;
+			const scheduleReminder = () => {
+				const delay = reminderDelaySeconds(reminder, interval, checkpoint);
+				if (delay === undefined || job.state !== "running" || closed) return;
+				job.reminderTimer = timers.setTimeout(() => {
+					job.reminderTimer = undefined;
+					if (job.state !== "running" || closed) return;
+					checkpoint++;
+					const goal = backgroundState(pi).goal;
+					if (!job.goalId || (goal?.id === job.goalId && goal.active)) {
+						try {
+							pi.sendMessage({
+								customType: "pix-background-health",
+								content: `${describe(job)}\nHealth check ${checkpoint} after ${delay}s. The command is still running. Inspect background status id=${job.id} if useful; otherwise continue other work or yield. The next check is automatic.`,
+								display: false,
+								details: { id: job.id, checkpoint },
+							}, { triggerTurn: true, deliverAs: "followUp" });
+						} catch (error) {
+							if (ctx.hasUI) ctx.ui.notify(`Background ${job.id} health notification failed: ${String(error)}`, "error");
+						}
+					}
+					scheduleReminder();
+				}, delay * 1000);
+			};
+			scheduleReminder();
 			const bash = createBashToolDefinition(ctx.cwd);
 			const update = (value: { content: Array<{ type: string; text?: string }>; details?: { fullOutputPath?: string } }) => {
 				job.output = value.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
@@ -125,6 +165,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					job.output = error instanceof Error ? error.message : String(error);
 					if (job.state === "running") job.state = "failed";
 				}
+				timers.clearTimeout(job.reminderTimer);
 				showStatus(ctx);
 				if (closed || job.state === "stopped") return;
 				const tail = truncateTail(job.output, { maxLines: 40, maxBytes: 4096 });
@@ -141,7 +182,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			job.done = job.done.catch((error) => {
 				if (!closed && ctx.hasUI) ctx.ui.notify(`Background ${job.id} notification failed: ${String(error)}`, "error");
 			});
-			return result(`${describe(job)}\nCompletion will wake the agent automatically. Do other work or yield; no polling needed.`, job);
+			return result(`${describe(job)}\nCompletion will wake the agent${reminder === "off" ? "" : `; ${reminder} health checks will also wake while it runs`}. Do other work or yield; no polling needed.`, job);
 		},
 	});
 }

@@ -33,8 +33,8 @@ status process.
 Press `Esc` to interrupt current agent work. Use `background stop` to terminate a
 background command; pausing or clearing a goal does not kill its jobs. Their
 results are retained, but a goal-owned command finishing while its goal is
-inactive does not wake the agent. Subagents retain their existing stop and native
-notification behavior; pausing a goal does not cancel children or disable their
+inactive does not wake the agent; its health checks are suppressed too.
+Subagents retain their existing stop and native notification behavior; pausing a goal does not cancel children or disable their
 notifications.
 
 Goal mode requires a persistent TUI or RPC session. It refuses to start or resume
@@ -47,8 +47,9 @@ tool permissions or enables disabled tools.
 At Pi's fully settled boundary, Pix checks the active goal:
 
 1. If a background command or subagent is still running, wait for its native
-   completion notification. There is no timer-driven polling or repeated model
-   call while waiting. Subagent status is queried once at the idle boundary
+   completion notification. Background jobs may also send scheduled health-check
+   wakes while running (exponential by default, configurable per job); there is
+   no continuous polling. Subagent status is queried once at the idle boundary
    through the installed package's public event-bus API; an unavailable status
    pauses the goal rather than guessing. Pix does not expose `bg_wait`; ordinary
    command and subagent notifications do not require it. Explicit blocking waits
@@ -56,8 +57,8 @@ At Pi's fully settled boundary, Pix checks the active goal:
 2. If work remains, send one visible follow-up to the agent.
 3. After **10 automatic goal continuations**, pause for review. Explicit
    `/goal resume` resets the used count. This bounds additional goal prompts,
-   not tool calls, tokens, cost, or time within each agent run. Native background
-   completion wakes do not consume the allowance.
+   not tool calls, tokens, cost, or time within each agent run. Background
+   completion and health-check wakes do not consume the allowance.
 
 The agent ends goal mode by calling the small `goal` tool with the active goal's
 exact ID, a `completed` or `blocked` status, and evidence:
