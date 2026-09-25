@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Container, Image, Text } from "@earendil-works/pi-tui";
 import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
@@ -28,6 +29,19 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let relayKey = "";
   let relayAgent: ReturnType<typeof startRemoteRelayAgent> | undefined;
   let ctx: ExtensionContext | undefined;
+  // Pi's terminal shows user images only as text. For photos sent from the phone, add a display-only
+  // entry after the message so the terminal draws them. It stores a timestamp, not a second copy.
+  const phoneImages = new Set<string>();
+  pi.registerEntryRenderer<{ timestamp: number }>("pix-remote-image", (entry, _options, theme) => {
+    const message = ctx?.sessionManager.getEntries().find(e => e.type === "message" && e.message.role === "user" && e.message.timestamp === entry.data?.timestamp);
+    const content = message?.type === "message" && Array.isArray(message.message.content) ? message.message.content : [];
+    const images = content.filter(part => part.type === "image");
+    if (!images.length) return undefined;
+    const box = new Container();
+    box.addChild(new Text(theme.fg("dim", "Photo from phone"), 1, 0));
+    for (const image of images) box.addChild(new Image(image.data, image.mimeType, { fallbackColor: text => theme.fg("muted", text) }, { maxWidthCells: 60 }));
+    return box;
+  });
   let token = "";
   let hub: RemoteHub | undefined;
   let connected = false;
@@ -110,6 +124,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       ...(prompt.text ? [{ type: "text" as const, text: prompt.text }] : []),
       ...prompt.images.map(image => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
     ];
+    if (typeof prompt === "object") for (const image of prompt.images) phoneImages.add(image.data);
     // While Pi works, a phone message steers the current turn by default, like Enter in the terminal.
     if (ctx.isIdle()) pi.sendUserMessage(content);
     else pi.sendUserMessage(content, { deliverAs: typeof prompt === "object" && prompt.mode === "followUp" ? "followUp" : "steer" });
@@ -171,7 +186,14 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const delta = event.assistantMessageEvent;
     if (delta.type === "text_delta") { streaming += delta.delta; schedulePush(120); }
   });
-  pi.on("message_end", (_e, next) => { ctx = next; streaming = ""; schedulePush(); });
+  pi.on("message_end", (event, next) => {
+    ctx = next; streaming = ""; schedulePush();
+    const message = event.message;
+    if (message.role !== "user" || !Array.isArray(message.content)) return;
+    const fromPhone = message.content.filter(part => part.type === "image" && phoneImages.delete(part.data));
+    // Pi saves the message after this handler returns; wait so the picture lands below it.
+    if (fromPhone.length) setTimeout(() => pi.appendEntry("pix-remote-image", { timestamp: message.timestamp }), 0);
+  });
   pi.on("tool_execution_start", (e, next) => { track(e, next); schedulePush(); });
   pi.on("tool_execution_end", (e, next) => { track(e, next); schedulePush(); });
   pi.on("session_tree", (e, next) => { track(e, next); schedulePush(); });

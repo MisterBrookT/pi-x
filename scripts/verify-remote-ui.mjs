@@ -64,6 +64,9 @@ try {
   assert.equal(await page.locator('#imageViewer').isVisible(), true);
   await page.getByRole('button', { name: 'Close image' }).click();
   const group = page.locator('details.activity');
+  // Regression: tool pictures were hidden inside the folded tool group; they must be visible without opening it.
+  await page.locator('.tool-images .image-card img').first().waitFor();
+  assert.equal(await group.evaluate(el => el.open), false, "picture shows while the group stays folded");
   assert.equal(await group.count(), 1, "consecutive tool calls appear as one group");
   assert.equal(await group.getAttribute("open"), null, "tool run starts collapsed");
   assert.match(await group.locator("summary").first().textContent(), /5 tools.*1 failed/);
@@ -99,7 +102,7 @@ try {
   assert.equal(await group.locator('details.tool').count(), 5);
   await group.locator('details.tool[data-tool="t1"] summary').click();
   assert.equal(await page.getByText("export function main() {}").isVisible(), true);
-  assert.equal(await group.locator('.image-card img').first().evaluate(el => el.complete && el.naturalWidth > 0), true);
+  assert.equal(await page.locator('.tool-images .image-card img').first().evaluate(el => el.complete && el.naturalWidth > 0), true);
   messages[3].tools.push({ id: "t6", name: "read", input: '{"path":"src/final.ts"}' });
   await publish();
   await group.getByText("1 running").waitFor();

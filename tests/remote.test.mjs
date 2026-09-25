@@ -246,6 +246,14 @@ test("/rc delivers an image prompt to real Pi and exposes it only through authen
   const user = h.session.messages.find(m => m.role === "user" && m.content.some?.(p => p.type === "image"));
   assert.ok(user, "the image content reached the live Pi session");
   assert.equal(user.content.find(p => p.type === "image").data, data);
+  // The Mac terminal also shows the phone photo: a display-only entry after the message, never sent to the model.
+  await h.until(() => h.session.sessionManager.getEntries().some(e => e.type === "custom" && e.customType === "pix-remote-image"));
+  const entries = h.session.sessionManager.getEntries();
+  const shown = entries.findIndex(e => e.type === "custom" && e.customType === "pix-remote-image");
+  const sent = entries.findIndex(e => e.type === "message" && e.message === user || (e.type === "message" && e.message.timestamp === user.timestamp && e.message.role === "user"));
+  assert.ok(sent >= 0 && shown > sent, "picture entry comes after the phone message");
+  assert.deepEqual(entries[shown].data, { timestamp: user.timestamp });
+  assert.equal(h.session.messages.filter(m => m.role === "user").length, 1, "no extra message reaches the model");
   let ref;
   for (let attempt = 0; attempt < 60; attempt++) {
     const snapshot = await (await fetch(`${base}/api/sessions/${id}`, { headers })).json();

@@ -40,14 +40,7 @@ final class RemoteSafariTests: XCTestCase {
         XCTAssertTrue(safari.staticTexts["Phone prompt reached the same session."].waitForExistence(timeout: 10))
         safari.screenshot().image.addAttachment(named: "phone-to-session")
 
-        // A real PNG from a Pi tool result: open the tool group and the tool, then view it full screen.
-        let contains = { (text: String) in NSPredicate(format: "label CONTAINS %@", text) }
-        let group = safari.descendants(matching: .any).matching(contains("2 tools")).firstMatch
-        XCTAssertTrue(group.waitForExistence(timeout: 5), safari.debugDescription)
-        group.tap()
-        let readTool = safari.buttons.matching(NSPredicate(format: "label == %@", "read done")).element(boundBy: 1)
-        XCTAssertTrue(readTool.waitForExistence(timeout: 5), safari.debugDescription)
-        readTool.tap()
+        // A real PNG from a Pi tool result shows in the conversation without opening the tool group.
         let picture = safari.buttons["View tool image"].firstMatch
         XCTAssertTrue(picture.waitForExistence(timeout: 10), safari.debugDescription)
         let loading = safari.staticTexts["Loading image…"]
