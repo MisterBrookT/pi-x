@@ -294,6 +294,13 @@ test("/rc mirrors a real Pi session and delivers phone prompts into it", async (
 	assert.deepEqual(await (await fetch(`${base}/api/sessions`, { headers })).json(), []);
 	await h.session.prompt("/rc tailnet");
 	assert.equal((await (await fetch(`${base}/api/sessions`, { headers })).json()).length, 1);
+	// Regression: /reload used to turn remote off; the phone lost the session until /rc was run again.
+	await h.session.reload();
+	await waitFor(() => true);
+	const deadline = Date.now() + 5000;
+	let after = [];
+	while (Date.now() < deadline && !(after = await (await fetch(`${base}/api/sessions`, { headers })).json()).length) await new Promise(r => setTimeout(r, 50));
+	assert.equal(after.length, 1, "/reload keeps remote on");
 	await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 	await assert.rejects(fetch(`${base}/api/sessions`, { headers }), "closing the hosting Pi turns remote control off");
 });

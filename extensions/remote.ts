@@ -18,6 +18,9 @@ export function shouldShowRemotePairing(action: string, paired: boolean) {
 
 export interface RemoteOptions { port?: number; tokenPath?: string; relayUrl?: string; relayKeyPath?: string; }
 
+/** Survives extension reloads within one Pi process (module state does not). */
+const reloadResume: Map<string, { relay: boolean }> = ((globalThis as any).__pixRemoteReloadResume ??= new Map());
+
 export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions = {}) {
   const port = options.port ?? Number(process.env.PIX_REMOTE_PORT || remoteDefaultPort);
   const base = `http://${remoteHost}:${port}`;
@@ -174,7 +177,23 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   pi.on("session_tree", (e, next) => { track(e, next); schedulePush(); });
   pi.on("session_compact", (e, next) => { track(e, next); schedulePush(); });
   pi.on("session_info_changed", (e, next) => { track(e, next); schedulePush(); });
-  pi.on("session_shutdown", async () => {
+  // /reload replaces this extension instance; remember "remote on" so the new instance resumes it.
+  // Quitting or switching sessions still turns remote off.
+  pi.on("session_start", async (event, next) => {
+    const resume = reloadResume.get(next.sessionManager.getSessionId());
+    reloadResume.delete(next.sessionManager.getSessionId());
+    if (event.reason !== "reload" || !resume || connected) return;
+    try {
+      publicOrigin = options.relayUrl ?? await readRelayOrigin();
+      if (resume.relay && !publicOrigin) return;
+      await connect(next, resume.relay);
+    } catch (error) {
+      await disconnect();
+      next.ui.notify(`Remote control could not resume after reload: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    }
+  });
+  pi.on("session_shutdown", async (event) => {
+    if (event.reason === "reload" && connected && sessionId) reloadResume.set(sessionId, { relay: Boolean(relayKey) });
     await disconnect();
     relayAgent?.stop();
     relayAgent = undefined;
