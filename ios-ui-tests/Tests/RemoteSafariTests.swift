@@ -7,6 +7,10 @@ final class RemoteSafariTests: XCTestCase {
         XCTAssertTrue(safari.staticTexts["Pix simulator test"].waitForExistence(timeout: 15), safari.debugDescription)
         XCTAssertTrue(safari.staticTexts["Review the project structure"].exists)
         XCTAssertFalse(safari.staticTexts["Reconnecting…"].exists)
+        // Mac-rendered Markdown: a real table and a Mermaid diagram, not raw source.
+        XCTAssertTrue(safari.staticTexts["Mac Pi"].waitForExistence(timeout: 5), "table cell renders")
+        XCTAssertFalse(safari.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "flowchart LR")).firstMatch.exists, "Mermaid source is drawn, not shown raw")
+        safari.screenshot().image.addAttachment(named: "rich-markdown")
 
         let web = safari.webViews.firstMatch
         XCTAssertTrue(web.exists)

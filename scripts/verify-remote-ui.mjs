@@ -154,6 +154,13 @@ try {
   await page.getByRole('button', { name: 'Send' }).click();
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: ['First line\nSecond line'] });
   await page.waitForFunction(() => !sending);
+  // Regression: Mac-rendered user Markdown collapsed a multi-line phone message onto one line.
+  messages.push({ id: "multi", role: "user", text: "First line\nSecond line", timestamp: 9 });
+  await publish();
+  const multi = page.locator(".user .rich p").filter({ hasText: "Second line" }).last();
+  await multi.waitFor();
+  assert.ok((await multi.evaluate(el => el.getClientRects().length && el.offsetHeight)) > 30, "user line breaks stay visible");
+  messages.pop(); await publish();
   await composer.fill("Phone-side prompt");
   await page.getByRole("button", { name: "Send" }).click();
   const response = await fetch(`${base}/agent/fixture/next`, { headers: auth });

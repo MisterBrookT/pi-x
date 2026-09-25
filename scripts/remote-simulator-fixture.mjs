@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import { startRemoteHub } from "../src/remote-hub.ts";
 import { imageRef } from "../src/remote-state.ts";
+import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 
 const token = "simulator-demo-token-not-production";
 const port = Number(process.env.PIX_TEST_FIXTURE_PORT || 18787);
@@ -14,12 +15,12 @@ const picture = { type: "image", mimeType: "image/png", data: (await readFile(ne
 const pictureRef = imageRef(picture);
 const messages = [
   { id: "u1", role: "user", text: "Review the project structure", timestamp: 1 },
-  { id: "a1", role: "assistant", text: "The app is connected to this live session. Tool results are below.", timestamp: 2,
+  { id: "a1", role: "assistant", text: "The app is connected to this live session. Tool results are below.\n\n| Part | Status |\n|---|:-:|\n| Relay | ✅ |\n| Mac Pi | ✅ |\n\n```mermaid\nflowchart LR\n  A[iPhone] --> B[Relay]\n  B --> C[Mac Pi]\n```", timestamp: 2,
     tools: [{ id: "t1", name: "read", input: '{"path":"src/index.ts"}', output: "export function main() {}" },
       { id: "t2", name: "read", input: '{"path":"remote-image-test.png"}', output: "Read image file [image/png]", images: [pictureRef] }] },
 ];
 const publish = () => fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth,
-  body: JSON.stringify({ id, name: "Pix simulator test", cwd: "/workspace/demo", busy: false, messages }) });
+  body: JSON.stringify({ id, name: "Pix simulator test", cwd: "/workspace/demo", busy: false, messages: messages.map((m) => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
 await publish();
 await fetch(`${base}/agent/${id}/media/${pictureRef.id}`, { method: "PUT", headers: auth, body: JSON.stringify({ mimeType: picture.mimeType, data: picture.data }) });
 const timer = setInterval(() => void publish(), 8_000);
