@@ -121,7 +121,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (!ctx) return;
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     const content = typeof prompt === "string" ? prompt : [
-      ...(prompt.text ? [{ type: "text" as const, text: prompt.text }] : []),
+      // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
+      { type: "text" as const, text: prompt.text || "(photo)" },
       ...prompt.images.map(image => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
     ];
     if (typeof prompt === "object") for (const image of prompt.images) phoneImages.add(image.data);

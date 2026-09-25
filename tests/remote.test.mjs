@@ -254,6 +254,14 @@ test("/rc delivers an image prompt to real Pi and exposes it only through authen
   assert.ok(sent >= 0 && shown > sent, "picture entry comes after the phone message");
   assert.deepEqual(entries[shown].data, { timestamp: user.timestamp });
   assert.equal(h.session.messages.filter(m => m.role === "user").length, 1, "no extra message reaches the model");
+
+  // Regression: a photo with no text produced an empty text block, which Anthropic rejects with a 400.
+  assert.equal((await fetch(`${base}/api/sessions/${id}/prompt`, { method: "POST", headers,
+    body: JSON.stringify({ images: [{ mimeType: "image/png", data }] }) })).status, 202);
+  await h.until(() => h.session.messages.filter(m => m.role === "user").length === 2);
+  const photoOnly = h.session.messages.filter(m => m.role === "user")[1];
+  assert.ok(photoOnly.content.every(p => p.type !== "text" || p.text.trim()), "no empty text block");
+  assert.ok(photoOnly.content.some(p => p.type === "image"));
   let ref;
   for (let attempt = 0; attempt < 60; attempt++) {
     const snapshot = await (await fetch(`${base}/api/sessions/${id}`, { headers })).json();
