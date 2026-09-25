@@ -44,8 +44,9 @@ function harness(t, mode = "tui", timers, goalRef) {
 		ui: { notify() {}, setStatus: (key, value) => { if (value === undefined) statuses.delete(key); else statuses.set(key, value); } },
 	};
 	const call = (args, signal) => tool.execute("test", validateToolArguments(tool, { type: "toolCall", id: "test", name: tool.name, arguments: args }), signal, undefined, ctx);
+	handlers.get("session_start")({}, ctx);
 	t.after(() => handlers.get("session_shutdown")());
-	return { tool, call, ctx, messages, handlers, status: () => statuses.get("pix-background"), wake: () => once(events, "wake", { signal: AbortSignal.timeout(10000) }).then(([message]) => message) };
+	return { tool, call, ctx, messages, handlers, bus, status: () => statuses.get("pix-background"), wake: () => once(events, "wake", { signal: AbortSignal.timeout(10000) }).then(([message]) => message) };
 }
 
 // The child blocks on an HTTP response controlled by the test, not a timing guess.
@@ -60,6 +61,45 @@ async function gate(t) {
 		request: () => once(requests, "request", { signal: AbortSignal.timeout(10000) }).then(([res]) => res),
 	};
 }
+
+test("async subagent lifecycle joins request-local status and ignores another session", (t) => {
+	const h = harness(t);
+	const context = () => h.handlers.get("context")({ messages: [] })?.messages ?? [];
+	const sessionId = h.ctx.sessionManager.getSessionId();
+	h.bus.emit("subagent:async-started", { id: "other", sessionId: "other-session", agent: "scout" });
+	assert.equal(context().length, 0);
+	h.bus.emit("subagent:async-started", { id: "run-1", sessionId, mode: "workflow", agents: ["scout", "scout"] });
+	assert.match(context()[0].content, /Subagent run-1: active · workflow · scout, scout/);
+	assert.equal(context()[0].content.includes("other"), false);
+	h.bus.emit("subagent:async-complete", { id: "run-1", sessionId: "other-session" });
+	assert.equal(context().length, 1);
+	h.bus.emit("subagent:async-complete", { id: "run-1", sessionId });
+	assert.equal(context().length, 0);
+	assert.equal(h.messages.length, 0);
+});
+
+test("each model request sees only current running jobs without persisting or waking", { timeout: 15000 }, async (t) => {
+	const h = harness(t);
+	const g = await gate(t);
+	const base = [{ role: "user", content: "continue" }];
+	const context = () => h.handlers.get("context")({ messages: base })?.messages ?? base;
+	assert.equal(context(), base);
+	const requested = g.request();
+	const started = await h.call({ action: "start", command: g.command, reminder: "off" });
+	const response = await requested;
+	for (let i = 0; i < 2; i++) {
+		const messages = context();
+		assert.equal(messages.length, 2);
+		assert.match(messages[1].content, new RegExp(`Shell ${started.details.id}: running`));
+		assert.equal(messages[1].display, false);
+	}
+	assert.equal(base.length, 1, "request-local reminder must not alter history");
+	assert.equal(h.messages.length, 0, "status must not wake the agent");
+	const wake = h.wake();
+	response.end("done");
+	await wake;
+	assert.equal(context(), base, "completed jobs no longer appear as running");
+});
 
 test("reminder schedule supports fixed, capped exponential, and off", () => {
 	assert.equal(reminderDelaySeconds("off", 60, 0), undefined);
@@ -85,7 +125,11 @@ test("running job sends exponential health wakes, then completion cancels the ti
 	}
 	const wake = h.wake();
 	response.end("done");
-	assert.equal((await wake).details.state, "completed");
+	const completed = await wake;
+	assert.equal(completed.details.state, "completed");
+	assert.equal(completed.details.command, g.command);
+	assert.match(completed.details.output, /done/);
+	assert.equal(completed.details.truncated, false);
 	assert.deepEqual(timers.delays, []);
 	assert.equal(h.messages.filter(({ message }) => message.customType === "pix-background").length, 1);
 });

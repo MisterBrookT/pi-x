@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const extension = resolve(root, "extensions/pix-anthropic/index.ts");
-const models = ["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"];
+const models = ["claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5"];
 let failed = false;
 
 for (const model of models) {

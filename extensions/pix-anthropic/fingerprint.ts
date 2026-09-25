@@ -19,7 +19,7 @@ import nodeCrypto from "node:crypto";
 // ---------------------------------------------------------------------------
 
 /** Claude Code version pinned by OMP c4da0d08. */
-export const claudeCodeVersion = "2.1.257";
+export const claudeCodeVersion = "2.1.280";
 export const claudeCodeSdkVersion = "0.112.1";
 
 /** User-Agent emitted by Claude Code's CLI inference entrypoint. */

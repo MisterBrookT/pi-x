@@ -27,7 +27,7 @@ const AUTHORIZE_URL = "https://claude.ai/oauth/authorize";
 /** omp uses api.anthropic.com here; pi 0.83.0 uses platform.claude.com. */
 const TOKEN_URL = "https://api.anthropic.com/v1/oauth/token";
 const BOOTSTRAP_URL = "https://api.anthropic.com/api/claude_cli/bootstrap";
-const CLAUDE_CODE_BOOTSTRAP_MODEL = "claude-opus-4-8";
+const CLAUDE_CODE_BOOTSTRAP_MODEL = "claude-opus-5-5";
 const CLAUDE_CODE_BOOTSTRAP_USER_AGENT = `claude-code/${claudeCodeVersion}`;
 
 /** omp's callback port. Deliberately different from pi's 53692 so both can coexist. */

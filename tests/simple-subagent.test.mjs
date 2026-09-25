@@ -17,6 +17,8 @@ test('delegation guidance lives in the guideline once, and the description keeps
  assert.ok(tool.description.length < 650, 'retain operational caveats without an instruction essay');
  assert.match(tool.description, /NOT merged/);
  assert.match(tool.description, /never overlap writers/);
+ assert.match(tool.description, /shared cwd/);
+ assert.match(tool.description, /Role permissions remain configured/);
  assert.match(tool.description, /do not undo work already done/);
  assert.match(tool.description, /delegation does not grant permission/);
  assert.doesNotMatch(tool.description, /configuration|configured model|resolved at launch/, 'no internals the model cannot act on');
@@ -40,12 +42,17 @@ test('the main agent sees one line per role and no other agent names',()=>{
 });
 test('single task uses the upstream async child interface without overriding policy',()=>{
  const args=validate({action:'start',tasks:[{agent:'worker',task:'Fix tests'}]});
- assert.deepEqual(subagentRequest(args),{agent:'worker',task:'Fix tests',async:true});
+ assert.deepEqual(subagentRequest(args),{agent:'worker',task:'Fix tests',async:true,context:'fresh'});
+ assert.equal(subagentRequest({action:'start',tasks:[{agent:'worker',task:'Fix tests'}],context:'fork'}).context,'fork');
 });
-test('parallel tasks are bounded and isolated; task strings are not executable',async()=>{
+test('parallel tasks share cwd by default and can request isolation; task strings are not executable',async()=>{
  const tasks=[{agent:'worker',task:'quote " ` ${evil()} ;'},{agent:'scout',task:'Find entry points'}];
  const request=subagentRequest(validate({action:'start',tasks}));
- assert.equal(request.async,true); assert.equal(request.worktree,true);
+ assert.equal(request.async,true); assert.equal(request.worktree,undefined);
+ assert.equal(request.context,'fresh');
+ assert.equal(subagentRequest({action:'start',tasks,context:'fork'}).context,'fork');
+ assert.equal(subagentRequest({action:'start',tasks,worktree:true}).worktree,true);
+ assert.equal(subagentRequest({action:'start',tasks,worktree:false}).worktree,false);
  assert.equal(request.globalConcurrencyLimit,4); assert.equal(request.maxSubagentSpawnsPerRun,8);
  let received;
  const result=await new Function('runs',`return (async()=>{${request.workflowScript}})()` )({all:async children=>{received=children;return ['a','b'];}});
@@ -59,7 +66,7 @@ test('status, guidance and stop translate to existing upstream management action
  assert.deepEqual(subagentRequest({action:'stop',id:'r'}),{action:'interrupt',id:'r'});
 });
 test('advanced controls and inconsistent arguments fail closed',()=>{
- for(const args of [{action:'start',tasks:[]},{action:'start',tasks:Array(9).fill({agent:'worker',task:'x'})},{action:'stop'},{action:'steer',id:'r'},{action:'status',tasks:[]},{action:'stop',id:'r',index:0},{action:'status',index:0},{action:'start',tasks:[{agent:'worker',task:'x',model:'override'}]},{action:'start',workflowScript:'evil()'},{action:'schedule.create'}]) assert.throws(()=>subagentRequest(args));
+ for(const args of [{action:'start',tasks:[]},{action:'start',tasks:Array(9).fill({agent:'worker',task:'x'})},{action:'stop'},{action:'steer',id:'r'},{action:'status',tasks:[]},{action:'stop',id:'r',index:0},{action:'status',index:0},{action:'start',tasks:[{agent:'worker',task:'x',model:'override'}]},{action:'start',workflowScript:'evil()'},{action:'start',tasks:[{agent:'scout',task:'x'}],worktree:'yes'},{action:'start',tasks:[{agent:'scout',task:'x'}],context:'profile'},{action:'status',worktree:true},{action:'status',context:'fork'},{action:'schedule.create'}]) assert.throws(()=>subagentRequest(args));
  assert.throws(()=>validate({action:'schedule.create'}));
 });
 test('executor preserves context, abort signal, updates, results and errors',async()=>{
@@ -80,6 +87,8 @@ test('translated requests validate against the installed upstream public schema'
  const backend={...tool,parameters:SubagentParams};
  for(const input of [
  {action:'start',tasks:[{agent:'worker',task:'Fix tests'}]},
+ {action:'start',tasks:[{agent:'scout',task:'Inspect'}],worktree:true,context:'fork'},
+ {action:'start',tasks:[{agent:'scout',task:'Inspect A'},{agent:'worker',task:'Inspect B'}],worktree:true},
  {action:'start',tasks:[{agent:'scout',task:'Inspect A'},{agent:'worker',task:'Inspect B'}]},
  {action:'status'},{action:'status',id:'r',index:0},
  {action:'steer',id:'r',message:'Read only',index:0},{action:'stop',id:'r'}]) {

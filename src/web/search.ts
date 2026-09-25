@@ -59,11 +59,17 @@ function codexAccountId(token: string): string | undefined {
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
 }
 
-/** Newest general-purpose model; `pro`/`ultra` tiers are wasted on search. */
+/** Newest general-purpose model; `pro`/`ultra`/`astra` tiers are wasted on search. */
 function pickSearchModel<T extends { id: string }>(models: T[]): T | undefined {
-  const usable = models.filter((m) => !/pro|ultra/i.test(m.id));
+  const usable = models.filter((m) => !/pro|ultra|astra/i.test(m.id));
   if (usable.length === 0) return undefined;
-  return usable.find((m) => /terra/i.test(m.id)) ?? usable.find((m) => /^gpt-\d/i.test(m.id)) ?? usable[0];
+  return (
+    usable.find((m) => /gpt-6-sol/i.test(m.id)) ??
+    usable.find((m) => /sol/i.test(m.id)) ??
+    usable.find((m) => /terra/i.test(m.id)) ??
+    usable.find((m) => /^gpt-\d/i.test(m.id)) ??
+    usable[0]
+  );
 }
 
 /** Ask Pi for a usable model and its request auth. */
@@ -94,7 +100,7 @@ export async function resolveAuth(ctx: ExtensionContext, config: WebConfig = rea
   }
   const apiKey = (config.openaiApiKey && String(config.openaiApiKey)) || process.env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
-  return { apiKey, model: "gpt-5", headers: {}, responsesUrl: OPENAI_RESPONSES_URL, codex: false };
+  return { apiKey, model: "gpt-6-sol", headers: {}, responsesUrl: OPENAI_RESPONSES_URL, codex: false };
 }
 
 function normalizeDomain(value: string): string | null {

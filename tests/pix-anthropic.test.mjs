@@ -88,12 +88,13 @@ test("registers an isolated Pix provider using Pi's current provider contract", 
     "claude-fable-5-1",
     "claude-fable-5",
     "claude-mythos-5",
+    "claude-opus-5-5",
     "claude-opus-5",
     "claude-sonnet-5",
   ]) {
     assert.ok(ids.has(id), `missing current OMP model ${id}`);
   }
-  assert.equal(registration.config.models.length, 12);
+  assert.equal(registration.config.models.length, 13);
 });
 
 test("subscription transport reports Anthropic cache usage exactly", async () => {

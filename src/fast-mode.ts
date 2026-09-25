@@ -54,7 +54,7 @@ export function fastModeActiveFor(model: { provider?: string; api?: string; id?:
   if (!isFastModeEnabled() || !model || fastModeFellBack(model)) return false;
   const target = fastModeTarget(model);
   if (target !== "anthropic") return target !== undefined;
-  return model?.id === "claude-opus-4-8" || model?.id === "claude-opus-5";
+  return model?.id === "claude-opus-4-8" || model?.id === "claude-opus-5" || model?.id === "claude-opus-5-5";
 }
 
 export function applyFastMode(payload: unknown, target: FastModeTarget): unknown {

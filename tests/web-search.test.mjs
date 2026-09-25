@@ -91,14 +91,16 @@ test("Codex credentials are preferred and produce a Codex request", async () => 
 	const auth = await resolveAuth(registry([
 		{ id: "gpt-5", provider: "openai" },
 		{ id: "gpt-5.6-terra", provider: "openai-codex" },
+		{ id: "gpt-6-sol", provider: "openai-codex" },
 	]));
 	assert.equal(auth.codex, true);
-	assert.equal(auth.model, "gpt-5.6-terra", "the terra tier is preferred for search");
+	assert.equal(auth.model, "gpt-6-sol", "the sol tier is preferred for search");
 	assert.match(auth.responsesUrl, /chatgpt\.com\/backend-api\/codex/);
 });
 
 test("pro and ultra tiers are not spent on search", async () => {
 	const auth = await resolveAuth(registry([
+		{ id: "gpt-6-astra", provider: "openai" },
 		{ id: "gpt-5-pro", provider: "openai" },
 		{ id: "gpt-5", provider: "openai" },
 	]));
