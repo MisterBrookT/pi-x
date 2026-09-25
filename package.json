@@ -25,6 +25,10 @@
     "bench": "node scripts/bench.mjs",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
+    "test:remote-ui": "node scripts/verify-remote-ui.mjs",
+    "test:relay-ui": "node scripts/verify-relay-ui.mjs",
+    "test:relay-session": "node --test scripts/verify-relay-session.mjs",
+    "test:relay-workflow": "node --test scripts/verify-relay-workflow.mjs",
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
   },
@@ -41,6 +45,7 @@
     "jsonc-parser": "3.3.1",
     "linkedom": "^0.16.11",
     "lovely-mermaid": "^0.3.3",
+    "marked": "18.0.11",
     "open": "^10.2.0",
     "pi-subagents": "0.63.0",
     "recheck": "^4.5.0",
@@ -52,9 +57,9 @@
     "zod": "^3.25.0 || ^4.0.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.86.1",
-    "@earendil-works/pi-coding-agent": ">=0.86.1",
-    "@earendil-works/pi-tui": ">=0.86.1",
+    "@earendil-works/pi-ai": ">=0.87.1",
+    "@earendil-works/pi-coding-agent": ">=0.87.1",
+    "@earendil-works/pi-tui": ">=0.87.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -85,6 +90,7 @@
       "./extensions/mermaid.ts",
       "./extensions/mcp.ts",
       "./extensions/question.ts",
+      "./extensions/remote.ts",
       "./extensions/smart-editor.ts",
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
@@ -98,6 +104,8 @@
     "agents",
     "docs",
     "extensions",
+    "relay/src/index.ts",
+    "relay/wrangler.jsonc",
     "scripts",
     "src",
     "vendor",
@@ -116,7 +124,8 @@
     "pi-subagents"
   ],
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.86.1",
-    "@earendil-works/pi-tui": "^0.86.1"
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-tui": "^0.87.1",
+    "playwright": "^1.63.0"
   }
 }

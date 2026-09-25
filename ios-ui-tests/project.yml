@@ -1,0 +1,26 @@
+name: PixRemoteUI
+options:
+  bundleIdPrefix: dev.pix.remoteuitest
+  deploymentTarget:
+    iOS: '17.0'
+targets:
+  PixRemoteTestHost:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.pix.remoteuitest.host
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+  PixRemoteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: PixRemoteTestHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.pix.remoteuitest.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'

@@ -5,6 +5,14 @@ const root=new URL("..",import.meta.url);
 test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts","./extensions/background.ts","./extensions/goal.ts"]) assert.ok(e.includes(x));assert.equal(j["pi-subagents"],undefined);assert.equal(j.pi.skills,undefined);});
 test("prompt snapshots and comparison exist",async()=>{for(const p of ["docs/prompts/pi-default.txt","docs/prompts/pix-default.txt","docs/system-prompts.html"])await access(new URL(p,root));});
 
+test("Pix ships a self-hostable relay but no personal endpoint or Wrangler state", async () => {
+  const manifest = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
+  assert.deepEqual(manifest.files.filter(path => path.startsWith("relay/")), ["relay/src/index.ts", "relay/wrangler.jsonc"]);
+  const client = await readFile(new URL("src/remote-relay-agent.ts", root), "utf8");
+  const config = await readFile(new URL("relay/wrangler.jsonc", root), "utf8");
+  assert.doesNotMatch(client + config, /doabit\.dev|brooktang\.fun/);
+});
+
 test("slash commands stay minimal", async () => {
   const capabilities = await readFile(new URL("extensions/capabilities.ts", root), "utf8");
   const fast = await readFile(new URL("extensions/fast-mode.ts", root), "utf8");
@@ -57,7 +65,7 @@ test("slash commands stay minimal", async () => {
  * an implementation detail. Verbs live under a parent command instead of
  * claiming another top-level name.
  */
-test("Pix keeps eight top-level slash commands", async () => {
+test("Pix keeps nine top-level slash commands", async () => {
   // ai-completion is loaded by smart-editor rather than by the manifest, so the
   // whole extension tree is scanned instead of the declared entry points.
   const names = [];
@@ -72,6 +80,7 @@ test("Pix keeps eight top-level slash commands", async () => {
     "fast",
     "footer",
     "goal",
+    "rc",
     "subagent-config",
     "todo",
     "tool",

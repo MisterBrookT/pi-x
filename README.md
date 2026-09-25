@@ -57,6 +57,7 @@ Use Pi normally—Pix's enabled tools are available to the agent as needed. A fe
 | `/tool` | Choose which tools are enabled |
 | `/goal Fix the failing tests` | Keep working toward an explicit goal, within a continuation limit |
 | `/complete on` | Enable cloud-model inline completion; off by default |
+| `/rc` | Continue this live session from your phone ([setup](docs/guide.md#remote-control)) |
 | `/context` | See what is filling the context window |
 | `/context html` | Open prompt, tool schemas, and messages as one HTML page (`Alt+H`) |
 

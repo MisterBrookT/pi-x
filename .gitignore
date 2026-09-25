@@ -4,4 +4,5 @@ node_modules/
 npm-debug.log*
 .brookdev/
 .private/
+relay/.wrangler/
 pi-session-*.html

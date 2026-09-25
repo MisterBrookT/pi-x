@@ -118,6 +118,23 @@ test("reload preserves the active goal footer and continuation count", async (t)
 	assert.doesNotMatch(h.render().join("\n"), /goal/);
 });
 
+test("footer shows remote control only while this Pi session is exposed", async (t) => {
+	const h = await harness(t);
+	assert.doesNotMatch(h.render()[0], /remote/);
+	h.ctx.ui.setStatus("pix-remote", "remote on");
+	assert.match(h.render()[0], /remote on/);
+	assert.equal(h.render().length, 2);
+	for (const width of [1, 6, 10, 20, 40, 80]) {
+		for (const line of h.render(width)) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
+		if (width >= 10) assert.match(h.render(width)[0], /remote on/);
+	}
+	await h.command("Keep this goal visible too.");
+	assert.match(h.render()[0], /remote on.*goal on/);
+	h.ctx.ui.setStatus("pix-remote", undefined);
+	assert.doesNotMatch(h.render()[0], /remote/);
+	assert.match(h.render()[0], /goal on/);
+});
+
 test("goal visibility takes priority over a long path and all footer lines fit on resize", async (t) => {
 	const h = await harness(t);
 	await h.command("A goal.");

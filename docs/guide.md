@@ -49,6 +49,7 @@ For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model und
 | `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/goal [objective]` | Open goal configuration, or start with an objective; also `status`, `pause` (`stop`), `resume`, and `clear` |
+| `/rc [off\|status\|reset\|tailnet]` | Control this live Pi session from the Pix Remote web app |
 | `/todo [on\|off]` | Show todo state or toggle tracking for this session |
 | `/tool` | Open the tool panel; also `/tool list`, `/tool <name\|capability> [on\|off\|auto\|default]`, and capability actions such as `/tool computer check` |
 | `/export [path]` | Save Pi’s session viewer and open it in your browser: current effective system prompt, tools, and recorded conversation history. `.jsonl` exports remain save-only |
@@ -105,9 +106,14 @@ Delegation guidance leaves organization to the model: use subagents when delegat
 The `subagent` tool exposes four actions: `start`, `status`, `steer`, and `stop`.
 For example, `{action:"start", tasks:[{agent:"scout", task:"Locate the parser"}]}`
 starts one asynchronous task. Multiple tasks start in parallel, capped at four
-concurrent agents and eight tasks. Parallel tasks use separate git worktrees;
-review and integrate their changes yourself. A single task uses the current
-working directory, so do not overlap writers there.
+concurrent agents and eight tasks. Tasks share the current working directory by
+default, including uncommitted changes; do not overlap writers. For parallel
+isolation, pass `worktree:true` on `start` (requires a clean git working tree).
+Worktree changes are not merged automatically; review and integrate them yourself.
+Each child gets fresh, task-only context by default. Pass `context:"fork"` on
+`start` only when it needs the parent conversation. The main agent selects the
+role and states the scope in the task; role tools and permissions remain
+configured separately and delegation cannot elevate them.
 
 Use the returned run ID with `status`, `steer` (plus `message`), or `stop`.
 Completion notifications arrive automatically. The main assistant and Todo
@@ -159,7 +165,11 @@ fails. There is no need to say “continue,” poll, or watch every log line.
 ```
 
 Omit `id` from `status` to list jobs. Up to four run at once; the latest 32 are
-retained in memory. Completion includes a short output tail; `status` provides
+retained in memory. Each model request also receives a short, request-local
+list of currently running shell jobs and active async subagent run IDs; it
+does not wake the agent or include logs or subagent transcripts. Subagent state
+comes from lifecycle events, so a run already active before a Pix reload may
+not appear until a new event; use `subagent status` for the authoritative view. Completion includes a short output tail; `status` provides
 Pi's bounded Bash output and a full log path when truncated. An optional
 `timeout` is in seconds. While a job runs, hidden health-check messages wake
 the agent at 1, 2, 4, then every 8 minutes by default (intervals, not elapsed
@@ -237,6 +247,22 @@ Todo state reminders are saved as hidden conversation messages when the plan cha
 Updates are atomic: an invalid ID, duplicate ID, or blocked transition leaves every item unchanged. Dependencies are checked against the final state, so array order does not matter. For a single change, `{"action":"set","id":"1","status":"done"}` still works; do not mix top-level `id`/`status` with `updates`.
 
 Optional `dependsOn` IDs block work until all prerequisites are done. Independent ready items may be delegated in parallel, but Todo never launches subagents automatically. To reopen a completed prerequisite, reset its active/done dependents to pending first or in the same batch; Todo does not silently reset other tasks.
+
+## Remote control
+
+The [iPhone user story and acceptance checklist](remote-mobile.md) tracks rendering, pictures, keyboard, and touch navigation beyond the initial connection.
+
+`/rc` connects the **current Pi conversation** to Pix Remote. On the Mac, a hub binds only to `127.0.0.1:8787` (override with `PIX_REMOTE_PORT`); the first Pi session hosts it, and other `/rc` sessions join its session list. Prompts sent from the phone enter that same terminal transcript. While Pi is working, a phone message steers the current turn (like Enter in the terminal), and **Stop** aborts it (like Escape). The Mac footer shows `remote on` only while this Pi session is exposed; `/rc off` removes this session and clears the indicator, as does quitting Pi. `/rc status` gives the same answer explicitly.
+
+**No VPN on the phone:** point `PIX_REMOTE_RELAY_URL` (or private `~/.pi/agent/pix-remote/relay.json` containing `{"origin":"https://your-relay.example"}`) at a relay you operate. `/rc` opens its QR code. Without a configured relay, `/rc` explains the setup instead of silently switching networks. The Mac and phone each make an outbound WebSocket to a Cloudflare Worker/Durable Object, which forwards opaque encrypted frames. The Mac encrypts session data and decrypts requests locally; the phone does the reverse using a random pairing key carried **only in the QR URL fragment**, not the HTTP request. AES-256-GCM protects prompts, replies, and snapshots in transit through the relay. The key is stored on the Mac at `~/.pi/agent/pix-remote/relay-key` (mode 600) and on the phone in this site's local storage; the QR disappears from the address bar after pairing. Run `/rc` for each Pi session you want to share. The QR appears only the first time; later `/rc` just turns sharing on, so refresh the saved phone page. Use `/rc pair` to show the QR for another device, or `/rc reset` to revoke old devices and pair again. The relay sees connection metadata and the opaque room ID, but does not store transcript data. The Mac must stay awake and connected. If `qrencode` is unavailable (`brew install qrencode`), `/rc` displays the pairing URL instead. The QR is a password: keep it private. `/rc pair` shows the existing QR again. `/rc reset` rotates the relay key and opens a new QR, revoking previously paired phones; run it in the Pi session hosting the hub. `/rc off` disconnects the session but does **not** revoke the pairing key.
+
+The mobile app is JavaScript served by the relay operator. Encryption protects data from passive relay observation, **not** from an operator who changes the web app to steal its key. Do not use an untrusted `PIX_REMOTE_RELAY_URL`. The included Worker is self-hostable, not a bundled public relay service. Do not send package users to someone else's personal relay. Cloudflare limits and availability still apply.
+
+**Private alternative:** `/rc tailnet` uses private Tailscale Serve; `/rc tailnet pair` shows its QR again (same-tailnet devices only). Its separate token is stored at `~/.pi/agent/pix-remote/token` (mode 600). Pix does not enable Funnel or replace unrelated Serve routes. `/rc off` does not alter Serve settings. You can add either mobile page to your iPhone Home Screen via Safari's Share menu.
+
+Consecutive tool calls appear as one collapsed activity row with a running/failed count; expand it to inspect individual calls and their input/output. This follows [assistant-ui's Tool group pattern](https://www.assistant-ui.com/elements/tool-group) using native HTML disclosure elements instead of importing its React runtime. Images in Pi user messages and tool results are fetched from the authenticated Mac hub through the encrypted relay, not embedded in transcript snapshots. The phone can attach a picture; Safari converts it to a bounded JPEG before sending it into Pi's normal image prompt API. The current limit is about 900 KB per stored image (1.2 MB base64) and 24 cached images per session; oversized/unsupported images show an honest placeholder, and Markdown image URLs are not fetched. Tool dialogs, permission prompts, and model switching stay in the terminal; the app shows up to the latest 200 transcript items (fewer if needed to fit an encrypted relay frame) and truncates long tool output. The hosting Pi process must stay running. If it exits, another connected Pi session restarts the hub and relay on its next heartbeat.
+
+The relay source and generic Wrangler config live in `relay/`; attach your own custom domain to its Worker in your Cloudflare account. No account, domain, or key is shipped in Pix. Set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` only in the deployment environment, never in Git. For code-only releases use `wrangler versions upload` then `wrangler versions deploy <version-id>@100 --yes`; manage domain triggers separately. The configured URL must serve the matching mobile app and Worker. Run `npm run test:relay-ui` for a phone-sized browser journey against the deployed relay, `npm run test:relay-session` for a real Pi session with a scripted model, and `npm run test:relay-workflow` for a phone-driven Pi turn that executes six real tools and verifies the collapsed activity UI. They use disposable keys and fixture messages, never your private transcript. Run `npm run test:remote-ui` for the offline loopback UI regression check. It uses a fixture hub, checks the iPhone-sized chat, live updates, drawer, and prompt delivery, and saves an offline report under `.private/var/runs/test-ui/remote-cli-<timestamp>/`. Install the Playwright Chromium browser with `npx playwright install chromium`, or set `PIX_TEST_BROWSER_PATH` to a compatible executable. For actual iOS Simulator Safari interaction, run `./scripts/verify-remote-simulator.sh` on a Mac with Xcode, an iPhone 17 Pro simulator, and `xcodegen` installed. It runs an XCTest UI journey against a deterministic local fixture, records the simulator screen, and saves the video and `.xcresult` under `.private/var/runs/test-ui/remote-simulator-<timestamp>/`. Use `PIX_TEST_SIMULATOR_ID` for a different available device. This verifies Safari controls and the local hub, not a provider-backed Pi turn or the private-network connection. Simulator and browser checks do not establish behavior on a physical iPhone; retest the latest renderer, picker, and gestures there.
 
 ## MCP
 
