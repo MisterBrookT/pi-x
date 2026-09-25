@@ -35,6 +35,23 @@ final class RemoteSafariTests: XCTestCase {
         XCTAssertTrue(safari.staticTexts["First line\nSecond line"].waitForExistence(timeout: 10))
         XCTAssertTrue(safari.staticTexts["Phone prompt reached the same session."].waitForExistence(timeout: 10))
         safari.screenshot().image.addAttachment(named: "phone-to-session")
+
+        // A real PNG from a Pi tool result: open the tool group and the tool, then view it full screen.
+        let contains = { (text: String) in NSPredicate(format: "label CONTAINS %@", text) }
+        let group = safari.descendants(matching: .any).matching(contains("2 tools")).firstMatch
+        XCTAssertTrue(group.waitForExistence(timeout: 5), safari.debugDescription)
+        group.tap()
+        let readTool = safari.buttons.matching(NSPredicate(format: "label == %@", "read done")).element(boundBy: 1)
+        XCTAssertTrue(readTool.waitForExistence(timeout: 5), safari.debugDescription)
+        readTool.tap()
+        let picture = safari.buttons["View tool image"].firstMatch
+        XCTAssertTrue(picture.waitForExistence(timeout: 10), safari.debugDescription)
+        let loading = safari.staticTexts["Loading image…"]
+        XCTAssertTrue(loading.waitForNonExistence(timeout: 10), "picture loads through authenticated media")
+        safari.screenshot().image.addAttachment(named: "tool-image")
+        picture.tap()
+        XCTAssertTrue(safari.buttons["Close image"].waitForExistence(timeout: 5), safari.debugDescription)
+        safari.screenshot().image.addAttachment(named: "image-full-screen")
     }
 }
 
