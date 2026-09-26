@@ -22,13 +22,18 @@ export interface RemoteSnapshot {
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
+  /** Current model and thinking level, and the choices the phone may switch between. */
+  model?: { id: string; name: string };
+  thinking?: string;
+  models?: { id: string; name: string }[];
+  thinkingLevels?: string[];
 }
 
 export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact";
-export interface RemoteAction { action: RemoteActionName }
+export interface RemoteAction { action: RemoteActionName | "model" | "thinking"; value?: string }
 
 interface Registered extends RemoteSnapshot {
   seenAt: number;
@@ -117,7 +122,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
   };
-  const publicSession = (s: Registered) => ({ id: s.id, name: s.name, named: s.named, cwd: s.cwd, busy: s.busy, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
+  const publicSession = (s: Registered) => ({ id: s.id, name: s.name, named: s.named, cwd: s.cwd, busy: s.busy, model: s.model, thinking: s.thinking, models: s.models, thinkingLevels: s.thinkingLevels, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
   const drop = (id: string) => {
     const session = sessions.get(id);
     if (!session) return;
@@ -170,10 +175,13 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
           return send(res, 202, { queued: true });
         }
         if (req.method === "POST" && sessionMatch[2] === "/action") {
-          const action = (await body(req)).action;
-          if (!["reload", "new", "compact"].includes(action)) return send(res, 400, { error: "unknown action" });
+          const input = await body(req), action = input.action, value = typeof input.value === "string" ? input.value : undefined;
+          if (!["reload", "new", "compact", "model", "thinking"].includes(action)) return send(res, 400, { error: "unknown action" });
+          // Only offer what this session listed, so the phone cannot pick arbitrary models.
+          if (action === "model" && !session.models?.some(m => m.id === value)) return send(res, 400, { error: "unknown model" });
+          if (action === "thinking" && !session.thinkingLevels?.includes(value ?? "")) return send(res, 400, { error: "unknown thinking level" });
           if (session.busy) return send(res, 409, { error: "Pi is working. Stop it or wait, then try again." });
-          session.prompts.push({ action });
+          session.prompts.push(value ? { action, value } : { action });
           if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
           return send(res, 202, { queued: true });
         }
@@ -212,6 +220,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
           const old = sessions.get(id);
           const next: Registered = {
             id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy),
+            model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,
           };

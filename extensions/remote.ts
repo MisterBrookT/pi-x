@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Image, Text } from "@earendil-works/pi-tui";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemoteAction, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
@@ -89,7 +90,33 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+  };
+
+  // The phone may switch between the same models the terminal's model picker offers:
+  // enabledModels when configured, otherwise every model with a key.
+  const modelKey = (m: { provider: string; id: string }) => `${m.provider}/${m.id}`;
+  const choices = () => {
+    if (!ctx) return [];
+    const scoped = ctx.scopedModels.map(s => s.model);
+    return scoped.length ? scoped : ctx.modelRegistry.getAvailable();
+  };
+  const modelChoices = () => {
+    if (!ctx) return {};
+    const current = ctx.model;
+    const levels: string[] = current ? getSupportedThinkingLevels(current) : ["off"];
+    return {
+      model: current ? { id: modelKey(current), name: current.name || current.id } : undefined,
+      thinking: pi.getThinkingLevel(),
+      models: choices().map(m => ({ id: modelKey(m), name: m.name || m.id })),
+      thinkingLevels: levels,
+    };
+  };
+  const switchModel = async (value: string) => {
+    const model = choices().find(m => modelKey(m) === value);
+    if (!model || !ctx?.isIdle()) return;
+    if (!(await pi.setModel(model))) ctx.ui.notify(`No API key for ${modelKey(model)}`, "warning");
+    schedulePush();
   };
 
   const push = async () => {
@@ -123,6 +150,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (!ctx) return;
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
+    if (typeof prompt === "object" && "action" in prompt && prompt.action === "model") { void switchModel(prompt.value ?? ""); return; }
+    if (typeof prompt === "object" && "action" in prompt && prompt.action === "thinking") {
+      if (ctx.isIdle() && modelChoices().thinkingLevels?.includes(prompt.value ?? "")) pi.setThinkingLevel(prompt.value as any);
+      schedulePush(); return;
+    }
     if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc ${prompt.action}`, { expandPromptTemplates: true }); return; }
     const content = typeof prompt === "string" ? prompt : [
       // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
@@ -204,6 +236,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   pi.on("session_tree", (e, next) => { track(e, next); schedulePush(); });
   pi.on("session_compact", (e, next) => { track(e, next); schedulePush(); });
   pi.on("session_info_changed", (e, next) => { track(e, next); schedulePush(); });
+  pi.on("model_select", (e, next) => { track(e, next); schedulePush(); });
+  pi.on("thinking_level_select", (e, next) => { track(e, next); schedulePush(); });
   // /reload replaces this extension instance; remember "remote on" so the new instance resumes it.
   // Quitting or switching sessions still turns remote off.
   pi.on("session_start", async (event, next) => {

@@ -28,9 +28,10 @@ const messages = [
     background: { id: "1", state: "failed", command: "npm test", output: "fixture failure", truncated: false } },
 ];
 let streaming = "";
+const modelState = { model: { id: "a/fast", name: "Fast One" }, thinking: "low" };
 const publish = async () => {
   const response = await fetch(`${base}/agent/fixture`, { method: "PUT", headers: auth,
-    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: "/workspace/demo", busy: Boolean(streaming), streaming, streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
+    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: "/workspace/demo", busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
   assert.equal(response.status, 200);
 };
 let browser;
@@ -96,6 +97,22 @@ try {
   streaming = "";
   await publish();
   await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
+  // Model settings: the header chip shows the model and thinking level and opens a picker.
+  const chip = page.getByRole("button", { name: "Model" });
+  assert.equal(await chip.textContent(), "Fast One · low");
+  await chip.click();
+  const sheet = page.getByRole("dialog", { name: "Model settings" });
+  await sheet.waitFor();
+  assert.equal(await sheet.locator('[data-model="a/fast"]').getAttribute("aria-checked"), "true");
+  await page.screenshot({ path: new URL("model.png", output).pathname });
+  await sheet.locator('[data-level="high"]').click();
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "thinking", value: "high" }] });
+  await sheet.locator('[data-model="b/smart"]').click();
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "model", value: "b/smart" }] });
+  await sheet.waitFor({ state: "hidden" });
+  modelState.model = { id: "b/smart", name: "Smart One" }; modelState.thinking = "high"; await publish();
+  await page.waitForFunction(() => document.querySelector("#modelChip").textContent === "Smart One · high");
+  modelState.model = { id: "a/fast", name: "Fast One" }; modelState.thinking = "low"; await publish();
   // Quick actions: a menu next to +, disabled while Pi works, New chat asks first, typed /reload works too.
   await page.getByRole("button", { name: "Quick actions" }).click();
   const menu = page.getByRole("menu", { name: "Quick actions" });

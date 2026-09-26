@@ -437,3 +437,34 @@ test("phone quick actions reload Pi and start a new chat in a real Pi runtime, k
   const after = await until(l => l.length === 1 && l[0].id !== first, "the phone's New chat opens a new session with remote on");
   assert.equal(after[0].id, runtime.session.sessionManager.getSessionId());
 });
+
+test("the phone can switch a real Pi session's model and thinking level, only among offered choices", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pix-remote-model-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const probe = await startRemoteHub({ token, port: 0 });
+  const port = probe.port; await probe.close();
+  const tokenPath = join(dir, "token");
+  const h = await goalSession(t, () => say("ok"), { tools: [], extensions: [pi => registerRemote(pi, { port, tokenPath, relayUrl: "" })] });
+  await h.session.prompt("/rc tailnet");
+  const headers = { authorization: `Bearer ${(await readFile(tokenPath, "utf8")).trim()}`, "content-type": "application/json" };
+  const base = `http://127.0.0.1:${port}`, id = h.session.sessionManager.getSessionId();
+  const get = async () => (await fetch(`${base}/api/sessions/${id}`, { headers })).json();
+  const until = async (predicate, what) => { for (let i = 0; i < 100; i++) { const s = await get(); if (predicate(s)) return s; await new Promise(r => setTimeout(r, 50)); } assert.fail(what); };
+  const start = await until(s => s.model && s.models?.length > 1, "the phone sees the current model and choices");
+  assert.equal(start.model.id, `${h.session.model.provider}/${h.session.model.id}`);
+  const target = start.models.find(m => m.id !== start.model.id);
+  const act = body => fetch(`${base}/api/sessions/${id}/action`, { method: "POST", headers, body: JSON.stringify(body) });
+  assert.equal((await act({ action: "model", value: "evil/not-offered" })).status, 400, "only offered models");
+  assert.equal((await act({ action: "thinking", value: "ultra" })).status, 400, "only offered levels");
+  assert.equal((await act({ action: "model", value: target.id })).status, 202);
+  await until(s => s.model.id === target.id, "the phone sees the switch");
+  assert.equal(`${h.session.model.provider}/${h.session.model.id}`, target.id, "real Pi switched model");
+  const after = await get();
+  const level = after.thinkingLevels.find(l => l !== after.thinking);
+  assert.ok(level, "the test model offers more than one thinking level");
+  {
+    assert.equal((await act({ action: "thinking", value: level })).status, 202);
+    await until(s => s.thinking === level, "the phone sees the new thinking level");
+    assert.equal(h.session.thinkingLevel, level, "real Pi switched thinking level");
+  }
+});
