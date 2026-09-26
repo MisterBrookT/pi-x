@@ -117,8 +117,11 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
   // name and outcome are sent, never message text: the push service can read the title.
   const notifyChanges = (old: Registered | undefined, next: Registered) => {
     if (!push || !old) return;
-    if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` });
+    // Like chat apps: no notification on a phone that has Pix open on screen right now.
+    if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` }, endpoint => (onScreen.get(endpoint) ?? 0) > Date.now());
   };
+  // Phone endpoint -> time until which it counts as looking at Pix (refreshed every 10 s while visible).
+  const onScreen = new Map<string, number>();
   const sessions = new Map<string, Registered>();
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();
   const phones = new Set<ServerResponse>();
@@ -165,6 +168,11 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
       if (path === "/api/push" && req.method === "POST") {
         if (!push) return send(res, 404, { error: "notifications are off" });
         const input = await body(req) as any;
+        if (typeof input?.presence === "string" && typeof input.endpoint === "string" && input.endpoint.length < 1000) {
+          if (input.presence === "visible") onScreen.set(input.endpoint, Date.now() + 25_000); else onScreen.delete(input.endpoint);
+          if (onScreen.size > 20) onScreen.delete(onScreen.keys().next().value!);
+          return send(res, 200, { ok: true });
+        }
         if (!validSubscription(input?.subscription)) return send(res, 400, { error: "invalid subscription" });
         await push.subscribe(input.subscription);
         if (input.test) await push.notify({ title: "Pix", body: "Notifications are on", tag: "pix-test" });

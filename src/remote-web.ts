@@ -139,6 +139,10 @@ async function setupNotify(){const btn=$("notify");if(!("serviceWorker" in navig
   const ready=async()=>{const sub=await reg.pushManager?.getSubscription();if(sub&&Notification.permission==="granted"){try{await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON()})});btn.textContent="Notifications on · send test"}catch{}}};
   if(!("PushManager" in window)){btn.textContent=standalone?"Notifications need iOS 16.4 or later":"Notifications: add Pix to the Home Screen first";btn.disabled=true;return}
   void ready();
+  // Tell the Mac when Pix is on screen, so it does not notify this phone while you are reading.
+  let endpoint="";const presence=async()=>{endpoint||=(await reg.pushManager.getSubscription())?.endpoint||"";if(!endpoint||!token)return;
+    const visible=document.visibilityState==="visible";try{await api("/api/push",{method:"POST",body:JSON.stringify({presence:visible?"visible":"hidden",endpoint})})}catch{}};
+  document.addEventListener("visibilitychange",()=>void presence());setInterval(()=>{if(document.visibilityState==="visible")void presence()},10000);void presence();
   btn.onclick=async()=>{try{if(await Notification.requestPermission()!=="granted"){btn.textContent="Notifications blocked in Settings";return}
     const {publicKey}=await api("/api/push");const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(publicKey)});
     await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON(),test:true})});btn.textContent="Notifications on · send test"}catch(e){btn.textContent="Could not turn on: "+(e.message||e)}}}

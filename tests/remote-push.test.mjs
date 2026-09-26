@@ -70,6 +70,25 @@ test("the hub notifies only when a turn ends (Pi waits for you), not on backgrou
   assert.ok(!JSON.stringify(notes).includes("secret"), "no message text in notifications");
 });
 
+test("no notification to a phone that has Pix on screen; it resumes once the phone leaves", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pix-push-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const sent = [];
+  const push = createPushSender(join(dir, "push.json"), { fetch: async url => { sent.push(url); return new Response(null, { status: 201 }); } });
+  const p = phone(); await push.subscribe(p.sub);
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push }); t.after(() => hub.close());
+  const req = (path, body) => fetch(`http://127.0.0.1:${hub.port}${path}`, { method: body.id ? "PUT" : "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const turn = async () => { await req("/agent/s1", { id: "s1", name: "w", cwd: "/", busy: true, messages: [] }); await req("/agent/s1", { id: "s1", name: "w", cwd: "/", busy: false, messages: [] }); await new Promise(r => setTimeout(r, 50)); };
+  await turn();
+  assert.equal(sent.length, 1, "notifies while Pix is not open");
+  await req("/api/push", { presence: "visible", endpoint: p.sub.endpoint });
+  await turn();
+  assert.equal(sent.length, 1, "silent while Pix is on screen");
+  await req("/api/push", { presence: "hidden", endpoint: p.sub.endpoint });
+  await turn();
+  assert.equal(sent.length, 2, "notifies again after leaving Pix");
+});
+
 test("encryption matches the RFC 8291 example byte for byte", () => {
   const as = createECDH("prime256v1"); as.setPrivateKey(Buffer.from("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw", "base64url"));
   const out = encryptPushPayload({ endpoint: "https://x", keys: { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" } }, "When I grow up, I want to be a watermelon", Buffer.from("DGv6ra1nlYgDCS1FRnbzlw", "base64url"), as);
