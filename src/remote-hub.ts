@@ -27,12 +27,14 @@ export interface RemoteSnapshot {
 export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
+export type RemoteActionName = "reload" | "new" | "compact";
+export interface RemoteAction { action: RemoteActionName }
 
 interface Registered extends RemoteSnapshot {
   seenAt: number;
   updatedAt: number;
-  prompts: (string | RemotePrompt | RemoteAbort)[];
-  waiter?: (prompts: (string | RemotePrompt | RemoteAbort)[]) => void;
+  prompts: (string | RemotePrompt | RemoteAbort | RemoteAction)[];
+  waiter?: (prompts: (string | RemotePrompt | RemoteAbort | RemoteAction)[]) => void;
 }
 
 const staleMs = 20_000;
@@ -156,7 +158,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
         const media = mediaBySession.get(id)?.get(mediaGet[2]);
         return send(res, media ? 200 : 404, media ?? { error: "image unavailable" });
       }
-      const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)(\/prompt|\/abort)?$/);
+      const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)(\/prompt|\/abort|\/action)?$/);
       if (sessionMatch) {
         const session = sessions.get(decodeURIComponent(sessionMatch[1]));
         if (!session) return send(res, 404, { error: "session is no longer connected" });
@@ -164,6 +166,14 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
         if (req.method === "POST" && sessionMatch[2] === "/abort") {
           await body(req);
           session.prompts.push({ abort: true });
+          if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
+          return send(res, 202, { queued: true });
+        }
+        if (req.method === "POST" && sessionMatch[2] === "/action") {
+          const action = (await body(req)).action;
+          if (!["reload", "new", "compact"].includes(action)) return send(res, 400, { error: "unknown action" });
+          if (session.busy) return send(res, 409, { error: "Pi is working. Stop it or wait, then try again." });
+          session.prompts.push({ action });
           if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
           return send(res, 202, { queued: true });
         }
@@ -219,7 +229,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
           session.waiter?.([]);
           let finished = false;
           let timer: ReturnType<typeof setTimeout>;
-          const finish = (prompts: (string | RemotePrompt | RemoteAbort)[]) => {
+          const finish = (prompts: (string | RemotePrompt | RemoteAbort | RemoteAction)[]) => {
             if (finished) return;
             finished = true;
             clearTimeout(timer);

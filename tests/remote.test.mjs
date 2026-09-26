@@ -387,3 +387,53 @@ test("phone-only background card details never enter the model context", async (
   const completion = h.requests.at(-1).messages.find(m => JSON.stringify(m).includes("Job 1: completed"));
   assert.equal(completion.details, undefined, "the completion message reaches the model as text only");
 });
+
+test("phone quick actions reload Pi and start a new chat in a real Pi runtime, keeping remote on", async (t) => {
+  const { createAgentSessionRuntime, createAgentSessionServices, createAgentSessionFromServices, ModelRuntime, SessionManager, SettingsManager } = await import("@earendil-works/pi-coding-agent");
+  const { InMemoryCredentialStore } = await import("@earendil-works/pi-ai");
+  const dir = await mkdtemp(join(tmpdir(), "pix-remote-actions-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const probe = await startRemoteHub({ token, port: 0 });
+  const port = probe.port; await probe.close();
+  const tokenPath = join(dir, "token");
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, modelsStorePath: join(dir, "models.json"), refreshOnCreate: false });
+  await modelRuntime.setRuntimeApiKey("anthropic", "test-only");
+  const model = modelRuntime.getModels("anthropic")[0];
+  const createRuntime = async ({ cwd, sessionManager, sessionStartEvent }) => {
+    const services = await createAgentSessionServices({ cwd, agentDir: dir, settingsManager, modelRuntime, resourceLoaderOptions: {
+      noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      extensionFactories: [pi => registerRemote(pi, { port, tokenPath, relayUrl: "" })] } });
+    return { ...(await createAgentSessionFromServices({ services, sessionManager, sessionStartEvent, model, tools: [] })), services, diagnostics: services.diagnostics };
+  };
+  const runtime = await createAgentSessionRuntime(createRuntime, { cwd: dir, agentDir: dir, sessionManager: SessionManager.inMemory(dir) });
+  // Bind the same command actions the interactive terminal provides.
+  const bind = session => session.bindExtensions({ mode: "rpc", commandContextActions: {
+    waitForIdle: () => runtime.session.waitForIdle(),
+    newSession: async options => { const result = await runtime.newSession(options); await bind(runtime.session); return result; },
+    fork: async () => ({ cancelled: true }), navigateTree: async () => ({ cancelled: true }), switchSession: async () => ({ cancelled: true }),
+    reload: () => runtime.session.reload(),
+  } });
+  await bind(runtime.session);
+  t.after(async () => { await runtime.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); await runtime.dispose(); });
+  await runtime.session.prompt("/rc tailnet");
+  const headers = { authorization: `Bearer ${(await readFile(tokenPath, "utf8")).trim()}`, "content-type": "application/json" };
+  const base = `http://127.0.0.1:${port}`;
+  const list = async () => { try { return await (await fetch(`${base}/api/sessions`, { headers })).json(); } catch { return []; } };
+  const until = async (predicate, what) => { for (let i = 0; i < 200; i++) { const l = await list(); if (predicate(l)) return l; await new Promise(r => setTimeout(r, 50)); } assert.fail(what); };
+  const act = (id, action) => fetch(`${base}/api/sessions/${id}/action`, { method: "POST", headers, body: JSON.stringify({ action }) });
+  const first = runtime.session.sessionManager.getSessionId();
+  await until(l => l.some(s => s.id === first), "remote is on");
+  assert.equal((await act(first, "delete-everything")).status, 400, "only known actions are accepted");
+
+  const oldSession = runtime.session.extensionRunner;
+  assert.equal((await act(first, "reload")).status, 202);
+  for (let i = 0; i < 100 && runtime.session.extensionRunner === oldSession; i++) await new Promise(r => setTimeout(r, 50));
+  assert.notEqual(runtime.session.extensionRunner, oldSession, "the phone action really reloaded Pi");
+  await new Promise(r => setTimeout(r, 300));
+  await until(l => l.some(s => s.id === first), "remote stays on after the phone reloads Pi");
+
+  assert.equal((await act(first, "new")).status, 202);
+  const after = await until(l => l.length === 1 && l[0].id !== first, "the phone's New chat opens a new session with remote on");
+  assert.equal(after[0].id, runtime.session.sessionManager.getSessionId());
+});

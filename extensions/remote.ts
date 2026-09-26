@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Image, Text } from "@earendil-works/pi-tui";
-import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
+import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemoteAction, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
@@ -21,6 +21,8 @@ export interface RemoteOptions { port?: number; tokenPath?: string; relayUrl?: s
 
 /** Survives extension reloads within one Pi process (module state does not). */
 const reloadResume: Map<string, { relay: boolean }> = ((globalThis as any).__pixRemoteReloadResume ??= new Map());
+/** Key for "keep remote on in the next session", set by the phone's New chat action. */
+const nextSession = "__next";
 
 export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions = {}) {
   const port = options.port ?? Number(process.env.PIX_REMOTE_PORT || remoteDefaultPort);
@@ -117,9 +119,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     pushTimer = setTimeout(() => { pushTimer = undefined; void push(); }, delay);
   };
 
-  const deliver = (prompt: string | RemotePrompt | RemoteAbort) => {
+  const deliver = (prompt: string | RemotePrompt | RemoteAbort | RemoteAction) => {
     if (!ctx) return;
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
+    // Reload and New chat need a command context, so phone actions run through a Pix command.
+    if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc-action ${prompt.action}`, { expandPromptTemplates: true }); return; }
     const content = typeof prompt === "string" ? prompt : [
       // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
       { type: "text" as const, text: prompt.text || "(photo)" },
@@ -137,7 +141,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       try {
         const res = await request(`/agent/${encodeURIComponent(sessionId)}/next`, { signal: controller.signal });
         if (res.status === 404) { await push(); continue; }
-        const { prompts = [] } = (await res.json()) as { prompts?: (string | RemotePrompt | RemoteAbort)[] };
+        const { prompts = [] } = (await res.json()) as { prompts?: (string | RemotePrompt | RemoteAbort | RemoteAction)[] };
         for (const prompt of prompts) deliver(prompt);
       } catch {
         if (controller.signal.aborted) return;
@@ -203,9 +207,10 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   // /reload replaces this extension instance; remember "remote on" so the new instance resumes it.
   // Quitting or switching sessions still turns remote off.
   pi.on("session_start", async (event, next) => {
-    const resume = reloadResume.get(next.sessionManager.getSessionId());
-    reloadResume.delete(next.sessionManager.getSessionId());
-    if (event.reason !== "reload" || !resume || connected) return;
+    const key = event.reason === "new" ? nextSession : next.sessionManager.getSessionId();
+    const resume = reloadResume.get(key);
+    reloadResume.delete(key);
+    if ((event.reason !== "reload" && event.reason !== "new") || !resume || connected) return;
     try {
       publicOrigin = options.relayUrl ?? await readRelayOrigin();
       if (resume.relay && !publicOrigin) return;
@@ -222,6 +227,25 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     relayAgent = undefined;
     await hub?.close();
     hub = undefined;
+  });
+
+  // Phone quick actions. Hidden from normal use: the phone sends these, but typing them also works.
+  pi.registerCommand("rc-action", {
+    description: "Pix Remote phone action: reload, new, or compact",
+    handler: async (args, next) => {
+      const action = args.trim();
+      if (!["reload", "new", "compact"].includes(action)) { next.ui.notify("Usage: /rc-action reload|new|compact", "warning"); return; }
+      if (!next.isIdle()) { next.ui.notify("Pi is working. Stop it or wait, then try again.", "warning"); return; }
+      if (action === "compact") { next.compact({ onError: error => next.ui.notify(`Compact failed: ${error.message}`, "error") }); return; }
+      const relay = Boolean(relayKey);
+      if (action === "reload") {
+        await next.reload();
+        return;
+      }
+      if (connected) reloadResume.set(nextSession, { relay });
+      const result = await next.newSession();
+      if (result.cancelled) reloadResume.delete(nextSession);
+    },
   });
 
   pi.registerCommand("rc", {

@@ -96,6 +96,43 @@ try {
   streaming = "";
   await publish();
   await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
+  // Quick actions: a menu next to +, disabled while Pi works, New chat asks first, typed /reload works too.
+  await page.getByRole("button", { name: "Quick actions" }).click();
+  const menu = page.getByRole("menu", { name: "Quick actions" });
+  await menu.waitFor();
+  assert.deepEqual(await menu.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["↻ Reload Pi", "✎ New chat", "⇲ Compact"]);
+  await page.screenshot({ path: new URL("actions.png", output).pathname });
+  const reload = page.waitForRequest(r => r.url().endsWith("/api/sessions/fixture/action") && r.method() === "POST");
+  await menu.getByRole("menuitem", { name: /Reload Pi/ }).click();
+  assert.deepEqual(JSON.parse((await reload).postData()), { action: "reload" });
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "reload" }] });
+  await menu.waitFor({ state: "hidden" });
+  page.once("dialog", d => d.dismiss());
+  await page.getByRole("button", { name: "Quick actions" }).click();
+  await menu.getByRole("menuitem", { name: /New chat/ }).click();
+  await page.waitForTimeout(200);
+  // Another Pi session is already open, like jevbench; New chat must not fall onto it.
+  await fetch(`${base}/agent/other`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "other", name: "Other", named: true, cwd: "/w", busy: false, messages: [] }) });
+  page.once("dialog", d => d.accept());
+  await page.getByRole("button", { name: "Quick actions" }).click();
+  await menu.getByRole("menuitem", { name: /New chat/ }).click();
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "new" }] }, "cancelling New chat sends nothing; confirming sends it once");
+  // Regression guard: after New chat the phone follows the new session, not another open one.
+  await fetch(`${base}/agent/fresh`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "fresh", name: "Fresh chat", named: true, cwd: "/w", busy: false, messages: [] }) });
+  await page.locator("#title").getByText("Fresh chat").waitFor();
+  await fetch(`${base}/agent/other`, { method: "DELETE", headers: auth });
+  await fetch(`${base}/agent/fresh`, { method: "DELETE", headers: auth });
+  await page.evaluate(() => open("fixture"));
+  await page.locator("#title").getByText("Pix UI test").waitFor();
+  await page.getByPlaceholder("Message Pi").fill("/compact");
+  await page.getByRole("button", { name: "Send" }).click();
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "compact" }] }, "typed /compact runs the action, not a chat message");
+  await page.waitForFunction(() => document.querySelector("#input").value === "", null, { timeout: 3000 });
+  streaming = "busy"; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor();
+  await page.getByRole("button", { name: "Quick actions" }).click();
+  assert.equal(await menu.getByRole("menuitem", { name: /Reload Pi/ }).isDisabled(), true, "actions wait until Pi is idle");
+  await page.locator("#actionsShade").click({ position: { x: 20, y: 200 } });
+  streaming = ""; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
   await group.locator("summary").first().click();
   await job.locator('summary').click();
   assert.equal(await job.getByText("fixture failure").isVisible(), true);
