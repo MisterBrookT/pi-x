@@ -65,9 +65,7 @@ test("the hub notifies only when a turn ends (Pi waits for you), not on backgrou
   await put({ busy: true, messages: [{ role: "user", text: "secret plan" }, job("failed")] });
   await put({ busy: false, messages: [{ role: "user", text: "secret plan" }, job("failed"), { role: "assistant", text: "secret answer" }] });
   await put({ busy: false, messages: [{ role: "user", text: "secret plan" }, job("failed"), { role: "assistant", text: "secret answer" }] });
-  await put({ busy: true, asking: true, messages: [] });
-  await put({ busy: true, asking: true, messages: [] });
-  assert.deepEqual(notes.map(n => n.body), ["Pi finished", "Pi is asking you something"]);
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished"]);
   assert.ok(notes.every(n => n.session === "s1" && n.title === "workspace"));
   assert.ok(!JSON.stringify(notes).includes("secret"), "no message text in notifications");
 });

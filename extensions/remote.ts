@@ -50,7 +50,6 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let hub: RemoteHub | undefined;
   let connected = false;
   let busy = false;
-  const asking = new Set<string>();
   let streaming = "";
   let sessionId = "";
   let polling: AbortController | undefined;
@@ -100,7 +99,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), context: contextUsage(), asking: asking.size > 0 || undefined, todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
   };
 
   const contextUsage = () => {
@@ -241,9 +240,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
 
   const track = (_event: unknown, next: ExtensionContext) => { ctx = next; };
   pi.on("agent_start", (_e, next) => { ctx = next; busy = true; streaming = ""; schedulePush(); });
-  pi.on("tool_execution_start", (e, next) => { if (e.toolName === "question") { ctx = next; asking.add(e.toolCallId); schedulePush(); } });
-  pi.on("tool_execution_end", (e, next) => { if (asking.delete(e.toolCallId)) { ctx = next; schedulePush(); } });
-  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; asking.clear(); streaming = ""; schedulePush(); });
+  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; streaming = ""; schedulePush(); });
   pi.on("message_update", (event, next) => {
     ctx = next;
     const delta = event.assistantMessageEvent;

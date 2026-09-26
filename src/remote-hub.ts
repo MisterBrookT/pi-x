@@ -24,8 +24,6 @@ export interface RemoteSnapshot {
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
-  /** Set while Pi is blocked on a question for the user (question tool). */
-  asking?: boolean;
   /** Context window use, and the latest Pix todo plan. */
   context?: { tokens: number | null; window: number; percent: number | null };
   todos?: { id: string; text: string; status: string; parentId?: string }[];
@@ -119,7 +117,6 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
   // name and outcome are sent, never message text: the push service can read the title.
   const notifyChanges = (old: Registered | undefined, next: Registered) => {
     if (!push || !old) return;
-    if (next.asking && !old.asking) void push.notify({ title: next.name, body: "Pi is asking you something", session: next.id, tag: `turn-${next.id}` });
     if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` });
   };
   const sessions = new Map<string, Registered>();
