@@ -6,6 +6,7 @@ import { Container, Image, Text } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemoteAction, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
+import { createPushSender } from "../src/remote-push.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "../src/remote-relay-agent.ts";
@@ -87,7 +88,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     } catch (error) {
       if (error instanceof Error && /Pix Remote|another service/.test(error.message)) throw error;
     }
-    try { hub = await startRemoteHub({ token, port }); }
+    try { hub = await startRemoteHub({ token, port, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay();
   };

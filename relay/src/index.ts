@@ -1,5 +1,6 @@
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "../../src/remote-web.ts";
 import { remoteRelayWebScript } from "../../src/remote-relay-web.ts";
+import { remoteServiceWorker } from "../../src/remote-sw.ts";
 
 const html = remoteAppHtml.replace("<script>", `<script>\n${remoteRelayWebScript}\n`);
 const text = (body: string, type: string, headers: Record<string, string> = {}) => new Response(body, { headers: {
@@ -13,9 +14,10 @@ export default {
     if (url.pathname === "/") {
       const nonce = crypto.randomUUID().replace(/-/g, "");
       return text(html.replace("<script>", `<script nonce="${nonce}">`), "text/html; charset=utf-8", {
-        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' wss://${url.host}; img-src 'self' data:; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' wss://${url.host}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
       });
     }
+    if (url.pathname === "/sw.js") return text(remoteServiceWorker, "text/javascript", { "service-worker-allowed": "/" });
     if (url.pathname === "/icon.svg") return text(remoteIconSvg, "image/svg+xml");
     if (url.pathname === "/manifest.webmanifest") return text(remoteManifest, "application/manifest+json");
     const route = url.pathname.match(/^\/socket\/([a-f0-9]{64})\/(agent|phone)$/);

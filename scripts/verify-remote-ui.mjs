@@ -97,6 +97,10 @@ try {
   streaming = "";
   await publish();
   await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
+  // Notifications: a plain browser tab is told to use the Home Screen app.
+  const notify = page.locator("#notify");
+  await notify.waitFor();
+  assert.match(await notify.textContent(), /notifications/i);
   // Context ring and todo bar.
   const ring = page.getByRole("button", { name: /^Context:/ });
   assert.equal(await ring.getAttribute("aria-label"), "Context: 150k of 200k (75%)");
@@ -213,6 +217,11 @@ try {
   assert.match(await gesture([45,400],[120,402],[210,405]), /translateX/, 'drawer follows a horizontal drag');
   await page.locator('body.open').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Sessions' }).getAttribute('aria-expanded'), 'true');
+  await gesture([250,300],[160,305],[30,310], '.list');
+  await page.locator('body.open').waitFor({ state: 'detached' });
+  // Regression: only the left edge used to open the sidebar; now the middle and right of the chat do too.
+  await gesture([300,400],[370,402],[440,405]);
+  await page.locator('body.open').waitFor();
   await gesture([250,300],[160,305],[30,310], '.list');
   await page.locator('body.open').waitFor({ state: 'detached' });
   await gesture([40,400],[85,470],[130,550]);

@@ -6,6 +6,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { imageRef, maxImageBase64, type RemoteMedia, type RemoteMessage } from "./remote-state.ts";
+import { validSubscription, type PushSender } from "./remote-push.ts";
+import { remoteServiceWorker } from "./remote-sw.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 
 export const remoteHost = "127.0.0.1";
@@ -108,8 +110,20 @@ export interface RemoteHub {
 }
 
 /** Start the hub on loopback. Rejects with EADDRINUSE when another session already hosts it. */
-export async function startRemoteHub(options: { token: string; port?: number; host?: string }): Promise<RemoteHub> {
-  const { token } = options;
+export async function startRemoteHub(options: { token: string; port?: number; host?: string; push?: PushSender }): Promise<RemoteHub> {
+  const { token, push } = options;
+  // Notify the phone when a session finishes a turn or a background job ends. Only the session
+  // name and outcome are sent, never message text: the push service can read the title.
+  const notifyChanges = (old: Registered | undefined, next: Registered) => {
+    if (!push || !old) return;
+    if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` });
+    const before = new Map(old.messages.filter(m => m.background).map(m => [m.background!.id, m.background!.state]));
+    for (const m of next.messages) {
+      const job = m.background;
+      if (!job || before.get(job.id) === job.state || !before.has(job.id) && !old.messages.length) continue;
+      if (job.state !== "running") void push.notify({ title: next.name, body: `Job ${job.id} ${job.state}`, session: next.id, tag: `job-${next.id}-${job.id}` });
+    }
+  };
   const sessions = new Map<string, Registered>();
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();
   const phones = new Set<ServerResponse>();
@@ -146,11 +160,21 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
       const path = url.pathname;
       if (req.method === "GET" && (path === "/" || path === "/index.html")) return send(res, 200, remoteAppHtml, "text/html");
       if (req.method === "GET" && path === "/manifest.webmanifest") return send(res, 200, remoteManifest, "application/manifest+json");
+      if (req.method === "GET" && path === "/sw.js") return send(res, 200, remoteServiceWorker, "text/javascript");
       if (req.method === "GET" && path === "/icon.svg") return send(res, 200, remoteIconSvg, "image/svg+xml");
 
       const bearer = req.headers.authorization?.replace(/^Bearer /, "");
       if (!sameToken(bearer ?? url.searchParams.get("token"), token)) return send(res, 401, { error: "unauthorized" });
 
+      if (path === "/api/push" && req.method === "GET") return push ? send(res, 200, { publicKey: await push.publicKey(), phones: await push.count() }) : send(res, 404, { error: "notifications are off" });
+      if (path === "/api/push" && req.method === "POST") {
+        if (!push) return send(res, 404, { error: "notifications are off" });
+        const input = await body(req) as any;
+        if (!validSubscription(input?.subscription)) return send(res, 400, { error: "invalid subscription" });
+        await push.subscribe(input.subscription);
+        if (input.test) await push.notify({ title: "Pix", body: "Notifications are on", tag: "pix-test" });
+        return send(res, 200, { ok: true });
+      }
       if (req.method === "GET" && path === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         res.write(`event: sessions\ndata: ${JSON.stringify(summary())}\n\n`);
@@ -230,6 +254,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,
           };
           sessions.set(id, next);
+          notifyChanges(old, next);
           publish("session", publicSession(next));
           publish("sessions", summary());
           return send(res, 200, { ok: true });
