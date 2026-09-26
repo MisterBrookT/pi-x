@@ -28,7 +28,7 @@ export default {
 
 /** Routes opaque encrypted frames only. No key, plaintext, or transcript is stored here. */
 export class Room {
-  constructor(private state: any) {}
+  constructor(private state: any) { state.setWebSocketAutoResponse?.(new WebSocketRequestResponsePair("ping", "pong")); }
   fetch(request: Request) {
     const role = new URL(request.url).pathname.endsWith("/agent") ? "agent" : "phone";
     if (role === "phone" && this.state.getWebSockets("phone").length >= 3) return new Response("Room full", { status: 429 });

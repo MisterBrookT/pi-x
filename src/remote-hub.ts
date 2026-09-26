@@ -22,6 +22,9 @@ export interface RemoteSnapshot {
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
+  /** Context window use, and the latest Pix todo plan. */
+  context?: { tokens: number | null; window: number; percent: number | null };
+  todos?: { id: string; text: string; status: string; parentId?: string }[];
   /** Current model and thinking level, and the choices the phone may switch between. */
   model?: { id: string; name: string };
   thinking?: string;

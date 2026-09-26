@@ -452,6 +452,7 @@ test("the phone can switch a real Pi session's model and thinking level, only am
   const until = async (predicate, what) => { for (let i = 0; i < 100; i++) { const s = await get(); if (predicate(s)) return s; await new Promise(r => setTimeout(r, 50)); } assert.fail(what); };
   const start = await until(s => s.model && s.models?.length > 1, "the phone sees the current model and choices");
   assert.equal(start.model.id, `${h.session.model.provider}/${h.session.model.id}`);
+  assert.equal(start.context?.window, h.session.getContextUsage()?.contextWindow, "the phone sees the context window");
   const target = start.models.find(m => m.id !== start.model.id);
   const act = body => fetch(`${base}/api/sessions/${id}/action`, { method: "POST", headers, body: JSON.stringify(body) });
   assert.equal((await act({ action: "model", value: "evil/not-offered" })).status, 400, "only offered models");
@@ -467,4 +468,28 @@ test("the phone can switch a real Pi session's model and thinking level, only am
     await until(s => s.thinking === level, "the phone sees the new thinking level");
     assert.equal(h.session.thinkingLevel, level, "real Pi switched thinking level");
   }
+});
+
+test("the phone sees the current todo plan from a real Pi session", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pix-remote-todo-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const probe = await startRemoteHub({ token, port: 0 });
+  const port = probe.port; await probe.close();
+  const tokenPath = join(dir, "token");
+  const { default: registerTodo } = await import("../extensions/todo.ts");
+  const replies = [
+    () => call("todo", { action: "replace", items: [{ text: "Read" }, { text: "Fix" }] }),
+    () => say("planned"),
+    () => call("todo", { action: "set", id: "1", status: "done" }, "t2"),
+    () => say("one done"),
+  ];
+  const h = await goalSession(t, () => replies.shift()(), { tools: ["todo"], extensions: [registerTodo, pi => registerRemote(pi, { port, tokenPath, relayUrl: "" })] });
+  await h.session.prompt("/rc tailnet");
+  const headers = { authorization: `Bearer ${(await readFile(tokenPath, "utf8")).trim()}` };
+  const get = async () => (await fetch(`http://127.0.0.1:${port}/api/sessions/${h.session.sessionManager.getSessionId()}`, { headers })).json();
+  await h.session.prompt("plan");
+  await h.session.prompt("continue");
+  let todos;
+  for (let i = 0; i < 60; i++) { todos = (await get()).todos; if (todos?.[0]?.status === "done") break; await new Promise(r => setTimeout(r, 50)); }
+  assert.deepEqual(todos?.map(x => [x.text, x.status]), [["Read", "done"], ["Fix", "pending"]]);
 });

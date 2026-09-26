@@ -1,6 +1,6 @@
 // /rc: expose this live Pi session to the Pix Remote web app through a loopback-only hub.
-import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Image, Text } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -61,9 +61,17 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(init.headers ?? {}) },
   });
 
+  // One line per relay state change, so "Mac is not connected" on the phone can be checked later.
+  const logRelay = (state: string) => {
+    try {
+      const file = join(dirname(options.tokenPath ?? remoteTokenPath), "relay.log");
+      if (existsSync(file) && statSync(file).size > 200_000) renameSync(file, file + ".1");
+      appendFileSync(file, `${new Date().toISOString()} pid=${process.pid} ${state}\n`);
+    } catch {}
+  };
   const ensureRelay = async () => {
     if (!hub) return;
-    relayAgent ||= startRemoteRelayAgent({ origin: publicOrigin, secret: relayKey, localBase: base, localToken: token });
+    relayAgent ||= startRemoteRelayAgent({ origin: publicOrigin, secret: relayKey, localBase: base, localToken: token, onState: logRelay });
     await relayAgent.ready;
   };
 
@@ -90,7 +98,21 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+  };
+
+  const contextUsage = () => {
+    const u = ctx?.getContextUsage();
+    return u ? { tokens: u.tokens, window: u.contextWindow, percent: u.percent } : undefined;
+  };
+  // The todo tool stores the whole plan in each result; the newest one on this branch is current.
+  const latestTodos = (branch: readonly any[]) => {
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const m = branch[i]?.type === "message" ? branch[i].message : branch[i];
+      if (m?.role !== "toolResult" || m.toolName !== "todo" || !Array.isArray(m.details?.items)) continue;
+      return m.details.items.slice(0, 60).map((x: any) => ({ id: String(x.id), text: String(x.text).slice(0, 300), status: String(x.status), ...(x.parentId === undefined ? {} : { parentId: String(x.parentId) }) }));
+    }
+    return undefined;
   };
 
   // The phone may switch between the same models the terminal's model picker offers:

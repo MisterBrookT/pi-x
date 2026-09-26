@@ -77,3 +77,26 @@ test("the largest phone photo prompt fits the relay request and encrypted frame 
   const frame = sealRelayFrame("k".repeat(43), { kind: "request", id: crypto.randomUUID(), path: "/api/sessions/x/prompt", method: "POST", body });
   assert.ok(frame.length <= relayFrameLimit, `${frame.length} > ${relayFrameLimit}`);
 });
+
+test("the Mac notices a relay link that silently died and reconnects", async t => {
+  const { WebSocketServer } = await import("ws");
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  t.after(() => server.close());
+  await new Promise(r => server.once("listening", r));
+  let connections = 0;
+  server.on("connection", socket => {
+    connections++;
+    // First link answers nothing (like a socket left over after sleep); later links answer pings.
+    if (connections > 1) socket.on("message", data => { if (String(data) === "ping") socket.send("pong"); });
+  });
+  const states = [];
+  const { startRemoteRelayAgent } = await import("../src/remote-relay-agent.ts");
+  const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret: "s".repeat(43), localBase: "http://127.0.0.1:9", localToken: "x", heartbeatMs: 50, onState: s => states.push(s) });
+  t.after(() => agent.stop());
+  await agent.ready;
+  for (let i = 0; i < 160 && connections < 2; i++) await new Promise(r => setTimeout(r, 25));
+  assert.ok(states.includes("stale"), "dead link is detected");
+  assert.equal(connections, 2, "and replaced");
+  await new Promise(r => setTimeout(r, 400));
+  assert.equal(connections, 2, "a link that answers pings is kept");
+});

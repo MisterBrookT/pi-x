@@ -14,9 +14,11 @@ async function relayIdentity(secret){
 }
 async function relaySeal(value){const iv=crypto.getRandomValues(new Uint8Array(12));const data=await crypto.subtle.encrypt({name:"AES-GCM",iv},relayKey,relayBytes(JSON.stringify(value)));return JSON.stringify({iv:relayB64(iv),data:relayB64(data)})}
 async function relayOpen(frame){const f=JSON.parse(frame);return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:"AES-GCM",iv:relayUnb64(f.iv)},relayKey,relayUnb64(f.data))))}
+// A phone waking up or a Mac reconnecting takes a few seconds; wait for it instead of failing.
+async function relayWaitOnline(ms){const end=Date.now()+ms;while(Date.now()<end){if(relaySocket?.readyState===WebSocket.OPEN&&relayEvents?.online)return true;relayEvents?.wake?.();await new Promise(r=>setTimeout(r,250))}return false}
 function relayApi(path,opts={}){return new Promise(async(resolve,reject)=>{
   try{
-    if(relaySocket?.readyState!==WebSocket.OPEN||!relayEvents?.online)throw Error("Mac is not connected");
+    if(!await relayWaitOnline(12000))throw Error("Mac is not connected");
     const id=crypto.randomUUID();const timer=setTimeout(()=>{relayPending.delete(id);reject(Error("Mac did not respond"))},15000);
     relayPending.set(id,{resolve,reject,timer});
     relaySocket.send(await relaySeal({kind:"request",id,path,method:opts.method||"GET",body:opts.body||""}));
@@ -32,8 +34,13 @@ function relayConnect(secret){
         if(relayClosed)return;
         const socket=relaySocket=new WebSocket(location.origin.replace(/^http/,"ws")+"/socket/"+identity.room+"/phone");
         let greeting;const hello=async()=>{if(socket.readyState===WebSocket.OPEN)socket.send(await relaySeal({kind:"hello"}))};
-        socket.onopen=()=>{void hello();greeting=setInterval(()=>{if(!events.online)void hello()},2000)};
-        socket.onmessage=async e=>{try{
+        let lastPong=Date.now(),beat;
+        socket.onopen=()=>{void hello();greeting=setInterval(()=>{if(!events.online)void hello()},2000);
+          beat=setInterval(()=>{if(Date.now()-lastPong>40000){socket.close();return}try{socket.send("ping")}catch{}},15000)};
+        // iOS freezes pages in the background; the socket then looks open but is dead.
+        events.wake=()=>{if(socket!==relaySocket||socket.readyState!==WebSocket.OPEN)return;const sent=Date.now();try{socket.send("ping")}catch{}
+          setTimeout(()=>{if(socket===relaySocket&&lastPong<sent)socket.close()},3000)};
+        socket.onmessage=async e=>{if(e.data==="pong"){lastPong=Date.now();return}try{
           const signal=JSON.parse(e.data).signal;
           if(signal==="agent-online"){void hello();return}
           if(signal==="agent-offline"){events.online=false;events.onerror?.();return}
@@ -48,12 +55,14 @@ function relayConnect(secret){
           }
         }catch(e){console.warn("Invalid encrypted relay frame",e)}};
         socket.onclose=()=>{
-          events.online=false;clearInterval(greeting);
+          if(socket!==relaySocket)return;
+          events.online=false;clearInterval(greeting);clearInterval(beat);
           for(const p of relayPending.values()){clearTimeout(p.timer);p.reject(Error("Connection lost"))}relayPending.clear();
-          events.onerror?.();if(!relayClosed)relayReconnect=setTimeout(start,1500);
+          events.onerror?.();if(!relayClosed)relayReconnect=setTimeout(start,document.hidden?5000:800);
         };
         socket.onerror=()=>events.onerror?.();
       };start();
+      document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!relayClosed&&events===relayEvents){if(relaySocket?.readyState===WebSocket.OPEN)events.wake();else if(!relaySocket||relaySocket.readyState===WebSocket.CLOSED){clearTimeout(relayReconnect);start()}}});
     }catch(e){console.warn("Cannot open pairing key",e);events.onerror?.()}
   })();
   return events;

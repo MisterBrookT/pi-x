@@ -28,10 +28,10 @@ const messages = [
     background: { id: "1", state: "failed", command: "npm test", output: "fixture failure", truncated: false } },
 ];
 let streaming = "";
-const modelState = { model: { id: "a/fast", name: "Fast One" }, thinking: "low" };
+const modelState = { model: { id: "a/fast", name: "Fast One" }, thinking: "low", todos: [{ id: "1", text: "Read the code", status: "done" }, { id: "2", text: "Fix the relay link", status: "active" }, { id: "3", text: "Write tests", status: "pending" }] };
 const publish = async () => {
   const response = await fetch(`${base}/agent/fixture`, { method: "PUT", headers: auth,
-    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: "/workspace/demo", busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
+    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: "/workspace/demo", busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], context: { tokens: 150000, window: 200000, percent: 75 }, todos: modelState.todos, streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
   assert.equal(response.status, 200);
 };
 let browser;
@@ -97,6 +97,16 @@ try {
   streaming = "";
   await publish();
   await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
+  // Context ring and todo bar.
+  const ring = page.getByRole("button", { name: /^Context:/ });
+  assert.equal(await ring.getAttribute("aria-label"), "Context: 150k of 200k (75%)");
+  assert.ok(await ring.evaluate(e => e.classList.contains("warn")), "75% is shown as a warning");
+  assert.equal(await page.locator("#todoCount").textContent(), "1/3");
+  assert.equal(await page.locator("#todoNow").textContent(), "Fix the relay link");
+  await page.locator("#todoBar summary").click();
+  assert.equal(await page.locator("#todoList li").count(), 3);
+  await page.screenshot({ path: new URL("todo.png", output).pathname });
+  await page.locator("#todoBar summary").click();
   // Model settings: the header chip shows the model and thinking level and opens a picker.
   const chip = page.getByRole("button", { name: "Model" });
   assert.equal(await chip.textContent(), "Fast One · low");

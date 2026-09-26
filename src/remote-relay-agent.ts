@@ -43,12 +43,13 @@ export const openRelayFrame = (secret: string, frame: string): any => {
 
 const allowed = (path: string, method: string) => method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action)$/.test(path);
 
-export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void }) {
+export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
   const { origin, secret, localBase, localToken } = options;
   const parsed = new URL(origin);
   if (!(parsed.protocol === "https:" || parsed.protocol === "http:" && parsed.hostname === "127.0.0.1") || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw Error("Pix Remote relay must be an HTTPS origin (or loopback for tests)");
   let running = true, socket: WebSocket | undefined, stream: AbortController | undefined, retry: ReturnType<typeof setTimeout> | undefined;
   let connected = false;
+  const beatMs = options.heartbeatMs ?? 15_000;
   let resolveReady!: () => void, rejectReady!: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const readyTimer = setTimeout(() => { if (!connected) rejectReady(Error("Could not reach the Pix Remote relay. Check your Mac's network.")); }, 10_000);
@@ -93,9 +94,19 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     if (!running) return;
     const url = origin.replace(/^https:/, "wss:").replace(/^http:/, "ws:").replace(/\/$/, "") + `/socket/${relayRoom(secret)}/agent`;
     socket = new WebSocket(url);
+    let heartbeat: ReturnType<typeof setInterval> | undefined, lastPong = Date.now();
+    const current = socket;
+    // After sleep or a network change the socket can look open while the relay has dropped it.
+    // The relay answers "ping" itself; no answer within 45 s means reconnect.
+    socket.addEventListener("open", () => { lastPong = Date.now(); heartbeat = setInterval(() => {
+      if (Date.now() - lastPong > beatMs * 3) { options.onState?.("stale"); current.close(); return; }
+      try { current.send("ping"); } catch {}
+    }, beatMs); });
+    socket.addEventListener("close", () => clearInterval(heartbeat));
     socket.addEventListener("open", () => { connected = true; clearTimeout(readyTimer); resolveReady(); options.onState?.("connected"); stream = new AbortController(); void listen(stream); });
     socket.addEventListener("message", async (event) => {
       try {
+        if (event.data === "pong") { lastPong = Date.now(); return; }
         const message = openRelayFrame(secret, String(event.data));
         if (message.kind === "hello") { await publishSessions(); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || !allowed(message.path, message.method) || typeof message.body !== "string") return;
@@ -114,7 +125,6 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
       } catch { /* Never act on unauthenticated or malformed frames. */ }
     });
     socket.addEventListener("close", () => { options.onState?.("closed"); stream?.abort(); if (running) retry = setTimeout(connect, 1_500); });
-    const current = socket;
     socket.addEventListener("error", () => { options.onState?.("error"); current?.close(); });
   };
   connect();
