@@ -123,7 +123,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (!ctx) return;
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
-    if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc-action ${prompt.action}`, { expandPromptTemplates: true }); return; }
+    if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc ${prompt.action}`, { expandPromptTemplates: true }); return; }
     const content = typeof prompt === "string" ? prompt : [
       // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
       { type: "text" as const, text: prompt.text || "(photo)" },
@@ -229,33 +229,23 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     hub = undefined;
   });
 
-  // Phone quick actions. Hidden from normal use: the phone sends these, but typing them also works.
-  pi.registerCommand("rc-action", {
-    description: "Pix Remote phone action: reload, new, or compact",
-    handler: async (args, next) => {
-      const action = args.trim();
-      if (!["reload", "new", "compact"].includes(action)) { next.ui.notify("Usage: /rc-action reload|new|compact", "warning"); return; }
-      if (!next.isIdle()) { next.ui.notify("Pi is working. Stop it or wait, then try again.", "warning"); return; }
-      if (action === "compact") { next.compact({ onError: error => next.ui.notify(`Compact failed: ${error.message}`, "error") }); return; }
-      const relay = Boolean(relayKey);
-      if (action === "reload") {
-        await next.reload();
-        return;
-      }
-      if (connected) reloadResume.set(nextSession, { relay });
-      const result = await next.newSession();
-      if (result.cancelled) reloadResume.delete(nextSession);
-    },
-  });
-
   pi.registerCommand("rc", {
     description: "Control this Pi session from Pix Remote on your phone",
     getArgumentCompletions: (prefix: string) => {
-      const items = ["off", "status", "pair", "reset", "tailnet", "tailnet pair"].filter((value) => value.startsWith(prefix)).map((value) => ({ value, label: value }));
+      const items = ["off", "status", "pair", "reset", "tailnet", "tailnet pair", "reload", "new", "compact"].filter((value) => value.startsWith(prefix)).map((value) => ({ value, label: value }));
       return items.length ? items : null;
     },
     handler: async (args, next) => {
       const action = args.trim();
+      // Phone quick actions arrive as /rc reload|new|compact; typing them in the terminal also works.
+      if (action === "reload" || action === "new" || action === "compact") {
+        if (!next.isIdle()) { next.ui.notify("Pi is working. Stop it or wait, then try again.", "warning"); return; }
+        if (action === "compact") { next.compact({ onError: error => next.ui.notify(`Compact failed: ${error.message}`, "error") }); return; }
+        if (action === "reload") { await next.reload(); return; }
+        if (connected) reloadResume.set(nextSession, { relay: Boolean(relayKey) });
+        if ((await next.newSession()).cancelled) reloadResume.delete(nextSession);
+        return;
+      }
       if (action === "off") {
         await disconnect();
         next.ui.notify("Remote control is off for this session.", "info");
@@ -266,7 +256,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
         return;
       }
       const tailnet = action === "tailnet" || action === "tailnet pair";
-      if (action && !tailnet && action !== "reset" && action !== "pair") { next.ui.notify("Usage: /rc [off|status|pair|reset|tailnet|tailnet pair]", "warning"); return; }
+      if (action && !tailnet && action !== "reset" && action !== "pair") { next.ui.notify("Usage: /rc [off|status|pair|reset|tailnet|tailnet pair|reload|new|compact]", "warning"); return; }
       const keyPath = tailnet ? options.tokenPath ?? remoteTokenPath : options.relayKeyPath ?? relayKeyPath;
       const showPairing = shouldShowRemotePairing(action, existsSync(keyPath));
       try {
