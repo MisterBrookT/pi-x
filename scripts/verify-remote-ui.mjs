@@ -232,6 +232,36 @@ try {
   assert.equal(await page.locator("#title").textContent(), "Pix UI test");
   assert.equal(await page.getByText("Reconnecting…").count(), 0, "connection status stays out of the title");
   await page.screenshot({ path: new URL("reconnecting.png", output).pathname });
+  // Scrolling. Regressions: the chat jumped while Pi wrote (pictures re-loading on each update), and
+  // reading earlier messages was interrupted. Pi writing follows the bottom; the reader scrolling up
+  // stops following and shows ↓; ↓ or scrolling back to the bottom resumes it.
+  const chat = page.locator("#chat");
+  for (let i = 0; i < 30; i++) messages.push({ id: "long" + i, role: "assistant", text: "Paragraph " + i + " " + "words ".repeat(40), timestamp: 100 + i });
+  streaming = "Writing"; await publish();
+  await page.locator("#messages").getByText("Writing").waitFor();
+  const gap = () => chat.evaluate(c => c.scrollHeight - c.scrollTop - c.clientHeight);
+  await page.waitForFunction(() => { const c = document.querySelector("#chat"); return c.scrollHeight - c.scrollTop - c.clientHeight < 4; });
+  for (let i = 0; i < 4; i++) { streaming += " more text ".repeat(30); await publish(); await page.waitForTimeout(80); }
+  assert.ok(await gap() < 4, "follows the bottom while Pi writes");
+  assert.equal(await page.locator("#toBottom").isVisible(), false);
+  await page.mouse.move(195, 400);
+  await page.mouse.wheel(0, -900);
+  await page.waitForTimeout(150);
+  const readTop = await chat.evaluate(c => c.scrollTop);
+  await page.locator("#toBottom").waitFor();
+  const anchorText = await page.evaluate(() => { const c = document.querySelector("#chat"), top = c.getBoundingClientRect().top; const el = [...document.querySelectorAll("#messages > [data-key]")].find(e => e.getBoundingClientRect().bottom > top + 1); return { key: el.dataset.key, y: el.getBoundingClientRect().top }; });
+  for (let i = 0; i < 4; i++) { streaming += " still writing ".repeat(30); await publish(); await page.waitForTimeout(80); }
+  messages.push({ id: "late", role: "assistant", text: "A late message", timestamp: 999 }); await publish(); await page.waitForTimeout(150);
+  const after = await page.evaluate(key => document.querySelector(`#messages > [data-key="${key}"]`).getBoundingClientRect().top, anchorText.key);
+  assert.ok(Math.abs(after - anchorText.y) < 2, `reading position stays still while Pi writes (moved ${after - anchorText.y}px)`);
+  assert.ok(Math.abs(await chat.evaluate(c => c.scrollTop) - readTop) < 2);
+  await page.screenshot({ path: new URL("scroll-up.png", output).pathname });
+  await page.locator("#toBottom").click();
+  await page.waitForFunction(() => { const c = document.querySelector("#chat"); return c.scrollHeight - c.scrollTop - c.clientHeight < 4; });
+  await page.locator("#toBottom").waitFor({ state: "hidden" });
+  streaming += " resumed ".repeat(30); await publish(); await page.waitForTimeout(150);
+  assert.ok(await gap() < 4, "↓ resumes following");
+  streaming = ""; messages.splice(-31); await publish();
   assert.deepEqual(errors, []);
   await writeFile(new URL("result.json", output), JSON.stringify({ pass: true, errors }, null, 2));
   await writeFile(new URL('report.html', output), `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pix Remote mobile UI acceptance</title><style>body{font:16px/1.5 system-ui;max-width:850px;margin:auto;padding:24px;color:#222}img{display:block;width:min(390px,100%);height:auto;border:1px solid #ddd;border-radius:12px}section{margin:24px 0 42px}</style><h1>Pix Remote · iPhone-sized browser</h1><p><b>Pass.</b> Disposable local fixture in Chromium (not physical iPhone). No private transcript or pairing key.</p><section><h2>Readable context</h2><p>Markdown, Mac-only link, image, one collapsed tool run, and a structured failed background job.</p><img src="chat.png" alt="Phone-sized chat with Markdown, image, tool run and background job"></section><section><h2>Dark appearance</h2><img src="dark.png" alt="Readable Markdown and context in dark appearance"></section><section><h2>Session drawer</h2><p>Button and horizontal drag open the list; reverse drag closes it. Vertical scrolling does not.</p><img src="sessions.png" alt="Session drawer"></section><section><h2>Keyboard and recovery</h2><p>Return inserts a line break; Send submits once. A failed send retains the draft, and a new draft survives an in-flight send. The connection indicator announces reconnecting.</p><img src="reconnecting.png" alt="Chat with reconnect indicator"></section><p>Checks: accessible controls, image decoding/inspect/send, prompt queue, expansion persistence, zero page errors. Reproduce: <code>npm run test:remote-ui</code>.</p></html>`);
