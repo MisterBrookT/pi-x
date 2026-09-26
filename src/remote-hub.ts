@@ -24,6 +24,8 @@ export interface RemoteSnapshot {
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
+  /** Set while Pi is blocked on a question for the user (question tool). */
+  asking?: boolean;
   /** Context window use, and the latest Pix todo plan. */
   context?: { tokens: number | null; window: number; percent: number | null };
   todos?: { id: string; text: string; status: string; parentId?: string }[];
@@ -112,17 +114,13 @@ export interface RemoteHub {
 /** Start the hub on loopback. Rejects with EADDRINUSE when another session already hosts it. */
 export async function startRemoteHub(options: { token: string; port?: number; host?: string; push?: PushSender }): Promise<RemoteHub> {
   const { token, push } = options;
-  // Notify the phone when a session finishes a turn or a background job ends. Only the session
+  // Notify the phone when a session finishes a turn, i.e. Pi is waiting for Brook. Background jobs
+  // alone do not notify; when one ends Pi resumes, and that turn's end notifies. Only the session
   // name and outcome are sent, never message text: the push service can read the title.
   const notifyChanges = (old: Registered | undefined, next: Registered) => {
     if (!push || !old) return;
+    if (next.asking && !old.asking) void push.notify({ title: next.name, body: "Pi is asking you something", session: next.id, tag: `turn-${next.id}` });
     if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` });
-    const before = new Map(old.messages.filter(m => m.background).map(m => [m.background!.id, m.background!.state]));
-    for (const m of next.messages) {
-      const job = m.background;
-      if (!job || before.get(job.id) === job.state || !before.has(job.id) && !old.messages.length) continue;
-      if (job.state !== "running") void push.notify({ title: next.name, body: `Job ${job.id} ${job.state}`, session: next.id, tag: `job-${next.id}-${job.id}` });
-    }
   };
   const sessions = new Map<string, Registered>();
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();

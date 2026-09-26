@@ -52,7 +52,7 @@ test("expired phone subscriptions are dropped", async t => {
   assert.equal(await sender.count(), 0);
 });
 
-test("the hub notifies when a turn ends or a background job finishes, without message text", async t => {
+test("the hub notifies only when a turn ends (Pi waits for you), not on background jobs, without message text", async t => {
   const notes = [];
   const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async m => { notes.push(m); } };
   const token = "t".repeat(40);
@@ -65,7 +65,9 @@ test("the hub notifies when a turn ends or a background job finishes, without me
   await put({ busy: true, messages: [{ role: "user", text: "secret plan" }, job("failed")] });
   await put({ busy: false, messages: [{ role: "user", text: "secret plan" }, job("failed"), { role: "assistant", text: "secret answer" }] });
   await put({ busy: false, messages: [{ role: "user", text: "secret plan" }, job("failed"), { role: "assistant", text: "secret answer" }] });
-  assert.deepEqual(notes.map(n => n.body), ["Job 3 failed", "Pi finished"]);
+  await put({ busy: true, asking: true, messages: [] });
+  await put({ busy: true, asking: true, messages: [] });
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished", "Pi is asking you something"]);
   assert.ok(notes.every(n => n.session === "s1" && n.title === "workspace"));
   assert.ok(!JSON.stringify(notes).includes("secret"), "no message text in notifications");
 });
