@@ -113,6 +113,16 @@ try {
   modelState.model = { id: "b/smart", name: "Smart One" }; modelState.thinking = "high"; await publish();
   await page.waitForFunction(() => document.querySelector("#modelChip").textContent === "Smart One · high");
   modelState.model = { id: "a/fast", name: "Fast One" }; modelState.thinking = "low"; await publish();
+  // Regression: reloading the Pi that hosts the hub drops every session for a moment; the phone
+  // then jumped to another session. It must stay on the one being read and pick it up again.
+  await fetch(`${base}/agent/other2`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "other2", name: "Other session", named: true, cwd: "/w", busy: false, messages: [] }) });
+  await fetch(`${base}/agent/fixture`, { method: "DELETE", headers: auth });
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator("#title").textContent(), "Pix UI test", "stays on the reloading session");
+  await publish();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator("#title").textContent(), "Pix UI test");
+  await fetch(`${base}/agent/other2`, { method: "DELETE", headers: auth });
   // Quick actions: a menu next to +, disabled while Pi works, New chat asks first, typed /reload works too.
   await page.getByRole("button", { name: "Quick actions" }).click();
   const menu = page.getByRole("menu", { name: "Quick actions" });

@@ -122,7 +122,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
   };
-  const publicSession = (s: Registered) => ({ id: s.id, name: s.name, named: s.named, cwd: s.cwd, busy: s.busy, model: s.model, thinking: s.thinking, models: s.models, thinkingLevels: s.thinkingLevels, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
+  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
   const drop = (id: string) => {
     const session = sessions.get(id);
     if (!session) return;
@@ -218,7 +218,9 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
         if (req.method === "PUT" && !agentMatch[2]) {
           const snapshot = (await body(req)) as RemoteSnapshot;
           const old = sessions.get(id);
+          const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
           const next: Registered = {
+            ...extra,
             id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy),
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
