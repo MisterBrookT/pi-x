@@ -10,6 +10,7 @@ import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort,
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { createPushSender } from "../src/remote-push.ts";
 import { backgroundState } from "../src/background-state.ts";
+import { runningHelpers } from "../src/remote-helpers.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../src/remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
@@ -124,7 +125,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {

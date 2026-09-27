@@ -1,0 +1,1 @@
+{"runId":"run-a","sessionId":"/parent/session.jsonl","state":"running","toolCount":22,"lastActivityAt":1000,"currentStep":0,"steps":[{"agent":"worker","sessionName":"worker: Fix the relay reconnect","status":"running","lastActivityAt":9000,"toolCount":22}]}

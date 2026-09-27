@@ -17,6 +17,7 @@ export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
 export const remoteTokenPath = join(homedir(), ".pi/agent/pix-remote/token");
 
+import type { RemoteHelper } from "./remote-helpers.ts";
 export interface RemoteSnapshot {
   id: string;
   name: string;
@@ -34,6 +35,8 @@ export interface RemoteSnapshot {
   /** Context window use, and the latest Pix todo plan. */
   context?: { tokens: number | null; window: number; percent: number | null };
   todos?: { id: string; text: string; status: string; parentId?: string }[];
+  /** Running pi-subagents helpers launched by this session. */
+  helpers?: RemoteHelper[];
   /** Current model and thinking level, and the choices the phone may switch between. */
   model?: { id: string; name: string };
   thinking?: string;

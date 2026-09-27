@@ -49,7 +49,7 @@ let streaming = "";
 const modelState = { model: { id: "a/fast", name: "Fast One" }, thinking: "low", todos: [{ id: "1", text: "Read the code", status: "done" }, { id: "2", text: "Fix the relay link", status: "active" }, { id: "3", text: "Write tests", status: "pending" }] };
 const publish = async () => {
   const response = await fetch(`${base}/agent/fixture`, { method: "PUT", headers: auth,
-    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: demo, busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], context: { tokens: 150000, window: 200000, percent: 75 }, todos: modelState.todos, streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text, { cwd: demo, home: fixtureHome, hubRoot: join(fixtureHome, "hub") }) })) }) });
+    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: demo, busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], context: { tokens: 150000, window: 200000, percent: 75 }, todos: modelState.todos, helpers: [{ id: "h1", agent: "worker", task: "Fix the relay link", tools: 22, activityAt: 1, idleMs: 8000, state: "running" }], streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text, { cwd: demo, home: fixtureHome, hubRoot: join(fixtureHome, "hub") }) })) }) });
   assert.equal(response.status, 200);
 };
 let browser;
@@ -129,6 +129,15 @@ try {
   assert.equal(await page.locator("#todoList li").count(), 3);
   await page.screenshot({ path: new URL("todo.png", output).pathname });
   await page.locator("#todoBar summary").click();
+  // Running helper line above the todo bar, and the Shiba avatar on the first assistant bubble only.
+  assert.match(await page.locator("#helpers .helper summary").textContent(), /worker· 22 tools · active 8s ago/);
+  await page.locator("#helpers .helper summary").click();
+  assert.equal(await page.locator("#helpers .helper p").textContent(), "Fix the relay link");
+  await page.locator("#helpers .helper summary").click();
+  assert.ok(await page.locator("#messages .msg.user .av").count() === 0, "no avatar on user messages");
+  assert.ok(await page.locator("#messages .av").count() >= 1);
+  const avatarBox = await page.locator("#messages .av").first().boundingBox();
+  assert.ok(Math.round(avatarBox.width) === 30, "30px avatar");
   // Model settings: the header chip shows the model and thinking level and opens a picker.
   const chip = page.getByRole("button", { name: "Model" });
   assert.equal(await chip.textContent(), "Fast One · low");
