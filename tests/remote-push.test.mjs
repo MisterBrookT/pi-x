@@ -84,6 +84,24 @@ test("no notification when Pi goes idle only to wait for its own background jobs
   assert.equal(list.sessions?.[0]?.waiting ?? list[0]?.waiting, 0);
 });
 
+test("a waiting question notifies once and can be answered from the phone", async t => {
+  const notes = [];
+  const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async m => { notes.push(m); } };
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push }); t.after(() => hub.close());
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const put = body => fetch(`http://127.0.0.1:${hub.port}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "s1", name: "w", cwd: "/", messages: [], busy: true, ...body }) });
+  const act = body => fetch(`http://127.0.0.1:${hub.port}/api/sessions/s1/action`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+  await put({});
+  assert.equal((await act({ action: "answer", value: "Yes" })).status, 400, "no question waiting");
+  const q = { id: "call_1", question: "Allow?", options: [{ label: "Yes" }, { label: "No" }] };
+  await put({ question: q }); await put({ question: q });
+  assert.deepEqual(notes.map(n => n.body), ["Pi has a question"], "one notification per question, while busy");
+  assert.equal((await act({ action: "answer", value: "Yes" })).status, 202);
+  const next = await (await fetch(`http://127.0.0.1:${hub.port}/agent/s1/next`, { headers: auth })).json();
+  assert.deepEqual(next.prompts, [{ action: "answer", value: "Yes" }]);
+});
+
 test("no notification to a phone that has Pix on screen; it resumes once the phone leaves", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-push-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const sent = [];

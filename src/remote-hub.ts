@@ -23,6 +23,8 @@ export interface RemoteSnapshot {
   named?: boolean;
   cwd: string;
   busy: boolean;
+  /** A question tool call waiting for Brook; answerable from the phone. */
+  question?: RemoteQuestion;
   /** Background jobs still running while the agent is idle: Pi will resume on its own. */
   waiting?: number;
   messages: RemoteMessage[];
@@ -42,7 +44,8 @@ export interface RemotePrompt { text: string; images: { mimeType: string; data: 
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
-export interface RemoteAction { action: RemoteActionName | "model" | "thinking"; value?: string }
+export interface RemoteAction { action: RemoteActionName | "model" | "thinking" | "answer"; value?: string }
+export interface RemoteQuestion { id: string; question: string; options: { label: string; description?: string }[] }
 
 interface Registered extends RemoteSnapshot {
   seenAt: number;
@@ -121,6 +124,12 @@ export interface RemoteHubOptions {
   home?: string; sessionsDir?: string; memoryRoot?: string;
 }
 
+function validQuestion(q: any): RemoteQuestion | undefined {
+  if (!q || typeof q.id !== "string" || typeof q.question !== "string" || !Array.isArray(q.options)) return undefined;
+  return { id: q.id.slice(0, 200), question: q.question.slice(0, 4000),
+    options: q.options.slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) };
+}
+
 export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteHub> {
   const { token, push } = options;
   // Notify the phone when a session finishes a turn, i.e. Pi is waiting for Brook. Background jobs
@@ -130,6 +139,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (!push || !old) return;
     // Like chat apps: no notification on a phone that has Pix open on screen right now.
     // Idle but background work still running: Pi resumes by itself, so Brook is not needed yet.
+    const hidden = (endpoint: string) => (onScreen.get(endpoint) ?? 0) > Date.now();
+    // Pi is blocked on a question: Brook is needed now, even though the turn is still running.
+    if (next.question && next.question.id !== old.question?.id) void push.notify({ title: next.name, body: "Pi has a question", session: next.id, tag: `ask-${next.id}` }, hidden);
     if (old.busy && !next.busy && !next.waiting) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` }, endpoint => (onScreen.get(endpoint) ?? 0) > Date.now());
   };
   // Phone endpoint -> time until which it counts as looking at Pix (refreshed every 10 s while visible).
@@ -235,11 +247,13 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         }
         if (req.method === "POST" && sessionMatch[2] === "/action") {
           const input = await body(req), action = input.action, value = typeof input.value === "string" ? input.value : undefined;
-          if (!["reload", "new", "compact", "close", "delete", "model", "thinking"].includes(action)) return send(res, 400, { error: "unknown action" });
+          if (!["reload", "new", "compact", "close", "delete", "model", "thinking", "answer"].includes(action)) return send(res, 400, { error: "unknown action" });
           // Only offer what this session listed, so the phone cannot pick arbitrary models.
+          if (action === "answer" && (!session.question || !value?.trim())) return send(res, 400, { error: "no question is waiting" });
           if (action === "model" && !session.models?.some(m => m.id === value)) return send(res, 400, { error: "unknown model" });
           if (action === "thinking" && !session.thinkingLevels?.includes(value ?? "")) return send(res, 400, { error: "unknown thinking level" });
-          if (session.busy) return send(res, 409, { error: "Pi is working. Stop it or wait, then try again." });
+          // A question arrives mid-turn, so answering is the one action allowed while Pi works.
+          if (session.busy && action !== "answer") return send(res, 409, { error: "Pi is working. Stop it or wait, then try again." });
           session.prompts.push(value ? { action, value } : { action });
           if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
           return send(res, 202, { queued: true });
@@ -280,7 +294,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
           const next: Registered = {
             ...extra,
-            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), waiting: Math.max(0, Number(snapshot.waiting) || 0),
+            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0),
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,

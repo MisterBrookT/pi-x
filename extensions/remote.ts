@@ -9,6 +9,7 @@ import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort,
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { createPushSender } from "../src/remote-push.ts";
 import { backgroundState } from "../src/background-state.ts";
+import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "../src/remote-mac.ts";
@@ -57,6 +58,10 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let hub: RemoteHub | undefined;
   let connected = false;
   let busy = false;
+  let pendingQuestion: { id: string; question: string; options: { label: string; description?: string }[] } | undefined;
+  pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) }; schedulePush(); } });
+  pi.events.on(QUESTION_CLOSE, (data: any) => { if (pendingQuestion && data?.id === pendingQuestion.id) { pendingQuestion = undefined; schedulePush(); } });
+  const answerQuestion = (answer: string) => { if (!pendingQuestion || !answer.trim()) return false; pi.events.emit(QUESTION_ANSWER, { id: pendingQuestion.id, answer }); return true; };
   let streaming = "";
   let sessionId = "";
   let polling: AbortController | undefined;
@@ -109,7 +114,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
   };
 
   const contextUsage = () => {
@@ -183,6 +188,12 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (!ctx) return;
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
+    if (typeof prompt === "object" && "action" in prompt && prompt.action === "answer") { answerQuestion(prompt.value ?? ""); return; }
+    // A typed phone message while a question waits is the answer (the terminal picker cannot be tapped remotely).
+    if (pendingQuestion && (typeof prompt === "string" || (!("action" in prompt) && !("abort" in prompt) && !prompt.images?.length))) {
+      const text = typeof prompt === "string" ? prompt : (prompt as RemotePrompt).text;
+      if (answerQuestion(text)) return;
+    }
     if (typeof prompt === "object" && "action" in prompt && prompt.action === "model") { void switchModel(prompt.value ?? ""); return; }
     if (typeof prompt === "object" && "action" in prompt && prompt.action === "thinking") {
       if (ctx.isIdle() && modelChoices().thinkingLevels?.includes(prompt.value ?? "")) pi.setThinkingLevel(prompt.value as any);

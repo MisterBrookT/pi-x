@@ -40,6 +40,11 @@ const QuestionParams = Type.Object({
 	options: Type.Array(OptionSchema, { description: "Options for the user to choose from" }),
 });
 
+/** Shared-bus events so Pix Remote can show and answer a pending question from the phone. */
+export const QUESTION_OPEN = "pix:question:open";
+export const QUESTION_CLOSE = "pix:question:close";
+export const QUESTION_ANSWER = "pix:question:answer";
+
 export default function question(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "question",
@@ -69,8 +74,22 @@ export default function question(pi: ExtensionAPI) {
 
 			const allOptions: DisplayOption[] = [...params.options, { label: "Type something.", isOther: true }];
 
-			const result = await ctx.ui.custom<{ answer: string; wasCustom: boolean; index?: number } | null>(
+			// Phone side (Pix Remote): the same question can be answered remotely; first answer wins.
+			let finish: ((value: { answer: string; wasCustom: boolean; index?: number } | null) => void) | undefined;
+			let remoteAnswer: { answer: string; wasCustom: boolean; index?: number } | undefined;
+			const offAnswer = pi.events.on(QUESTION_ANSWER, (data: unknown) => {
+				const a = data as { id?: string; answer?: string };
+				if (a?.id !== _toolCallId || typeof a.answer !== "string" || !a.answer.trim()) return;
+				const i = params.options.findIndex((o) => o.label === a.answer);
+				remoteAnswer = i >= 0 ? { answer: a.answer, wasCustom: false, index: i + 1 } : { answer: a.answer.trim(), wasCustom: true };
+				finish?.(remoteAnswer);
+			});
+			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, options: params.options });
+
+			const result = remoteAnswer ?? await ctx.ui.custom<{ answer: string; wasCustom: boolean; index?: number } | null>(
 				(tui, theme, _kb, done) => {
+					finish = done;
+					if (remoteAnswer) queueMicrotask(() => done(remoteAnswer!));
 					let optionIndex = 0;
 					let editMode = false;
 					let cachedLines: string[] | undefined;
@@ -216,6 +235,8 @@ export default function question(pi: ExtensionAPI) {
 				},
 			);
 
+			offAnswer();
+			pi.events.emit(QUESTION_CLOSE, { id: _toolCallId });
 			// Build simple options list for details
 			const simpleOptions = params.options.map((o) => o.label);
 
