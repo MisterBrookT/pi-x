@@ -20,6 +20,14 @@ final class RemoteSafariTests: XCTestCase {
         safari.screenshot().image.addAttachment(named: "swipe-open")
         web.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.72))
             .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.72)))
+        // Mirror gesture: a leftward swipe opens Files from the right at the session folder.
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.64))
+            .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.64)))
+        XCTAssertTrue(safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "notes.txt")).firstMatch.waitForExistence(timeout: 5), "left swipe should open Files")
+        safari.screenshot().image.addAttachment(named: "files-open")
+        web.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.72))
+            .press(forDuration: 0.05, thenDragTo: web.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.72)))
+        XCTAssertTrue(safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "notes.txt")).firstMatch.waitForNonExistence(timeout: 5) || !safari.buttons.matching(NSPredicate(format: "label CONTAINS %@", "notes.txt")).firstMatch.isHittable, "swipe back closes Files")
         let sessions = safari.buttons["Sessions"]
         XCTAssertTrue(sessions.exists, safari.debugDescription)
         sessions.tap()

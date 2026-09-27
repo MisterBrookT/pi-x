@@ -121,10 +121,10 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   const snapshot = (branch: readonly any[]): RemoteSnapshot | undefined => {
     if (!ctx) return;
     const manager = ctx.sessionManager;
-    const messages = remoteMessages(branch).slice(-messageLimit);
+    const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {

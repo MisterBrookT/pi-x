@@ -1,12 +1,19 @@
 // Local-only deterministic Pi-shaped session for the Safari/XCTest UI journey.
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { startRemoteHub } from "../src/remote-hub.ts";
 import { imageRef } from "../src/remote-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 
 const token = "simulator-demo-token-not-production";
 const port = Number(process.env.PIX_TEST_FIXTURE_PORT || 18787);
-const hub = await startRemoteHub({ token, port });
+// A disposable home with one session folder, so the Files panel has something to list.
+const home = await realpath(await mkdtemp(join(tmpdir(), "pix-remote-sim-home-")));
+const cwd = join(home, "demo");
+await mkdir(cwd, { recursive: true });
+await writeFile(join(cwd, "notes.txt"), "Simulator file");
+const hub = await startRemoteHub({ token, port, home, memoryRoot: join(home, "hub") });
 const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 const base = `http://127.0.0.1:${port}`;
 const id = "simulator-demo";
@@ -20,7 +27,7 @@ const messages = [
       { id: "t2", name: "read", input: '{"path":"remote-image-test.png"}', output: "Read image file [image/png]", images: [pictureRef] }] },
 ];
 const publish = () => fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth,
-  body: JSON.stringify({ id, name: "Pix simulator test", cwd: "/workspace/demo", busy: false, messages: messages.map((m) => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
+  body: JSON.stringify({ id, name: "Pix simulator test", cwd, busy: false, messages: messages.map((m) => ({ ...m, html: renderRemoteMarkdown(m.text, { cwd, home }) })) }) });
 await publish();
 await fetch(`${base}/agent/${id}/media/${pictureRef.id}`, { method: "PUT", headers: auth, body: JSON.stringify({ mimeType: picture.mimeType, data: picture.data }) });
 const timer = setInterval(() => void publish(), 8_000);

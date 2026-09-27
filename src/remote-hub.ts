@@ -10,6 +10,7 @@ import { validSubscription, type PushSender } from "./remote-push.ts";
 import { remoteServiceWorker } from "./remote-sw.ts";
 import { launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
+import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readRemoteChunk } from "./remote-files.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 
 export const remoteHost = "127.0.0.1";
@@ -233,6 +234,29 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (!sessions.has(id)) return send(res, 404, { error: "session is no longer connected" });
         const media = mediaBySession.get(id)?.get(mediaGet[2]);
         return send(res, media ? 200 : 404, media ?? { error: "image unavailable" });
+      }
+      // Mac files named in chat or browsed in the Files panel; remote-files.ts checks every path.
+      const fileMatch = path.match(/^\/api\/sessions\/([^/]+)\/(files|file|file\/preview)$/);
+      if (req.method === "GET" && fileMatch) {
+        const session = sessions.get(decodeURIComponent(fileMatch[1]));
+        if (!session) return send(res, 404, { error: "session is no longer connected" });
+        const roots = { home: options.home, hubRoot: options.memoryRoot };
+        const target = url.searchParams.get("path");
+        if (fileMatch[2] === "files") {
+          const list = listRemoteFiles(target || (checkRemotePath(session.cwd, roots)?.dir ? session.cwd : ""), roots);
+          return list ? send(res, 200, list) : send(res, 404, { error: "folder unavailable" });
+        }
+        if (fileMatch[2] === "file") {
+          const { status, ...chunk } = readRemoteChunk(target, Number(url.searchParams.get("offset")) || 0, roots);
+          return send(res, status, chunk);
+        }
+        const file = checkRemotePath(target, roots);
+        if (file && !file.dir && file.kind === "markdown" && file.size <= 256_000) return send(res, 200, { path: file.path, name: file.name, html: renderRemoteMarkdown(await readFile(file.path, "utf8"), { home: options.home, hubRoot: options.memoryRoot, dirs: [dirname(file.path)] }) });
+        if (!file || file.dir || file.kind !== "word" || file.size > previewSourceLimit) return send(res, 404, { error: "no preview for this file" });
+        const html = await convertDocument(file.path).catch(() => undefined);
+        if (html === undefined) return send(res, 415, { error: "This document cannot be previewed" });
+        if (Buffer.byteLength(html) > 1_000_000) return send(res, 413, { error: "Preview is too large; download the original" });
+        return send(res, 200, { path: file.path, name: file.name, html });
       }
       const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)(\/prompt|\/abort|\/action)?$/);
       if (sessionMatch) {

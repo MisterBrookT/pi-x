@@ -1,6 +1,7 @@
 // Converts Pi transcript messages into the compact shape the remote-control web app renders.
 import { createHash } from "node:crypto";
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
+import type { MentionContext } from "./remote-files.ts";
 
 export interface RemoteImage { id: string; mimeType: string }
 export interface RemoteMedia extends RemoteImage { data: string }
@@ -82,7 +83,7 @@ function stringify(value: unknown): string {
 }
 
 /** Build remote messages from Pi agent messages; tool results attach to the assistant call that produced them. */
-export function remoteMessages(messages: readonly any[]): RemoteMessage[] {
+export function remoteMessages(messages: readonly any[], files?: MentionContext): RemoteMessage[] {
   const result: RemoteMessage[] = [];
   const tools = new Map<string, RemoteTool>();
   messages.forEach((message, index) => {
@@ -91,7 +92,7 @@ export function remoteMessages(messages: readonly any[]): RemoteMessage[] {
     if (message?.role === "user") {
       const text = textOf(message.content);
       const images = imagesOf(message.content);
-      if (text || images.length) result.push({ id, role: "user", text: clip(text), html: renderRemoteMarkdown(clip(text)), images: images.length ? images : undefined, timestamp });
+      if (text || images.length) result.push({ id, role: "user", text: clip(text), html: renderRemoteMarkdown(clip(text), files), images: images.length ? images : undefined, timestamp });
     } else if (message?.role === "assistant") {
       const parts = Array.isArray(message.content) ? message.content : [];
       const calls: RemoteTool[] = parts
@@ -100,7 +101,7 @@ export function remoteMessages(messages: readonly any[]): RemoteMessage[] {
       for (const call of calls) tools.set(call.id, call);
       const text = textOf(parts);
       const error = message.stopReason === "error" && message.errorMessage ? `Error: ${message.errorMessage}` : "";
-      if (text || calls.length || error) result.push({ id, role: "assistant", text: clip(text || error), html: renderRemoteMarkdown(clip(text || error)), tools: calls.length ? calls : undefined, timestamp });
+      if (text || calls.length || error) result.push({ id, role: "assistant", text: clip(text || error), html: renderRemoteMarkdown(clip(text || error), files), tools: calls.length ? calls : undefined, timestamp });
     } else if (message?.role === "toolResult") {
       const call = tools.get(String(message.toolCallId));
       if (call) {

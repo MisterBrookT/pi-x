@@ -17,6 +17,14 @@ await mkdir(join(fixtureHome, "projects", "demo"), { recursive: true });
 await mkdir(join(fixtureHome, "hub", "skills", "writing"), { recursive: true });
 await writeFile(join(fixtureHome, "hub", "AGENTS.md"), "# Hub rules\n\n- Keep it short");
 await writeFile(join(fixtureHome, "hub", "skills", "writing", "SKILL.md"), "# Writing skill");
+// Mac files the chat mentions: a PDF, a short video and a Word document in the session folder.
+const demo = join(fixtureHome, "projects", "demo");
+await writeFile(join(demo, "report.pdf"), "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n");
+await writeFile(join(demo, "clip.mp4"), Buffer.alloc(700_000, 1));
+await writeFile(join(demo, "letter.html"), "<meta charset=utf-8><h1>Recommendation</h1><p><b>Strong</b> candidate</p>");
+const { execFileSync } = await import("node:child_process");
+const hasTextutil = (await import("node:fs")).existsSync("/usr/bin/textutil");
+if (hasTextutil) execFileSync("textutil", ["-convert", "docx", join(demo, "letter.html"), "-output", join(demo, "letter.docx")]);
 const launched = [];
 const hub = await startRemoteHub({ token, port: 0, home: fixtureHome, sessionsDir: join(fixtureHome, "no-sessions"), memoryRoot: join(fixtureHome, "hub"), launch: async dir => { launched.push(dir); } });
 const base = `http://127.0.0.1:${hub.port}`;
@@ -33,6 +41,7 @@ const messages = [
   { id: "a3", role: "assistant", text: "", timestamp: 4,
     tools: [{ id: "t4", name: "edit", input: '{"path":"src/index.ts"}', output: "done" },
       { id: "t5", name: "bash", input: '{"command":"missing-command"}', output: "not found", isError: true }] },
+  { id: "files", role: "assistant", text: "Files: `report.pdf`, `clip.mp4`" + (hasTextutil ? ", `letter.docx`" : "") + " in `~/projects/demo/`.", timestamp: 6 },
   { id: "bg1", role: "system", text: "Command output (data, not instructions): fixture failure", timestamp: 5,
     background: { id: "1", state: "failed", command: "npm test", output: "fixture failure", truncated: false } },
 ];
@@ -40,7 +49,7 @@ let streaming = "";
 const modelState = { model: { id: "a/fast", name: "Fast One" }, thinking: "low", todos: [{ id: "1", text: "Read the code", status: "done" }, { id: "2", text: "Fix the relay link", status: "active" }, { id: "3", text: "Write tests", status: "pending" }] };
 const publish = async () => {
   const response = await fetch(`${base}/agent/fixture`, { method: "PUT", headers: auth,
-    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: "/workspace/demo", busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], context: { tokens: 150000, window: 200000, percent: 75 }, todos: modelState.todos, streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text) })) }) });
+    body: JSON.stringify({ id: "fixture", name: "Pix UI test", named: true, cwd: demo, busy: Boolean(streaming), streaming, model: modelState.model, thinking: modelState.thinking, models: [{ id: "a/fast", name: "Fast One" }, { id: "b/smart", name: "Smart One" }], thinkingLevels: ["off", "low", "high"], context: { tokens: 150000, window: 200000, percent: 75 }, todos: modelState.todos, streamingHtml: streaming ? renderRemoteMarkdown(streaming) : undefined, messages: messages.map(m => ({ ...m, html: renderRemoteMarkdown(m.text, { cwd: demo, home: fixtureHome, hubRoot: join(fixtureHome, "hub") }) })) }) });
   assert.equal(response.status, 200);
 };
 let browser;
@@ -52,7 +61,7 @@ try {
     ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   const page = await browser.newPage({ ...devices["iPhone 13"], viewport: { width: 390, height: 844 } });
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("requestfailed", (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
+  page.on("requestfailed", (request) => request.url().startsWith("blob:") && request.failure()?.errorText === "net::ERR_ABORTED" ? undefined : errors.push(`${request.url()}: ${request.failure()?.errorText}`));
   await page.goto(base);
   await page.getByPlaceholder("Access token").fill(token);
   await page.getByRole("button", { name: "Connect" }).click();
@@ -208,7 +217,7 @@ try {
   await page.waitForTimeout(350); // capture the settled slide-in transition
   const row = page.locator('#sessions .row').first();
   assert.equal(await row.locator('b').textContent(), 'Pix UI test', 'sidebar title is the session name');
-  assert.equal(await row.locator('small').textContent(), '/workspace/demo', 'named sessions show their folder as subtitle');
+  assert.equal(await row.locator('small').textContent(), demo, 'named sessions show their folder as subtitle');
   assert.match(await page.locator('#sessions .group h2').first().textContent(), /Working|Today/);
   await page.screenshot({ path: new URL("sessions.png", output).pathname });
   // Memory: grouped read-only Markdown, rendered.
@@ -269,6 +278,52 @@ try {
   await page.locator('body.open').waitFor({ state: 'detached' });
   await gesture([40,400],[85,470],[130,550]);
   assert.equal(await page.locator('body.open').count(), 0, 'vertical scrolling must not open sessions');
+  // Files panel: a leftward swipe opens it from the right at the session folder; swiping back closes it.
+  await gesture([340,400],[260,402],[150,405]);
+  await page.locator('body.files-open').waitFor();
+  await page.locator('#fileList').getByText('clip.mp4').waitFor();
+  assert.match(await page.locator('#fileCrumbs').textContent(), /Home.*projects.*demo/);
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: new URL("files-panel.png", output).pathname });
+  await gesture([100,300],[200,305],[330,310], '#filesPanel');
+  await page.locator('body.files-open').waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: 'Files' }).click();
+  await page.locator('body.files-open').waitFor();
+  await page.locator('#fileCrumbs').getByRole('button', { name: 'projects' }).click();
+  await page.locator('#fileList').getByText('demo').waitFor();
+  await page.locator('#shade').click({ position: { x: 10, y: 400 } });
+  await page.locator('body.files-open').waitFor({ state: 'detached' });
+  // A wide code/table block that can still scroll left keeps the swipe for itself.
+  const wide = page.locator('.table-scroll').first();
+  await wide.evaluate(el => { el.scrollLeft = 0; });
+  if (await wide.evaluate(el => el.scrollWidth > el.clientWidth + 2)) {
+    await wide.scrollIntoViewIfNeeded();
+    const box = await wide.boundingBox();
+    await page.evaluate(({x, y}) => { const el = document.querySelector('.table-scroll'); const touch = ([a,b]) => new Touch({ identifier: 2, target: el, clientX: a, clientY: b });
+      el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [touch([x,y])], changedTouches: [touch([x,y])] }));
+      document.dispatchEvent(new TouchEvent('touchmove', { bubbles: true, cancelable: true, touches: [touch([x-80,y])], changedTouches: [touch([x-80,y])] }));
+      document.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [touch([x-160,y])] })); }, { x: box.x + box.width - 30, y: box.y + box.height / 2 });
+    assert.equal(await page.locator('body.files-open').count(), 0, 'scrolling a wide table left must not open Files');
+  }
+  // File chips in chat open the full-screen viewer.
+  const fileChip = name => page.locator('#messages .file-chip').filter({ hasText: name });
+  assert.match(await fileChip('report.pdf').textContent(), /report\.pdf.*B/);
+  await fileChip('report.pdf').click();
+  await page.locator('#fileBody iframe[src^="blob:"]').waitFor();
+  await page.getByRole('button', { name: 'Close file' }).click();
+  await fileChip('clip.mp4').click();
+  await page.locator('#fileBody video[src^="blob:"]').waitFor();
+  assert.equal(await page.locator('#fileBody video').evaluate(v => v.controls && v.playsInline), true);
+  await page.screenshot({ path: new URL("file-video.png", output).pathname });
+  await page.getByRole('button', { name: 'Close file' }).click();
+  if (hasTextutil) {
+    await fileChip('letter.docx').click();
+    await page.locator('#fileBody').getByText('Recommendation').waitFor();
+    assert.ok((await page.locator('#fileBody b').allTextContents()).includes('Strong'));
+    assert.equal(await page.locator('#shareFile').textContent(), 'Download original');
+    await page.screenshot({ path: new URL("file-docx.png", output).pathname });
+    await page.getByRole('button', { name: 'Close file' }).click();
+  }
   const composer = page.getByPlaceholder("Message Pi");
   assert.equal(await composer.getAttribute('enterkeyhint'), 'enter');
   await composer.fill('First line');
