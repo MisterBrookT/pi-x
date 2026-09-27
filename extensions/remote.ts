@@ -7,6 +7,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemoteAction, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { createPushSender } from "../src/remote-push.ts";
+import { backgroundState } from "../src/background-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "../src/remote-relay-agent.ts";
@@ -99,7 +100,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream) : undefined });
   };
 
   const contextUsage = () => {

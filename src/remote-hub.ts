@@ -21,6 +21,8 @@ export interface RemoteSnapshot {
   named?: boolean;
   cwd: string;
   busy: boolean;
+  /** Background jobs still running while the agent is idle: Pi will resume on its own. */
+  waiting?: number;
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
@@ -118,7 +120,8 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
   const notifyChanges = (old: Registered | undefined, next: Registered) => {
     if (!push || !old) return;
     // Like chat apps: no notification on a phone that has Pix open on screen right now.
-    if (old.busy && !next.busy) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` }, endpoint => (onScreen.get(endpoint) ?? 0) > Date.now());
+    // Idle but background work still running: Pi resumes by itself, so Brook is not needed yet.
+    if (old.busy && !next.busy && !next.waiting) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` }, endpoint => (onScreen.get(endpoint) ?? 0) > Date.now());
   };
   // Phone endpoint -> time until which it counts as looking at Pix (refreshed every 10 s while visible).
   const onScreen = new Map<string, number>();
@@ -128,10 +131,10 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(({ id, name, named, cwd, busy, updatedAt, messages }) => {
+    .map(({ id, name, named, cwd, busy, waiting, updatedAt, messages }) => {
       const last = messages.at(-1);
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
-      return { id, name, named, cwd, busy, updatedAt, preview };
+      return { id, name, named, cwd, busy, waiting, updatedAt, preview };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -251,7 +254,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
           const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
           const next: Registered = {
             ...extra,
-            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy),
+            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), waiting: Math.max(0, Number(snapshot.waiting) || 0),
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,

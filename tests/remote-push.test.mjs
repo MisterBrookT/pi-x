@@ -70,6 +70,20 @@ test("the hub notifies only when a turn ends (Pi waits for you), not on backgrou
   assert.ok(!JSON.stringify(notes).includes("secret"), "no message text in notifications");
 });
 
+test("no notification when Pi goes idle only to wait for its own background jobs", async t => {
+  const notes = [];
+  const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async m => { notes.push(m); } };
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push }); t.after(() => hub.close());
+  const put = body => fetch(`http://127.0.0.1:${hub.port}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ id: "s1", name: "w", cwd: "/", messages: [], ...body }) });
+  await put({ busy: true }); await put({ busy: false, waiting: 1 });
+  assert.equal(notes.length, 0, "still waiting on a job: Brook is not needed");
+  await put({ busy: true }); await put({ busy: false, waiting: 0 });
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished"]);
+  const list = await (await fetch(`http://127.0.0.1:${hub.port}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json();
+  assert.equal(list.sessions?.[0]?.waiting ?? list[0]?.waiting, 0);
+});
+
 test("no notification to a phone that has Pix on screen; it resumes once the phone leaves", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-push-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const sent = [];
