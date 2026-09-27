@@ -1,6 +1,8 @@
 // Mobile browser acceptance for Pix Remote. Run: npm run test:remote-ui
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium, devices } from "playwright";
 import { startRemoteHub } from "../src/remote-hub.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
@@ -9,7 +11,14 @@ import { remoteMedia } from "../src/remote-state.ts";
 const output = new URL(`../.private/var/runs/test-ui/remote-cli-${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url);
 await mkdir(output, { recursive: true });
 const token = "fixture-token-not-a-real-credential";
-const hub = await startRemoteHub({ token, port: 0 });
+// Disposable home and memory folders for the New session picker and the Memory view.
+const fixtureHome = await realpath(await mkdtemp(join(tmpdir(), "pix-remote-ui-home-")));
+await mkdir(join(fixtureHome, "projects", "demo"), { recursive: true });
+await mkdir(join(fixtureHome, "hub", "skills", "writing"), { recursive: true });
+await writeFile(join(fixtureHome, "hub", "AGENTS.md"), "# Hub rules\n\n- Keep it short");
+await writeFile(join(fixtureHome, "hub", "skills", "writing", "SKILL.md"), "# Writing skill");
+const launched = [];
+const hub = await startRemoteHub({ token, port: 0, home: fixtureHome, sessionsDir: join(fixtureHome, "no-sessions"), memoryRoot: join(fixtureHome, "hub"), launch: async dir => { launched.push(dir); } });
 const base = `http://127.0.0.1:${hub.port}`;
 const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP4r5QGRAxK/9OACAArfAYdc7fY4gAAAABJRU5ErkJggg==";
@@ -202,6 +211,40 @@ try {
   assert.equal(await row.locator('small').textContent(), '/workspace/demo', 'named sessions show their folder as subtitle');
   assert.match(await page.locator('#sessions .group h2').first().textContent(), /Working|Today/);
   await page.screenshot({ path: new URL("sessions.png", output).pathname });
+  // Memory: grouped read-only Markdown, rendered.
+  await page.locator('#memoryList').getByRole('button', { name: 'SKILL.md' }).waitFor();
+  await page.locator('#memoryList').getByRole('button', { name: 'AGENTS.md' }).click();
+  await page.locator('#memoryBody h1').getByText('Hub rules').waitFor();
+  await page.screenshot({ path: new URL("memory.png", output).pathname });
+  await page.getByRole('button', { name: 'Close memory' }).click();
+  await page.getByRole("button", { name: "Sessions" }).click();
+  await page.locator("body.open").waitFor();
+  // Close/Delete: ⋯ opens the menu; cancelling the confirmation sends nothing, confirming sends once.
+  await page.getByRole('button', { name: 'Close or delete Pix UI test' }).click();
+  const sessionSheet = page.getByRole('dialog', { name: 'Pix UI test' });
+  await sessionSheet.getByRole('button', { name: /Delete/ }).waitFor();
+  page.once("dialog", d => d.dismiss());
+  await sessionSheet.getByRole('button', { name: /Close/ }).click();
+  await page.getByRole('button', { name: 'Close or delete Pix UI test' }).click();
+  page.once("dialog", d => d.accept());
+  await sessionSheet.getByRole('button', { name: /Close/ }).click();
+  assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "close" }] });
+  // New session (the drawer stays open after Close): browse home, start Pi there, and follow the new session.
+  await page.locator("body.open").waitFor();
+  await page.getByRole('button', { name: '＋ New session' }).click();
+  const picker = page.getByRole('dialog', { name: 'New session in…' });
+  await picker.getByRole('button', { name: 'projects ›' }).click();
+  await picker.getByRole('button', { name: 'demo ›' }).click();
+  await picker.getByRole('button', { name: /Start Pi here/ }).click();
+  await page.waitForFunction(() => document.querySelector('#composerStatus').textContent.startsWith('Starting Pi'));
+  assert.deepEqual(launched, [join(fixtureHome, "projects", "demo")]);
+  await fetch(`${base}/agent/launched`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "launched", name: "demo", cwd: join(fixtureHome, "projects", "demo"), busy: false, messages: [] }) });
+  await page.locator("#title").getByText("demo").waitFor();
+  await fetch(`${base}/agent/launched`, { method: "DELETE", headers: auth });
+  await page.evaluate(() => open("fixture"));
+  await page.locator("#title").getByText("Pix UI test").waitFor();
+  await page.getByRole("button", { name: "Sessions" }).click();
+  await page.locator("body.open").waitFor();
   await page.locator("#shade").click({ position: { x: 380, y: 400 } });
   await page.locator("body.open").waitFor({ state: "detached" });
   await page.waitForTimeout(350);
@@ -321,4 +364,5 @@ try {
 } finally {
   await browser?.close();
   await hub.close();
+  await rm(fixtureHome, { recursive: true, force: true });
 }
