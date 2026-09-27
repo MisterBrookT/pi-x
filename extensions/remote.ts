@@ -1,4 +1,5 @@
 // /rc: expose this live Pi session to the Pix Remote web app through a loopback-only hub.
+import { unlink } from "node:fs/promises";
 import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -10,6 +11,7 @@ import { createPushSender } from "../src/remote-push.ts";
 import { backgroundState } from "../src/background-state.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
+import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "../src/remote-mac.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "../src/remote-relay-agent.ts";
 
 const messageLimit = 200;
@@ -20,7 +22,11 @@ export function shouldShowRemotePairing(action: string, paired: boolean) {
   return !paired || action === "pair" || action === "reset" || action === "tailnet pair";
 }
 
-export interface RemoteOptions { port?: number; tokenPath?: string; relayUrl?: string; relayKeyPath?: string; }
+export interface RemoteOptions {
+  port?: number; tokenPath?: string; relayUrl?: string; relayKeyPath?: string;
+  /** Test seams for the phone's New session and Delete actions. */
+  spawn?: Spawner; hasOtty?: boolean; sessionsDir?: string; home?: string; memoryRoot?: string;
+}
 
 /** Survives extension reloads within one Pi process (module state does not). */
 const reloadResume: Map<string, { relay: boolean }> = ((globalThis as any).__pixRemoteReloadResume ??= new Map());
@@ -58,6 +64,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let pushTimer: ReturnType<typeof setTimeout> | undefined;
   let cleanupPairing: (() => Promise<void>) | undefined;
   const uploadedMedia = new Set<string>();
+  let deleteOnShutdown: string | undefined;
 
   const request = (path: string, init: RequestInit = {}) => fetch(base + path, {
     ...init, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(init.headers ?? {}) },
@@ -89,7 +96,9 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     } catch (error) {
       if (error instanceof Error && /Pix Remote|another service/.test(error.message)) throw error;
     }
-    try { hub = await startRemoteHub({ token, port, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
+    // A phone-started Pi uses the same network mode as the session hosting the hub.
+    const launch = async (dir: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty }); };
+    try { hub = await startRemoteHub({ token, port, launch, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay();
   };
@@ -179,6 +188,12 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       if (ctx.isIdle() && modelChoices().thinkingLevels?.includes(prompt.value ?? "")) pi.setThinkingLevel(prompt.value as any);
       schedulePush(); return;
     }
+    // Close and Delete quit this Pi process like /quit; Delete also removes its saved session file.
+    if (typeof prompt === "object" && "action" in prompt && (prompt.action === "close" || prompt.action === "delete")) {
+      if (!ctx.isIdle()) return;
+      if (prompt.action === "delete") deleteOnShutdown = ctx.sessionManager.getSessionFile() ?? "";
+      ctx.shutdown(); return;
+    }
     if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc ${prompt.action}`, { expandPromptTemplates: true }); return; }
     const content = typeof prompt === "string" ? prompt : [
       // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
@@ -265,6 +280,19 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   // /reload replaces this extension instance; remember "remote on" so the new instance resumes it.
   // Quitting or switching sessions still turns remote off.
   pi.on("session_start", async (event, next) => {
+    // A Pi started from the phone's New session turns remote on by itself.
+    const autostart = process.env.PIX_REMOTE_AUTOSTART;
+    if (event.reason === "startup" && autostart && !connected) {
+      delete process.env.PIX_REMOTE_AUTOSTART;
+      try {
+        publicOrigin = options.relayUrl ?? await readRelayOrigin();
+        await connect(next, autostart !== "tailnet" && !!publicOrigin);
+      } catch (error) {
+        await disconnect();
+        next.ui.notify(`Remote control could not start: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      }
+      return;
+    }
     const key = event.reason === "new" ? nextSession : next.sessionManager.getSessionId();
     const resume = reloadResume.get(key);
     reloadResume.delete(key);
@@ -285,6 +313,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     relayAgent = undefined;
     await hub?.close();
     hub = undefined;
+    if (deleteOnShutdown !== undefined) {
+      const file = await deletableSessionFile(deleteOnShutdown, sessionId, options.sessionsDir ?? remoteSessionsDir);
+      deleteOnShutdown = undefined;
+      if (file) await unlink(file).catch(() => {});
+    }
   });
 
   pi.registerCommand("rc", {

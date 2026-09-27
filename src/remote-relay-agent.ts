@@ -41,7 +41,8 @@ export const openRelayFrame = (secret: string, frame: string): any => {
   return JSON.parse(Buffer.concat([decipher.update(data.subarray(0, -16)), decipher.final()]).toString("utf8"));
 };
 
-const allowed = (path: string, method: string) => path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action)$/.test(path);
+export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action)$/.test(path)
+  || method === "GET" && (path === "/api/folders" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && path === "/api/launch"; };
 
 export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
   const { origin, secret, localBase, localToken } = options;
@@ -111,7 +112,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         if (message.kind === "hello") { await publishSessions(); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || typeof message.body !== "string") return;
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.
-        if (!allowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }
+        if (!relayAllowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }
         if (message.body.length > relayRequestLimit) { send({ kind: "response", id: message.id, status: 413, error: "Message and image are too large to send" }); return; }
         if (!requests.has(message.id)) {
           requests.set(message.id, (async () => {

@@ -8,6 +8,8 @@ import { dirname, join } from "node:path";
 import { imageRef, maxImageBase64, type RemoteMedia, type RemoteMessage } from "./remote-state.ts";
 import { validSubscription, type PushSender } from "./remote-push.ts";
 import { remoteServiceWorker } from "./remote-sw.ts";
+import { launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
+import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 
 export const remoteHost = "127.0.0.1";
@@ -39,7 +41,7 @@ export interface RemoteSnapshot {
 export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
-export type RemoteActionName = "reload" | "new" | "compact";
+export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
 export interface RemoteAction { action: RemoteActionName | "model" | "thinking"; value?: string }
 
 interface Registered extends RemoteSnapshot {
@@ -112,7 +114,14 @@ export interface RemoteHub {
 }
 
 /** Start the hub on loopback. Rejects with EADDRINUSE when another session already hosts it. */
-export async function startRemoteHub(options: { token: string; port?: number; host?: string; push?: PushSender }): Promise<RemoteHub> {
+export interface RemoteHubOptions {
+  token: string; port?: number; host?: string; push?: PushSender;
+  /** Start a new Pi process with remote on in this already validated folder. */
+  launch?: (dir: string) => Promise<void>;
+  home?: string; sessionsDir?: string; memoryRoot?: string;
+}
+
+export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteHub> {
   const { token, push } = options;
   // Notify the phone when a session finishes a turn, i.e. Pi is waiting for Brook. Background jobs
   // alone do not notify; when one ends Pi resumes, and that turn's end notifies. Only the session
@@ -189,6 +198,23 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
         return;
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
+      if (req.method === "GET" && path === "/api/folders") {
+        const browse = await listFolders(url.searchParams.get("path") ?? "", options.home);
+        if (!browse) return send(res, 404, { error: "folder unavailable" });
+        return send(res, 200, { ...browse, recent: url.searchParams.get("path") ? undefined : await recentFolders(options.sessionsDir) });
+      }
+      if (req.method === "POST" && path === "/api/launch") {
+        if (!options.launch) return send(res, 404, { error: "starting sessions is unavailable" });
+        const dir = await launchableFolder((await body(req))?.path, options.home, options.sessionsDir);
+        if (!dir) return send(res, 400, { error: "choose a folder in your home directory" });
+        try { await options.launch(dir); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
+        return send(res, 202, { started: true, path: dir });
+      }
+      if (req.method === "GET" && path === "/api/memory") return send(res, 200, await listMemory(options.memoryRoot));
+      if (req.method === "GET" && path === "/api/memory/file") {
+        const file = await readMemory(url.searchParams.get("path"), options.memoryRoot);
+        return file ? send(res, 200, { path: file.path, html: renderRemoteMarkdown(file.text) }) : send(res, 404, { error: "file unavailable" });
+      }
       const mediaGet = path.match(/^\/api\/sessions\/([^/]+)\/media\/([a-f0-9]{64})$/);
       if (req.method === "GET" && mediaGet) {
         const id = decodeURIComponent(mediaGet[1]);
@@ -209,7 +235,7 @@ export async function startRemoteHub(options: { token: string; port?: number; ho
         }
         if (req.method === "POST" && sessionMatch[2] === "/action") {
           const input = await body(req), action = input.action, value = typeof input.value === "string" ? input.value : undefined;
-          if (!["reload", "new", "compact", "model", "thinking"].includes(action)) return send(res, 400, { error: "unknown action" });
+          if (!["reload", "new", "compact", "close", "delete", "model", "thinking"].includes(action)) return send(res, 400, { error: "unknown action" });
           // Only offer what this session listed, so the phone cannot pick arbitrary models.
           if (action === "model" && !session.models?.some(m => m.id === value)) return send(res, 400, { error: "unknown model" });
           if (action === "thinking" && !session.thinkingLevels?.includes(value ?? "")) return send(res, 400, { error: "unknown thinking level" });
