@@ -2,6 +2,7 @@
 import { unlink } from "node:fs/promises";
 import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Image, Text } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -9,6 +10,7 @@ import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort,
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { createPushSender } from "../src/remote-push.ts";
 import { backgroundState } from "../src/background-state.ts";
+import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../src/remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
@@ -83,6 +85,14 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       appendFileSync(file, `${new Date().toISOString()} pid=${process.pid} ${state}\n`);
     } catch {}
   };
+  // Reload this session when Pix code on disk changes, so the hub and phone never run stale code.
+  const pixRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+  const autoReload = !autoReloadEnabled() ? undefined : createAutoReload({
+    version: () => pixCodeVersion(pixRoot),
+    ready: () => !!ctx?.isIdle() && !pendingQuestion && backgroundState(pi).running === 0,
+    reload: () => pi.sendUserMessage("/rc reload", { expandPromptTemplates: true }),
+    log: logRelay,
+  });
   const ensureRelay = async () => {
     if (!hub) return;
     relayAgent ||= startRemoteRelayAgent({ origin: publicOrigin, secret: relayKey, localBase: base, localToken: token, onState: logRelay });
@@ -259,7 +269,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     busy = !next.isIdle();
     connected = true;
     await push();
-    heartbeat = setInterval(() => void push(), heartbeatMs);
+    heartbeat = setInterval(() => { void push(); autoReload?.tick(); }, heartbeatMs);
     heartbeat.unref?.();
     void poll();
     next.ui.setStatus("pix-remote", "remote on");
@@ -267,7 +277,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
 
   const track = (_event: unknown, next: ExtensionContext) => { ctx = next; };
   pi.on("agent_start", (_e, next) => { ctx = next; busy = true; streaming = ""; schedulePush(); });
-  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; streaming = ""; schedulePush(); });
+  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; streaming = ""; schedulePush(); if (connected) autoReload?.tick(); });
   pi.on("message_update", (event, next) => {
     ctx = next;
     const delta = event.assistantMessageEvent;
