@@ -78,7 +78,20 @@ test("bounded view reports omitted nodes and dependencies rather than drawing da
   const chain = plan(Array.from({ length: 20 }, (_, i) => [`Task ${i + 1}`, i ? [String(i)] : []]));
   chain.slice(0, 15).forEach(item => { item.status = "done"; });
   const partial = renderTodoGraph(chain, 80);
-  assert.match(partial.at(-1), /dependencies outside view/);
+  // Finished history behind the view is not "hidden" work and needs no warning.
+  assert.doesNotMatch(partial.join("\n"), /hidden|outside view/);
+});
+
+test("a finished prerequisite of a finished task does not show as hidden", () => {
+  const items = [
+    { id: "1", text: "Build", status: "done" },
+    { id: "2", text: "Publish", status: "done", dependsOn: ["1"] },
+    { id: "3", text: "Helpers", status: "done", dependsOn: ["1"] },
+    { id: "4", text: "Test on iPhone", status: "active", dependsOn: ["2"] },
+  ];
+  const lines = renderTodoGraph(items, 120);
+  assert.doesNotMatch(lines.join("\n"), /hidden|outside view/);
+  once(lines, ["2", "4"]);
 });
 
 test("wide terminals pack parallel nodes into one column and chains horizontally", () => {

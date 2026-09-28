@@ -107,11 +107,10 @@ export function renderTodoGraph(items: readonly GraphTodo[], width: number, pain
   const visible = selected.length <= 12 ? selected : selected.slice(-12);
   const visibleIds = new Set(visible.map(item => item.id));
   const byId = new Map(items.map(item => [item.id, item]));
-  const relevant = new Set(open.map(item => item.id));
-  // Count omitted ancestors too, but don't advertise unrelated finished work.
-  for (const id of relevant) for (const parent of byId.get(id)?.dependsOn ?? []) relevant.add(parent);
-  const hidden = relevant.size - visible.length;
-  const outside = visible.some(item => (item.dependsOn ?? []).some(id => !visibleIds.has(id)));
+  // Only unfinished work counts as hidden: a finished prerequisite of a finished task
+  // (e.g. #1 behind done #2) says nothing about what is left.
+  const hidden = open.filter(item => !visibleIds.has(item.id)).length;
+  const outside = visible.some(item => (item.dependsOn ?? []).some(id => !visibleIds.has(id) && byId.get(id)?.status !== "done"));
   const children = new Map(visible.map(item => [item.id, visible.filter(child => child.dependsOn?.includes(item.id)).map(child => child.id)]));
   const lanes: (string | undefined)[] = [];
   const rows: Row[] = [];
