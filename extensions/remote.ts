@@ -61,6 +61,9 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let hub: RemoteHub | undefined;
   let connected = false;
   let busy = false;
+  // Who drives this session right now: the Mac terminal or the phone. The hub pushes only for the phone side.
+  let origin: "mac" | "phone" = "mac";
+  pi.on("input", event => { if (event.source === "interactive") origin = "mac"; });
   let pendingQuestion: { id: string; question: string; options: { label: string; description?: string }[] } | undefined;
   pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) }; schedulePush(); } });
   pi.events.on(QUESTION_CLOSE, (data: any) => { if (pendingQuestion && data?.id === pendingQuestion.id) { pendingQuestion = undefined; schedulePush(); } });
@@ -125,7 +128,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {
@@ -197,6 +200,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
 
   const deliver = (prompt: string | RemotePrompt | RemoteAbort | RemoteAction) => {
     if (!ctx) return;
+    origin = "phone";
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
     if (typeof prompt === "object" && "action" in prompt && prompt.action === "answer") { answerQuestion(prompt.value ?? ""); return; }

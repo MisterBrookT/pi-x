@@ -3,6 +3,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { imageRef, maxImageBase64, type RemoteMedia, type RemoteMessage } from "./remote-state.ts";
@@ -25,6 +26,8 @@ export interface RemoteSnapshot {
   named?: boolean;
   cwd: string;
   busy: boolean;
+  /** Where Brook last typed: in the Mac terminal or on the phone. Pushes follow the conversation. */
+  origin?: "mac" | "phone";
   /** A question tool call waiting for Brook; answerable from the phone. */
   question?: RemoteQuestion;
   /** Background jobs still running while the agent is idle: Pi will resume on its own. */
@@ -126,6 +129,20 @@ export interface RemoteHubOptions {
   /** Start a new Pi process with remote on in this already validated folder. */
   launch?: (dir: string) => Promise<void>;
   home?: string; sessionsDir?: string; memoryRoot?: string;
+  /** Milliseconds since the Mac keyboard or mouse was last used; injectable for tests. */
+  macIdleMs?: () => number;
+}
+
+/** Mac-started work notifies the phone only once Brook has left the Mac this long. */
+export const macAwayMs = 5 * 60_000;
+
+/** macOS HID idle time. Unknown counts as away, so a failure never swallows a notification. */
+export function readMacIdleMs(): number {
+  try {
+    const out = execFileSync("ioreg", ["-c", "IOHIDSystem", "-d", "4"], { encoding: "utf8", timeout: 1000 });
+    const ns = /"HIDIdleTime" = (\d+)/.exec(out)?.[1];
+    return ns ? Number(ns) / 1e6 : Infinity;
+  } catch { return Infinity; }
 }
 
 function validQuestion(q: any): RemoteQuestion | undefined {
@@ -141,6 +158,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // name and outcome are sent, never message text: the push service can read the title.
   const notifyChanges = (old: Registered | undefined, next: Registered) => {
     if (!push || !old) return;
+    // A conversation driven from the Mac terminal stays on the Mac while Brook is sitting there.
+    if (next.origin === "mac" && (options.macIdleMs ?? readMacIdleMs)() < macAwayMs) return;
     // Like chat apps: no notification on a phone that has Pix open on screen right now.
     // Idle but background work still running: Pi resumes by itself, so Brook is not needed yet.
     const hidden = (endpoint: string) => (onScreen.get(endpoint) ?? 0) > Date.now();
@@ -321,7 +340,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
           const next: Registered = {
             ...extra,
-            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0),
+            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), origin: snapshot.origin === "phone" ? "phone" : snapshot.origin === "mac" ? "mac" : undefined, question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0),
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,

@@ -126,3 +126,22 @@ test("encryption matches the RFC 8291 example byte for byte", () => {
   const out = encryptPushPayload({ endpoint: "https://x", keys: { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" } }, "When I grow up, I want to be a watermelon", Buffer.from("DGv6ra1nlYgDCS1FRnbzlw", "base64url"), as);
   assert.equal(out.toString("base64url"), "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN");
 });
+
+test("pushes follow the conversation: Mac-driven turns stay silent while Brook is at the Mac", async t => {
+  const notes = [];
+  const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async m => { notes.push(m); } };
+  let idleMs = 1_000;
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push, macIdleMs: () => idleMs }); t.after(() => hub.close());
+  const put = body => fetch(`http://127.0.0.1:${hub.port}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ id: "s1", name: "w", cwd: "/", messages: [], ...body }) });
+  const turn = async origin => { await put({ busy: true, origin }); await put({ busy: false, origin }); };
+  const q = { id: "call_1", question: "Allow?", options: [{ label: "Yes" }] };
+  await turn("mac");
+  await put({ busy: true, origin: "mac", question: q });
+  assert.equal(notes.length, 0, "typed on the Mac and still there: no push");
+  await turn("phone");
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished"], "typed on the phone: push even while the Mac is in use");
+  idleMs = 10 * 60_000;
+  await turn("mac");
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished", "Pi finished"], "Mac task, Brook walked away: push");
+});
