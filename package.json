@@ -92,6 +92,7 @@
       "./extensions/question.ts",
       "./extensions/remote.ts",
       "./extensions/smart-editor.ts",
+      "./extensions/terminal-support.ts",
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
       "./extensions/tool.ts"
