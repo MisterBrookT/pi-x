@@ -21,6 +21,10 @@ export const advanceSpinnerFrames = (line: string, steps: number): string => {
 export const hasSpinnerFrame = (lines: string[]): boolean =>
   lines.some(line => [...line].some(character => SUBAGENT_SPINNER_FRAMES.includes(character)));
 
+/** Upstream's one-line "Async runs 1/2 · ↓ 0 tokens · ↓/← to inspect" row; the Pix footer replaces it. */
+export const isCollapsedFleetSummary = (lines: string[]): boolean =>
+  lines.length === 1 && lines[0].includes("to inspect");
+
 type WidgetFactory = (tui: TUI, theme: ExtensionContext["ui"]["theme"]) => Component & { dispose?(): void };
 
 interface SpinnerTimers {
@@ -55,6 +59,10 @@ export const animateSubagentWidget = (
   const overrides = {
     render: (width: number) => {
       const lines = inner.render(width);
+      if (isCollapsedFleetSummary(lines)) {
+        stopTimer();
+        return [];
+      }
       if (!hasSpinnerFrame(lines)) {
         stopTimer();
         return lines;

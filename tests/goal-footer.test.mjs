@@ -148,3 +148,13 @@ test("goal visibility takes priority over a long path and all footer lines fit o
 	await h.command("pause");
 	assert.ok(h.renders() > rendersBefore);
 });
+
+test("running background work sits on the bottom line with a live spinner", async (t) => {
+	const h = await harness(t);
+	h.ctx.ui.setStatus("pix-background", "1 job running · /jobs");
+	const [top, bottom] = h.render();
+	assert.doesNotMatch(top, /running/);
+	assert.match(bottom, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job running · \/jobs/);
+	h.ctx.ui.setStatus("pix-background", undefined);
+	assert.doesNotMatch(h.render()[1], /running/);
+});

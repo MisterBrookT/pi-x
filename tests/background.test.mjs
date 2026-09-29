@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerBackground, { reminderDelaySeconds } from "../extensions/background.ts";
+import registerBackground, { reminderDelaySeconds, statusText } from "../extensions/background.ts";
 import { BACKGROUND_STATE_QUERY } from "../src/background-state.ts";
 
 const quote = (text) => `'${text.replaceAll("'", `'\\''`)}'`;
@@ -311,16 +311,23 @@ test("the footer status counts running jobs and clears when they finish", { time
 	const first = g.request();
 	await h.call({ action: "start", command: g.command });
 	await first;
-	assert.equal(h.status(), "1 job running");
+	assert.equal(h.status(), "1 job running · /jobs");
 	const second = g.request();
 	await h.call({ action: "start", command: g.command });
 	const response = await second;
-	assert.equal(h.status(), "2 jobs running");
+	assert.equal(h.status(), "2 jobs running · /jobs");
 	const wake = h.wake();
 	response.end("done\n");
 	await wake;
-	assert.equal(h.status(), "1 job running");
+	assert.equal(h.status(), "1 job running · /jobs");
 	const stopped = await h.call({ action: "stop", id: "1" });
 	assert.equal(stopped.details.state, "stopped");
 	assert.equal(h.status(), undefined);
+});
+
+test("footer status names shells and agents together, with the control command", () => {
+	assert.equal(statusText(0, 0), undefined);
+	assert.equal(statusText(1, 0), "1 job running · /jobs");
+	assert.equal(statusText(2, 1), "2 jobs + 1 agent running · /jobs");
+	assert.equal(statusText(0, 3), "3 agents running · /jobs");
 });

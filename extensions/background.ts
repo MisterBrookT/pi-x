@@ -25,6 +25,15 @@ interface Job {
 	reminderTimer?: ReturnType<typeof setTimeout>;
 }
 
+/** Footer text: what is running, and the command that controls it. */
+export function statusText(shells: number, agents: number): string | undefined {
+	const parts = [
+		shells ? `${shells} job${shells === 1 ? "" : "s"}` : "",
+		agents ? `${agents} agent${agents === 1 ? "" : "s"}` : "",
+	].filter(Boolean);
+	return parts.length ? `${parts.join(" + ")} running · /jobs` : undefined;
+}
+
 const MAX_RUNNING = 4;
 const MAX_HISTORY = 32;
 
@@ -35,13 +44,14 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 	let closed = false;
 	const subagents = new Map<string, { mode: string; agents: string[] }>();
 	let sessionId: string | undefined;
+	let statusCtx: Parameters<typeof showStatus>[0] | undefined;
 
 	const runningCount = () => [...jobs.values()].filter((job) => job.state === "running").length;
 	/** Footer indicator: background work is otherwise invisible while the agent does something else. */
 	const showStatus = (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
 		if (!ctx.hasUI) return;
-		const running = runningCount();
-		ctx.ui.setStatus("pix-background", running ? `${running} job${running === 1 ? "" : "s"} running` : undefined);
+		statusCtx = ctx;
+		ctx.ui.setStatus("pix-background", statusText(runningCount(), subagents.size));
 	};
 
 	pi.events.on("subagent:async-started", (data: unknown) => {
@@ -51,11 +61,13 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 		const agents = Array.isArray(run.agents) ? run.agents.filter((a): a is string => typeof a === "string")
 			: typeof run.agent === "string" ? [run.agent] : [];
 		subagents.set(run.id, { mode: typeof run.mode === "string" ? run.mode : "single", agents });
+		if (statusCtx) showStatus(statusCtx);
 	});
 	pi.events.on("subagent:async-complete", (data: unknown) => {
 		if (!data || typeof data !== "object") return;
 		const run = data as { id?: unknown; sessionId?: unknown };
 		if (typeof run.id === "string" && run.sessionId === sessionId) subagents.delete(run.id);
+		if (statusCtx) showStatus(statusCtx);
 	});
 
 	pi.events.on(BACKGROUND_STATE_QUERY, (data: unknown) => {
@@ -103,6 +115,36 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			role: "custom", customType: "pix-background-status", display: false,
 			content: `[ACTIVE BACKGROUND WORK]\n${lines.join("\n")}\nCompletion notifies automatically; use status for details.`,
 		}] };
+	});
+
+	// One place to see and control everything running in the background.
+	pi.registerCommand?.("jobs", {
+		description: "Show running background jobs and agents; view output or stop one",
+		handler: async (_args, ctx) => {
+			const active = [...jobs.values()].filter((job) => job.state === "running");
+			const agentRows = [...subagents].map(([id, run]) => `agent ${id.slice(0, 8)} · ${run.mode}${run.agents.length ? ` · ${run.agents.join(", ")}` : ""}`);
+			if (!active.length && !agentRows.length) return ctx.ui.notify("Nothing is running.", "info");
+			if (!ctx.hasUI) return ctx.ui.notify([...active.map(describe), ...agentRows].join("\n"), "info");
+			const shellRows = active.map((job) => `job ${job.id} · ${job.command.replace(/\s+/g, " ").slice(0, 70)}`);
+			const picked = await ctx.ui.select("Running", [...shellRows, ...agentRows]);
+			if (!picked) return;
+			if (picked.startsWith("agent ")) {
+				return ctx.ui.notify("Agents: press ↓ in an empty editor to open the agent inspector (enter opens, esc closes).", "info");
+			}
+			const job = active[shellRows.indexOf(picked)];
+			if (!job) return;
+			const action = await ctx.ui.select(`Job ${job.id}`, ["View latest output", "Stop"]);
+			if (action === "Stop") {
+				if (!(await ctx.ui.confirm(`Stop job ${job.id}?`, job.command.slice(0, 200)))) return;
+				stop(job);
+				await job.done;
+				showStatus(ctx);
+				ctx.ui.notify(`Job ${job.id} stopped.`, "info");
+			} else if (action) {
+				const tail = truncateTail(job.output || "(no output yet)", { maxLines: 20, maxBytes: 2000 });
+				ctx.ui.notify(`Job ${job.id} · running\n${tail.content}`, "info");
+			}
+		},
 	});
 
 	pi.registerTool({

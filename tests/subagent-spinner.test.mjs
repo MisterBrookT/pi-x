@@ -4,6 +4,7 @@ import {
 	advanceSpinnerFrames,
 	animateSubagentWidget,
 	hasSpinnerFrame,
+	isCollapsedFleetSummary,
 	SUBAGENT_SPINNER_FRAMES,
 	SUBAGENT_SPINNER_INTERVAL_MS,
 	spinnerFrameStep,
@@ -183,5 +184,13 @@ test("the real upstream async widget animates at deterministic 80ms ticks", asyn
 	}
 	assert.ok(frames.size > 1, `spinner frame must change over time, saw ${[...frames].join("")}`);
 	assert.ok(repaints > 0, "wrapper requests repaints at the spinner cadence");
+	component.dispose();
+});
+
+test("the collapsed fleet summary row is hidden; the footer shows running work instead", () => {
+	assert.equal(isCollapsedFleetSummary(["  Async runs 1/2 · ↓ 0 tokens · ↓/← to inspect"]), true);
+	assert.equal(isCollapsedFleetSummary(["⠋ scout", "  ↳ reading"]), false);
+	const component = animateSubagentWidget(() => ({ render: () => ["  ⠋ Async runs 1/2 · ↓/← to inspect"], invalidate() {} }))({ requestRender() {} }, {});
+	assert.deepEqual(component.render(80), []);
 	component.dispose();
 });

@@ -5,6 +5,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getSettingsListTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type SettingItem } from "@earendil-works/pi-tui";
 import { fastModeActiveFor } from "../src/fast-mode.js";
+import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../src/subagent-spinner.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "../src/footer.js";
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
@@ -51,8 +52,14 @@ export default function (pi: ExtensionAPI) {
 
   installFooter = (ctx) => ctx.ui.setFooter((tui, theme, footerData) => {
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
+    // Repaint only while background work runs, so the spinner shows it is alive.
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const animate = (on: boolean) => {
+      if (on && !timer) { timer = setInterval(() => tui.requestRender(), SUBAGENT_SPINNER_INTERVAL_MS); timer.unref?.(); }
+      if (!on && timer) { clearInterval(timer); timer = undefined; }
+    };
     return {
-      dispose: unsubscribe,
+      dispose: () => { animate(false); unsubscribe(); },
       invalidate() {},
       render(width: number): string[] {
         let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
@@ -82,16 +89,21 @@ export default function (pi: ExtensionAPI) {
         if (options.provider && model) right = `(${model.provider}) ${right}`;
         if (options.thinking && model?.reasoning) right += ` ${ctx.thinkingLevel ?? "off"}`;
         if (fastModeActiveFor(model)) right += " fast";
-        const left = parts.join(" ");
-        const room = width - visibleWidth(left) - visibleWidth(right);
-        const stats = room >= 2 ? left + " ".repeat(room) + right : truncateToWidth(`${left}  ${right}`, width);
-        const branch = footerData.getGitBranch();
         const statuses = footerData.getExtensionStatuses();
-        const status = [statuses.get("pix-remote"), statuses.get("pix-background"), statuses.get("pix-goal")].filter(Boolean).join(" · ") || undefined;
+        const work = statuses.get("pix-background");
+        animate(Boolean(work));
+        const frame = SUBAGENT_SPINNER_FRAMES[Math.floor(Date.now() / SUBAGENT_SPINNER_INTERVAL_MS) % SUBAGENT_SPINNER_FRAMES.length];
+        const running = work ? `${frame} ${work}  ` : "";
+        const metrics = parts.join(" ");
+        const room = width - visibleWidth(running) - visibleWidth(metrics) - visibleWidth(right);
+        const rest = room >= 2 ? metrics + " ".repeat(room) + right : truncateToWidth(`${metrics}  ${right}`, Math.max(0, width - visibleWidth(running)));
+        const stats = (running ? theme.fg("accent", running) : "") + theme.fg("dim", rest);
+        const branch = footerData.getGitBranch();
+        const status = [statuses.get("pix-remote"), statuses.get("pix-goal")].filter(Boolean).join(" · ") || undefined;
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
-        return [theme.fg("dim", location), theme.fg("dim", stats)];
+        return [theme.fg("dim", location), stats];
       },
     };
   });
