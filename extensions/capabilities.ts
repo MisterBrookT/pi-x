@@ -3,7 +3,7 @@
  *
  * Active schemas occupy model context. Specialists stay deferred until
  * discover_tools activates them for this session or /tool explicitly enables
- * them. Discovery never writes preferences or overrides a saved off choice.
+ * them; discoveries last for the session, including reloads. Discovery never writes preferences or overrides a saved off choice.
  *
  * Explicit choices live in shared agent settings. Every session rereads them
  * before a turn; navigating a branch never rewinds them.
@@ -51,7 +51,18 @@ export default function (pi: ExtensionAPI, settings: ToolSettings = toolSettings
     if (data.active) loaded.add("goal"); else loaded.delete("goal");
     apply();
   });
-  pi.on("session_start", () => apply(true));
+  // A reload of the same session must keep what discover_tools already activated in this session,
+  // so the tool results on the current branch are the record, not module memory.
+  const restore = (ctx: any) => {
+    let entries: any[] = [];
+    try { entries = ctx?.sessionManager?.getBranch?.() ?? []; } catch { return; }
+    for (const entry of entries) {
+      const m = entry?.type === "message" ? entry.message : undefined;
+      if (m?.role !== "toolResult" || m.toolName !== "discover_tools" || !Array.isArray(m.details?.activated)) continue;
+      for (const name of m.details.activated) if (typeof name === "string") loaded.add(name);
+    }
+  };
+  pi.on("session_start", (_event, ctx) => { apply(true); restore(ctx); apply(); });
   pi.on("session_tree", () => apply());
   pi.on("before_agent_start", () => apply());
 

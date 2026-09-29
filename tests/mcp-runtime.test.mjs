@@ -77,12 +77,12 @@ test("saved MCP off survives initialization, discovery attempts, and reload", as
   assert.deepEqual(h.extensionErrors, []);
 });
 
-test("MCP discovery resets on reload and new sessions", async t => {
+test("MCP discovery survives a reload but not a new session", async t => {
   const h = await setup(t, ({ index }) => index === 0 ? call("discover_tools", { query: "mcp" }) : say("done"));
   await h.session.prompt("Find MCP");
   assert.ok(h.session.getActiveToolNames().includes("mcp"));
   await h.session.reload();
-  assert.ok(!h.session.getActiveToolNames().includes("mcp"));
+  assert.ok(h.session.getActiveToolNames().includes("mcp"));
   const fresh = await setup(t);
   assert.ok(!fresh.session.getActiveToolNames().includes("mcp"));
   assert.deepEqual(fresh.extensionErrors, []);

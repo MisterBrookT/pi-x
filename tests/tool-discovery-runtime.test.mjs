@@ -61,17 +61,17 @@ test("explicit off choices cannot be bypassed by discovery", async t => {
   assert.deepEqual(h.extensionErrors, []);
 });
 
-test("session-local discovery resets on reload; explicit on choices survive", async t => {
+test("discovery survives a reload of the same session; explicit choices still win", async t => {
   const choices = settings();
   const h = await goalSession(t, ({ index }) => index === 0 ? call("discover_tools", { query: "computer" }) : say("done"),
     { extensions: extensions(choices), tools });
   await h.session.prompt("Discover computer");
   assert.ok(h.session.getActiveToolNames().includes("computer"));
   await h.session.reload();
-  assert.ok(!h.session.getActiveToolNames().includes("computer"));
-  choices.update({ computer: true });
+  assert.ok(h.session.getActiveToolNames().includes("computer"), "a reload keeps what this session discovered");
+  choices.update({ computer: false });
   await h.session.reload();
-  assert.ok(h.session.getActiveToolNames().includes("computer"));
+  assert.ok(!h.session.getActiveToolNames().includes("computer"), "an explicit off still wins");
   assert.deepEqual(h.extensionErrors, []);
 });
 
@@ -129,7 +129,7 @@ test("tool-owned guidance follows activation without rewriting unrelated instruc
   assert.deepEqual(h.extensionErrors, []);
 });
 
-test("Web auto withholds schemas until discovery, persists across reload, and respects off", async t => {
+test("Web auto withholds schemas until discovery, stays discovered across reload, and respects off", async t => {
  const choices = settings(); choices.update({ web_search: "auto" });
  const web = pi => pi.registerTool({ name: "web_search", label: "Search", description: "Web search fixture", parameters: Type.Object({}), async execute() { return { content: [{ type: "text", text: "fixture result" }], details: {} }; } });
  const h = await goalSession(t, ({ index }) => index === 0 ? call("discover_tools", { query: "web_search" }) : index === 1 ? call("web_search", {}) : say("done"), { extensions: [...extensions(choices), web], tools: [...tools, "web_search"] });
@@ -138,7 +138,7 @@ test("Web auto withholds schemas until discovery, persists across reload, and re
  assert.ok(h.requests[1].tools.includes("web_search"));
  assert.equal(choices.read().web_search, "auto");
  await h.session.reload();
- assert.ok(!h.session.getActiveToolNames().includes("web_search"));
+ assert.ok(h.session.getActiveToolNames().includes("web_search"), "a reload mid-task must not drop web search");
  await h.session.prompt("/tool web_search off");
  assert.equal(choices.read().web_search, false);
  assert.ok(!h.session.getActiveToolNames().includes("web_search"));

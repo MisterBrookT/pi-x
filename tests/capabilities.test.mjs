@@ -41,6 +41,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	return {
 		settings,
 		notices,
+		registered,
 		active: () => activeTools,
 		start: () => handlers.get("session_start")({}, ctx),
 		turn: () => handlers.get("before_agent_start")?.({}, ctx),
@@ -204,4 +205,18 @@ test("legacy conversation records cannot change shared defaults", () => {
 	const h = harness({ sessionManager });
 	h.start();
 	assert.ok(!h.active().includes("act_ui"), "the later family choice clears its children");
+});
+
+test("tools found by discover_tools survive a reload of the same session", async () => {
+	// Pix Remote reloads Pi when Pix code changes; web_search then vanished mid-task.
+	const sessionManager = SessionManager.inMemory();
+	const first = harness({ sessionManager });
+	first.start();
+	assert.ok(!first.active().includes("lsp_diagnostics"));
+	const result = await first.registered.get("discover_tools").execute("t1", { query: "lsp_diagnostics", limit: 1 });
+	assert.deepEqual(result.details.activated, ["lsp_diagnostics"]);
+	sessionManager.appendMessage({ role: "toolResult", toolCallId: "t1", toolName: "discover_tools", content: result.content, details: result.details, isError: false, timestamp: 1 });
+	const reloaded = harness({ sessionManager });
+	reloaded.start();
+	assert.ok(reloaded.active().includes("lsp_diagnostics"), "a reload must keep discovered tools");
 });
