@@ -108,14 +108,14 @@ test("the encrypted relay forwards the new endpoints and nothing broader", () =>
   assert.ok(!relayAllowed("/agent/x", "PUT"));
 });
 
-test("the phone app script parses and has New session, Close/Delete, and Memory controls", () => {
+test("the phone app script parses and has New session and Close/Delete controls, but no Memory section", () => {
   const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.doesNotThrow(() => new Script(script));
   assert.match(remoteAppHtml, /id="newSession"[^>]*>＋ New session/);
   assert.match(script, /data-more=/);
   assert.match(script, /action:del\?'delete':'close'/);
   assert.match(script, /confirm\(/);
-  assert.match(remoteAppHtml, /id="memory"/);
+  assert.doesNotMatch(remoteAppHtml, /id="memory"/);
 });
 
 async function remoteSession(t, extra) {

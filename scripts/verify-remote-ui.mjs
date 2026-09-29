@@ -33,7 +33,7 @@ const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP4r
 const media = remoteMedia([{ role: "user", content: [{ type: "image", mimeType: "image/png", data: imageData }] }])[0];
 const messages = [
   { id: "u1", role: "user", text: "Review the project structure", images: [{ id: media.id, mimeType: media.mimeType }], timestamp: 1 },
-  { id: "a1", role: "assistant", text: "## Project review\n\nI found the **entry point** and tests. The [recording](file:///Users/brook/run.mp4) is on the Mac.\n\n- Read the entry point\n- Run the tests\n\n`src/index.ts` is ready.\n\n| Check | Result | Notes |\n|---|---:|---|\n| Unit tests | 641 | All passing on the Mac with a deliberately long note column |\n| Relay | OK | Encrypted |\n\n```mermaid\nflowchart LR\n  A[Phone] --> B[Relay] --> C[Mac Pi]\n```", timestamp: 2,
+  { id: "a1", role: "assistant", text: "## Project review\n\nI found the **entry point** and tests. The [recording](file:///Users/brook/run.mp4) is on the Mac.\n\n- Read the entry point\n- Run the tests\n\n`src/index.ts` is ready.\n\n| Check | Result | Notes |\n|---|---:|---|\n| Unit tests | 641 | All passing on the Mac with a deliberately long note column |\n| Relay | OK | Encrypted |\n\n| Option | Where the HTML goes | Where the proxy runs | Effort |\n|---|---|---|---|\n| **A. Snapshot export** | Anywhere | Nowhere (data is baked in) | Low |\n| **B. Vercel (Zhao Gang)** | Vercel | A Vercel function with the key | Medium |\n\n```mermaid\nflowchart LR\n  A[Phone] --> B[Relay] --> C[Mac Pi]\n```", timestamp: 2,
     tools: [{ id: "t1", name: "read", label: "src/index.ts", input: '{"path":"src/index.ts"}', output: "export function main() {}", images: [{ id: media.id, mimeType: media.mimeType }] }] },
   { id: "a2", role: "assistant", text: "", timestamp: 3,
     tools: [{ id: "t2", name: "bash", input: '{"command":"npm test"}', output: "tests passed" },
@@ -70,7 +70,9 @@ try {
   const diagram = page.locator("figure.diagram pre");
   assert.match(await diagram.textContent(), /Phone[\s\S]*Relay[\s\S]*Mac Pi/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "wide tables and diagrams scroll inside their own box, not the page");
-  await page.locator(".table-scroll").scrollIntoViewIfNeeded();
+  await page.locator(".table-scroll").first().scrollIntoViewIfNeeded();
+  const narrowest = await page.evaluate(() => Math.min(...[...document.querySelectorAll(".rich th, .rich td")].map(c => c.getBoundingClientRect().width)));
+  assert.ok(narrowest >= 70, `table cells keep a readable width, not one letter per line (${narrowest}px)`);
   await page.screenshot({ path: new URL("rich.png", output).pathname });
   assert.equal(await page.locator("#messages strong").first().textContent(), "entry point");
   assert.equal(await page.locator("#messages .local-link").textContent(), "recordingMac only");
@@ -229,13 +231,7 @@ try {
   assert.equal(await row.locator('small').textContent(), demo, 'named sessions show their folder as subtitle');
   assert.match(await page.locator('#sessions .group h2').first().textContent(), /Working|Today/);
   await page.screenshot({ path: new URL("sessions.png", output).pathname });
-  // Memory: grouped read-only Markdown, rendered.
-  await page.locator('#memoryList').getByRole('button', { name: 'SKILL.md' }).waitFor();
-  await page.locator('#memoryList').getByRole('button', { name: 'AGENTS.md' }).click();
-  await page.locator('#memoryBody h1').getByText('Hub rules').waitFor();
-  await page.screenshot({ path: new URL("memory.png", output).pathname });
-  await page.getByRole('button', { name: 'Close memory' }).click();
-  await page.getByRole("button", { name: "Sessions" }).click();
+  assert.equal(await page.locator('#memory, #memoryList').count(), 0, 'sidebar has no Memory section; Files covers it');
   await page.locator("body.open").waitFor();
   // Close/Delete: ⋯ opens the menu; cancelling the confirmation sends nothing, confirming sends once.
   await page.getByRole('button', { name: 'Close or delete Pix UI test' }).click();
