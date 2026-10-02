@@ -119,7 +119,7 @@ try {
   await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
   // Notifications: a plain browser tab is told to use the Home Screen app.
   const notify = page.locator("#notify");
-  await notify.waitFor();
+  await notify.waitFor({ state: "attached" });
   assert.match(await notify.textContent(), /notifications/i);
   // Context ring and todo bar.
   const ring = page.getByRole("button", { name: /^Context:/ });
@@ -245,7 +245,7 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "close" }] });
   // New session (the drawer stays open after Close): browse home, start Pi there, and follow the new session.
   await page.locator("body.open").waitFor();
-  await page.getByRole('button', { name: '＋ New session' }).click();
+  await page.getByRole('button', { name: 'New session' }).click();
   const picker = page.getByRole('dialog', { name: 'New session in…' });
   await picker.getByRole('button', { name: 'projects ›' }).click();
   await picker.getByRole('button', { name: 'demo ›' }).click();

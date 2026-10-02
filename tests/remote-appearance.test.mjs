@@ -13,7 +13,11 @@ test("composer is a two-row dock and appearance lives at the sidebar bottom", ()
   for (const id of ["attach", "actionsButton", "modelChip", "ctxRing", "stop", "send"]) assert.match(controls, new RegExp(`id="${id}"`));
   assert.doesNotMatch(box, /[⚡■↑＋]/, "controls use drawn icons, not glyphs");
   assert.doesNotMatch(box, /appearanceButton/);
-  assert.match(remoteAppHtml, /<div class="list-scroll">[\s\S]*?<\/div><button type="button" class="appearance-button" id="appearanceButton"[^>]*>[\s\S]*?<\/button><\/aside>/);
+  assert.match(remoteAppHtml, /<\/div><button type="button" class="appearance-button" id="appearanceButton"[^>]*>[\s\S]*?Settings<\/button><div id="deviceSettings" hidden>[\s\S]*?<\/div><\/aside>/, "Settings sits under the scrolling list");
+  const list = remoteAppHtml.match(/<div class="list-scroll">[\s\S]*?<\/div><button type="button" class="appearance-button"/)[0];
+  assert.doesNotMatch(list, /id="(notify|copyPair)"/, "device actions live in Settings, not the session list");
+  assert.doesNotMatch(remoteAppHtml.match(/function renderList[^\n]*/)[0], /class="dot/, "sessions have no status dots");
+  assert.doesNotMatch(remoteAppHtml.match(/const fileIcons=[^;]*;/)[0], /[\u{1F300}-\u{1FAFF}]/u, "file icons are drawn, not emoji");
 });
 
 test("appearance sheet persists validated palette and typography per device", async t => {
@@ -35,13 +39,17 @@ test("appearance sheet persists validated palette and typography per device", as
   const btn = await open.boundingBox();
   assert.ok(btn.height >= 44 && btn.y + btn.height > 844 - 80, "anchored at the drawer bottom with a 44px target");
   await open.click();
-  const sheet = page.getByRole("dialog", { name: "Appearance" });
+  const sheet = page.getByRole("dialog", { name: "Settings" });
   await sheet.waitFor();
   assert.equal(await page.evaluate(() => document.activeElement.dataset.value), "warm", "focus moves into the sheet");
   await page.keyboard.press("ArrowRight");
   assert.equal(await sheet.getByRole("radio", { name: "Neutral" }).getAttribute("aria-checked"), "true");
   await sheet.getByRole("radio", { name: "Editorial" }).click();
   for (const r of await sheet.getByRole("radio").all()) assert.ok((await r.boundingBox()).height >= 44);
+  await page.evaluate(() => { document.getElementById("notify").hidden = false; document.getElementById("notify").textContent = "Turn on notifications"; });
+  await page.keyboard.press("Escape"); await sheet.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: "Settings" }).click(); await sheet.waitFor();
+  assert.equal(await sheet.getByRole("button", { name: "Turn on notifications" }).count(), 1, "notifications toggle is in Settings");
   await page.screenshot({ path: ".private/remote-appearance-sheet.png" });
   assert.deepEqual(await root(), ["neutral", "editorial"]);
   await page.keyboard.press("Escape");
