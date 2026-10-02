@@ -70,3 +70,20 @@ test("voice input: a mic button and Ctrl+M dictate into the message box", async 
   await page.keyboard.press("Control+m");
   assert.equal(await mic.getAttribute("aria-pressed"), "true", "Ctrl+M starts");
 });
+
+test("the message box grows with long drafts, then scrolls", async t => {
+  const server = await new Promise(r => { const s = createServer((q, res) => { res.setHeader("content-type", "text/html"); res.end(q.url === "/" ? remoteAppHtml : ""); }); s.listen(0, "127.0.0.1", () => r(s)); });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.evaluate(() => { document.getElementById("login").hidden = true; });
+  const input = page.getByPlaceholder("Message Pi");
+  await input.fill("word ".repeat(30));
+  const mid = (await input.boundingBox()).height;
+  assert.ok(mid > 100, `a five-line draft shows all its lines (got ${mid}px)`);
+  await input.fill("word ".repeat(400));
+  const tall = (await input.boundingBox()).height;
+  assert.ok(tall <= 320 && tall >= 250, `very long drafts cap near 40% of the screen (got ${tall}px)`);
+});
