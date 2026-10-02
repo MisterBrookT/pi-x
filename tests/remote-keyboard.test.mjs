@@ -87,3 +87,16 @@ test("the message box grows with long drafts, then scrolls", async t => {
   const tall = (await input.boundingBox()).height;
   assert.ok(tall <= 320 && tall >= 250, `very long drafts cap near 40% of the screen (got ${tall}px)`);
 });
+
+test("typing drops the home-indicator padding under the message box, even with a hardware keyboard", async t => {
+  const server = await new Promise(r => { const s = createServer((q, res) => { res.setHeader("content-type", "text/html"); res.end(q.url === "/" ? remoteAppHtml : ""); }); s.listen(0, "127.0.0.1", () => r(s)); });
+  t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.evaluate(() => { document.getElementById("login").hidden = true; document.querySelector(".composer").style.setProperty("--test", "1"); });
+  const pad = () => page.evaluate(() => getComputedStyle(document.querySelector(".composer")).paddingBottom);
+  await page.getByPlaceholder("Message Pi").focus();
+  assert.equal(await pad(), "8px", "no safe-area padding while typing (no visual-viewport shrink needed)");
+});
