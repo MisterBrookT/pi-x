@@ -331,9 +331,12 @@ try {
   }
   const composer = page.getByPlaceholder("Message Pi");
   assert.equal(await composer.getAttribute('enterkeyhint'), 'enter');
+  // Simulate the on-screen keyboard (iOS shrinks the visual viewport); a hardware keyboard sends on Return instead.
+  await page.evaluate(() => { const vv = window.visualViewport; const h = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(vv), 'height').get; Object.defineProperty(vv, 'height', { configurable: true, get: () => h.call(vv) - 336 }); });
   await composer.fill('First line');
   await composer.press('Enter');
   assert.equal(await composer.inputValue(), 'First line\n', 'mobile Return inserts a newline');
+  await page.evaluate(() => { delete window.visualViewport.height; });
   await composer.fill('First line\nSecond line');
   await page.route('**/api/sessions/fixture/prompt', route => route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"offline"}' }));
   await page.getByRole('button', { name: 'Send' }).click();
