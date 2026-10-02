@@ -110,3 +110,57 @@ test("the keyboard scrolls the conversation and an open file", async t => {
   await page.keyboard.press("Meta+ArrowUp"); await settle(page);
   assert.equal(await scrollTop(page, "fileScroll"), 0, "⌘↑ returns to its top");
 });
+
+test("keyboard modes: Esc to read, arrows scroll, letters press buttons, Enter types again", async t => {
+  const { page, errors } = await setup(t);
+  const input = page.locator("#input");
+  await input.focus();
+  await page.keyboard.press("Escape");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "chat", "Esc leaves the message box and focuses the conversation");
+  assert.match(await input.getAttribute("placeholder"), /⏎ to type/, "the box says how to get back");
+  await page.keyboard.press("Meta+ArrowUp"); await settle(page);
+  const top = await scrollTop(page, "chat");
+  await page.keyboard.press("ArrowDown"); await settle(page);
+  assert.ok(await scrollTop(page, "chat") > top, "↓ scrolls in reading mode");
+
+  // S opens sessions with focus on the current one; Esc closes.
+  await page.keyboard.press("s");
+  await page.waitForFunction(() => document.body.classList.contains("open") && document.activeElement?.dataset?.id === "s1");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.evaluate(() => document.body.classList.contains("open")), false);
+
+  // F opens Files; ↓ and Enter open a file; Esc closes it.
+  await page.keyboard.press("f");
+  await page.waitForFunction(() => document.activeElement?.classList.contains("file-row"));
+  assert.match(await page.evaluate(() => document.activeElement.textContent), /chaos\.md/);
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Chaos" }).waitFor();
+  await page.keyboard.press("Space"); await settle(page);
+  assert.ok(await scrollTop(page, "fileScroll") > 300, "Space pages the opened file without touching the screen");
+  await page.keyboard.press("e");
+  await page.getByRole("textbox", { name: "Edit chaos.md" }).waitFor();
+  await page.keyboard.press("Escape");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "fileScroll", "Esc in the editor stops typing but keeps the file open");
+  await page.keyboard.press("Escape");
+  await page.locator("#fileView").waitFor({ state: "hidden" });
+  await page.keyboard.press("Escape");
+
+  // A opens the + menu; ↓ moves; Esc closes. M opens the model picker with focus on the current model.
+  await page.keyboard.press("a");
+  await page.waitForFunction(() => document.activeElement?.dataset?.action === "photo");
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), "reload");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator("#actions").isHidden(), true);
+
+  // ? lists the keys; Enter returns to typing.
+  await page.keyboard.press("?");
+  await page.getByRole("dialog", { name: "Keyboard" }).waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator("#chat").focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "input", "Enter goes back to typing");
+  await page.keyboard.type("s");
+  assert.equal(await input.inputValue(), "s", "letters type normally in the message box");
+  assert.deepEqual(errors, []);
+});
