@@ -1,0 +1,112 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium, devices } from "playwright";
+import { startRemoteHub } from "../src/remote-hub.ts";
+
+// Writing on the phone with a Bluetooth keyboard: open a note from Files, edit, save to the Mac, and
+// move around long files and the conversation without a mouse.
+const token = "editor-token-1234567890";
+async function setup(t) {
+  const dir = await mkdtemp(join(tmpdir(), "pix-editor-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const home = join(dir, "home"), writing = join(home, "Desktop", "Writing");
+  await mkdir(writing, { recursive: true });
+  const note = join(writing, "chaos.md");
+  await writeFile(note, "# Chaos\n\n" + Array.from({ length: 80 }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n"));
+  const hub = await startRemoteHub({ token, port: 0, home, memoryRoot: join(home, "hub") });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const messages = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `Message ${i + 1} ` + "words ".repeat(30) }));
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "Writing", cwd: writing, busy: false, messages }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(`${base}/#token=${token}`);
+  await page.getByText("Message 40").waitFor();
+  return { page, note, errors };
+}
+const scrollTop = (page, id) => page.evaluate(id => document.getElementById(id).scrollTop, id);
+const settle = page => page.waitForTimeout(450);
+
+test("edit a Markdown note from Files and save it to the Mac", async t => {
+  const { page, note, errors } = await setup(t);
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: /chaos\.md/ }).click();
+  await page.getByRole("heading", { name: "Chaos" }).waitFor();
+  await page.getByRole("button", { name: "Edit" }).click();
+  const editor = page.getByRole("textbox", { name: "Edit chaos.md" });
+  await editor.waitFor();
+  assert.ok((await editor.inputValue()).startsWith("# Chaos\n\nParagraph 1."), "the editor shows the Markdown source");
+  await editor.evaluate(el => { el.focus(); el.setSelectionRange(7, 7); });
+  await page.keyboard.type(" 写在手机上");
+  await page.getByText("Saved", { exact: true }).waitFor({ timeout: 4000 });
+  assert.match(await readFile(note, "utf8"), /^# Chaos 写在手机上\n/, "autosaves to the real file after a pause");
+  await page.keyboard.type("!");
+  await page.keyboard.press("Meta+s");
+  await page.waitForFunction(() => document.getElementById("saveState").textContent === "Saved");
+  assert.match(await readFile(note, "utf8"), /^# Chaos 写在手机上!\n/, "⌘S saves immediately");
+  await page.screenshot({ path: ".private/remote-editor.png" });
+
+  // A change on the Mac wins unless the phone confirms the overwrite.
+  await writeFile(note, "# From Typora\n");
+  await page.keyboard.type("?");
+  page.once("dialog", d => d.dismiss());
+  await page.keyboard.press("Meta+s");
+  await page.getByText("Changed on Mac", { exact: true }).waitFor();
+  assert.equal(await readFile(note, "utf8"), "# From Typora\n", "the Mac's edit survives");
+  page.once("dialog", d => d.accept());
+  await page.keyboard.press("Meta+s");
+  await page.waitForFunction(() => document.getElementById("saveState").textContent === "Saved");
+  assert.match(await readFile(note, "utf8"), /^# Chaos 写在手机上!\?\n/, "overwrites only when asked");
+
+  // Done returns to the rendered preview with the saved text.
+  await page.getByRole("button", { name: "Done" }).click();
+  await page.getByRole("heading", { name: "Chaos 写在手机上!?" }).waitFor();
+  assert.deepEqual(errors, []);
+});
+
+test("leaving the editor with unsaved text asks first", async t => {
+  const { page, note } = await setup(t);
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: /chaos\.md/ }).click();
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("textbox", { name: "Edit chaos.md" }).evaluate(el => { el.focus(); el.setSelectionRange(7, 7); });
+  await page.keyboard.type(" draft");
+  page.once("dialog", d => d.dismiss());
+  await page.getByRole("button", { name: "Close file" }).click();
+  assert.equal(await page.getByRole("textbox", { name: "Edit chaos.md" }).inputValue().then(v => v.startsWith("# Chaos draft")), true, "Cancel keeps editing");
+  page.once("dialog", d => d.accept());
+  await page.getByRole("button", { name: "Close file" }).click();
+  await page.locator("#fileView").waitFor({ state: "hidden" });
+  assert.doesNotMatch(await readFile(note, "utf8"), /draft/, "discarded text is not written");
+});
+
+test("the keyboard scrolls the conversation and an open file", async t => {
+  const { page } = await setup(t);
+  await page.locator("#input").blur();
+  await page.keyboard.press("Meta+ArrowUp"); await settle(page);
+  assert.equal(await scrollTop(page, "chat"), 0, "⌘↑ jumps to the start of the conversation");
+  await page.keyboard.press("PageDown"); await settle(page);
+  const paged = await scrollTop(page, "chat");
+  assert.ok(paged > 300, `Page Down moves a screen (${paged})`);
+  await page.keyboard.press("ArrowUp"); await settle(page);
+  assert.ok(await scrollTop(page, "chat") < paged, "↑ scrolls up a little");
+  await page.locator("#input").focus();
+  await page.keyboard.press("Meta+ArrowDown"); await settle(page);
+  const chat = await page.evaluate(() => { const c = document.getElementById("chat"); return c.scrollHeight - c.clientHeight - c.scrollTop; });
+  assert.ok(chat < 4, "⌘↓ from the message box returns to the latest message");
+  assert.equal(await page.evaluate(() => document.activeElement.id), "input", "and keeps typing focus");
+
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: /chaos\.md/ }).click();
+  await page.getByRole("heading", { name: "Chaos" }).waitFor();
+  await page.keyboard.press(" "); await settle(page);
+  assert.ok(await scrollTop(page, "fileScroll") > 300, "Space pages through an open file");
+  await page.keyboard.press("Meta+ArrowUp"); await settle(page);
+  assert.equal(await scrollTop(page, "fileScroll"), 0, "⌘↑ returns to its top");
+});

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -126,4 +126,32 @@ test("Word documents convert on the Mac with textutil", { skip: !existsSync("/us
   const res = await fetch(`${base}/api/sessions/s1/file/preview?path=${encodeURIComponent(docx)}`, { headers: auth });
   assert.equal(res.status, 200);
   assert.match((await res.json()).html, /推荐信/);
+});
+
+test("the phone edits Markdown and text in place; a change on the Mac is never silently overwritten", async t => {
+  const f = await fixture(t);
+  const hub = await startRemoteHub({ token, port: 0, home: f.home, memoryRoot: f.hub });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "s", cwd: f.folder, busy: false, messages: [] }) });
+  const note = join(f.folder, "notes.md");
+  const source = p => fetch(`${base}/api/sessions/s1/file/source?path=${encodeURIComponent(p)}`, { headers: auth });
+  const save = b => fetch(`${base}/api/sessions/s1/file/save`, { method: "POST", headers: auth, body: JSON.stringify(b) });
+  assert.ok(relayAllowed(`/api/sessions/s1/file/source?path=x`, "GET") && relayAllowed("/api/sessions/s1/file/save", "POST"), "editing works through the relay");
+  const opened = await (await source(note)).json();
+  assert.equal(opened.text, "# Notes");
+  const saved = await save({ path: note, text: "# Notes\n\n写在手机上。", hash: opened.hash });
+  assert.equal(saved.status, 200);
+  assert.equal(await readFile(note, "utf8"), "# Notes\n\n写在手机上。");
+  const next = (await saved.json()).hash;
+  await writeFile(note, "edited in Typora");
+  const stale = await save({ path: note, text: "phone", hash: next });
+  assert.equal(stale.status, 409, "the Mac changed it after the phone opened it");
+  assert.equal(await readFile(note, "utf8"), "edited in Typora", "and the Mac's text is kept");
+  assert.equal((await save({ path: note, text: "phone", hash: next, force: true })).status, 200, "overwrite only when asked");
+  assert.equal(await readFile(note, "utf8"), "phone");
+  for (const bad of [join(f.home, ".ssh", "id_ed25519"), join(f.hub, "skills", "about-me", "private", "me.md"), join(f.home, "code", "run.mp4"), join(f.folder, "new.md")])
+    assert.equal((await save({ path: bad, text: "x", force: true })).status, 404, `refuses ${bad}`);
+  assert.equal(await readFile(join(f.hub, "skills", "about-me", "private", "me.md"), "utf8"), "k");
+  assert.equal((await source(join(f.home, "code", "run.mp4"))).status, 404, "only text files open for editing");
 });

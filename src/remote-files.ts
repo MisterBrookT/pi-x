@@ -1,7 +1,8 @@
 // Mac files the phone may open: paths mentioned in chat and the Files panel. Every path the
 // phone names is resolved and checked again here; nothing outside home or sensitive is served.
 import { execFile } from "node:child_process";
-import { closeSync, existsSync, openSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { remoteMemoryRoot } from "./remote-mac.ts";
@@ -103,6 +104,31 @@ export function readRemoteChunk(path: unknown, offset: number, roots: FileRoots 
   const fd = openSync(file.path, "r");
   try { readSync(fd, buffer, 0, length, start); } finally { closeSync(fd); }
   return { status: 200, path: file.path, name: file.name, kind: file.kind, mimeType: file.mimeType, size: file.size, offset: start, data: buffer.toString("base64"), done: start + length >= file.size } as const;
+}
+
+export const editableLimit = 1_000_000; // a long essay is ~100 KB; keeps a save inside one relay frame
+const sourceHash = (text: string) => createHash("sha256").update(text).digest("hex");
+
+/** Open an existing Markdown or text file as UTF-8 for the phone editor. */
+export function readEditable(path: unknown, roots: FileRoots = {}) {
+  const file = checkRemotePath(path, roots);
+  if (!file || file.dir || (file.kind !== "markdown" && file.kind !== "text")) return { status: 404, error: "This file can't be edited on the phone" } as const;
+  if (file.size > editableLimit) return { status: 413, error: `File is too large to edit on the phone (${formatSize(file.size)})` } as const;
+  const text = readFileSync(file.path, "utf8");
+  return { status: 200, path: file.path, name: file.name, kind: file.kind, text, hash: sourceHash(text) } as const;
+}
+
+/** Save phone edits to an existing Markdown or text file. A file that changed since it was opened is
+ * refused with 409 unless force is set, so a Mac edit is never silently overwritten. Writes are atomic. */
+export function saveEditable(input: { path?: unknown; text?: unknown; hash?: unknown; force?: unknown }, roots: FileRoots = {}) {
+  if (typeof input.text !== "string" || Buffer.byteLength(input.text) > editableLimit) return { status: 400, error: "Invalid or oversized text" } as const;
+  const opened = readEditable(input.path, roots);
+  if (opened.status !== 200) return { status: 404, error: "This file can't be saved from the phone" } as const;
+  if (input.force !== true && input.hash !== opened.hash) return { status: 409, error: "This file changed on the Mac since you opened it", hash: opened.hash } as const;
+  const tmp = join(dirname(opened.path), `.${opened.name}.pix-${process.pid}-${Date.now()}`);
+  writeFileSync(tmp, input.text, { mode: statSync(opened.path).mode });
+  renameSync(tmp, opened.path);
+  return { status: 200, path: opened.path, hash: sourceHash(input.text) } as const;
 }
 
 const keptTags = new Set("p br b strong i em u s strike h1 h2 h3 h4 h5 h6 ul ol li table thead tbody tfoot tr td th blockquote pre code sub sup hr div span".split(" "));

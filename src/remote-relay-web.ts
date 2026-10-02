@@ -47,7 +47,7 @@ function relayConnect(secret){
           const msg=await relayOpen(e.data);
           if(msg.kind==="response"){
             const pending=relayPending.get(msg.id);if(!pending)return;clearTimeout(pending.timer);relayPending.delete(msg.id);
-            msg.status>=200&&msg.status<300?pending.resolve(msg.body):pending.reject(Error(msg.error||"Request failed"));
+            msg.status>=200&&msg.status<300?pending.resolve(msg.body):pending.reject(Object.assign(Error(msg.error||"Request failed"),{status:msg.status,body:msg.body}));
           }else if(msg.kind==="event"){
             if(msg.event==="sessions"){events.online=true;clearInterval(greeting)}
             events.dispatchEvent(new MessageEvent(msg.event,{data:JSON.stringify(msg.data)}));
