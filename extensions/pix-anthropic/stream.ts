@@ -810,6 +810,11 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					} else if (event.type === "message_delta") {
 						if (event.delta?.stop_reason) {
 							output.stopReason = mapStopReason(event.delta.stop_reason);
+							if (output.stopReason === "error") {
+								output.errorMessage = event.delta.stop_reason === "refusal"
+									? "Anthropic refused this request (stop_reason: refusal). No further reason was provided."
+									: `Unrecognized Anthropic stop_reason: ${event.delta.stop_reason}`;
+							}
 						}
 						if (event.usage?.output_tokens) {
 							output.usage.output = event.usage.output_tokens;

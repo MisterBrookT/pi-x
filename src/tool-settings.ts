@@ -52,13 +52,13 @@ export function toolSettings(directory = getAgentDir()): ToolSettings {
 }
 
 /** Apply explicit choices and opt-in defaults to the current runtime set. */
-export function selectedTools(known: Iterable<string>, current: Iterable<string>, overrides: Overrides, discovered: Iterable<string> = [], mcpNames?: ReadonlySet<string>): string[] {
+export function selectedTools(known: Iterable<string>, current: Iterable<string>, overrides: Overrides, discovered: Iterable<string> = []): string[] {
   const available = new Set(known);
   const loaded = new Set(discovered);
   const active = new Set([...current, ...[...loaded].filter(name => available.has(name))]);
   for (const name of active) {
-    const choice = toolChoice(name, overrides, mcpNames);
-    if (choice === false || (choice !== true && !loaded.has(name) && (choice === "auto" || defaultToolMode(name, mcpNames) !== "on"))) active.delete(name);
+    const choice = toolChoice(name, overrides);
+    if (choice === false || (choice !== true && !loaded.has(name) && (choice === "auto" || defaultToolMode(name) !== "on"))) active.delete(name);
   }
   for (const [name, on] of Object.entries(overrides)) if (on === true && available.has(name)) active.add(name);
   return [...active];

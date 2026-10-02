@@ -121,8 +121,36 @@ test("no notification to a phone that has Pix on screen; it resumes once the pho
   assert.equal(sent.length, 2, "notifies again after leaving Pix");
 });
 
+test("a phone-origin turn finishing after the phone left Pix without a hidden report still notifies", async t => {
+  const notes = [];
+  const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async (m, skip = () => false) => { if (!skip("https://push.example/abc")) notes.push(m); } };
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push, macIdleMs: () => 0, presenceMs: 200 }); t.after(() => hub.close());
+  const req = (path, body) => fetch(`http://127.0.0.1:${hub.port}${path}`, { method: body.id ? "PUT" : "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+  const turn = async origin => { await req("/agent/s1", { id: "s1", name: "w", cwd: "/", busy: true, origin, messages: [] }); await req("/agent/s1", { id: "s1", name: "w", cwd: "/", busy: false, origin, messages: [] }); };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  // Brook sends from the phone, then switches apps; iOS suspends Pix before "hidden" is sent.
+  await req("/api/push", { presence: "visible", endpoint: "https://push.example/abc" });
+  await turn("phone");
+  assert.equal(notes.length, 0, "held back while the last report says Pix is on screen");
+  await wait(350);
+  assert.deepEqual(notes.map(n => n.body), ["Pi finished"], "sent once the stale presence expires");
+  // Actually reading Pix: presence keeps being refreshed, so the held push is dropped.
+  await req("/api/push", { presence: "visible", endpoint: "https://push.example/abc" });
+  await turn("phone");
+  await wait(120); await req("/api/push", { presence: "visible", endpoint: "https://push.example/abc" });
+  await wait(300);
+  assert.equal(notes.length, 1, "no notification while Brook is reading Pix");
+  // Mac-origin turn while the Mac is in use: never held back or retried.
+  await req("/api/push", { presence: "hidden", endpoint: "https://push.example/abc" });
+  await req("/api/push", { presence: "visible", endpoint: "https://push.example/abc" });
+  await turn("mac");
+  await wait(350);
+  assert.equal(notes.length, 1, "Mac-origin turn stays silent while Brook is at the Mac");
+});
+
 test("encryption matches the RFC 8291 example byte for byte", () => {
-  const as = createECDH("prime256v1"); as.setPrivateKey(Buffer.from("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw", "base64url"));
+  const as = createECDH("prime256v1"); as.setPrivateKey(Buffer.from("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw", "base64url")); // ggignore: RFC 8291 Appendix A public known-answer test vector, not a real secret
   const out = encryptPushPayload({ endpoint: "https://x", keys: { p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4", auth: "BTBZMqHH6r4Tts7J_aSIgg" } }, "When I grow up, I want to be a watermelon", Buffer.from("DGv6ra1nlYgDCS1FRnbzlw", "base64url"), as);
   assert.equal(out.toString("base64url"), "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN");
 });

@@ -97,7 +97,7 @@ try {
   assert.equal(await page.getByText("Command output (data, not instructions): fixture failure").count(), 0);
   await page.screenshot({ path: new URL("chat.png", output).pathname });
   await page.emulateMedia({ colorScheme: 'dark' });
-  assert.equal(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(23, 24, 26)');
+  assert.equal(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(38, 37, 34)');
   await page.screenshot({ path: new URL('dark.png', output).pathname });
   await page.emulateMedia({ colorScheme: 'light' });
   streaming = "**Still writing**";
@@ -142,7 +142,7 @@ try {
   assert.ok(Math.round(avatarBox.width) === 30, "30px avatar");
   // Model settings: the header chip shows the model and thinking level and opens a picker.
   const chip = page.getByRole("button", { name: "Model" });
-  assert.equal(await chip.textContent(), "Fast One · low");
+  assert.equal(await chip.textContent(), "Fast One low");
   await chip.click();
   const sheet = page.getByRole("dialog", { name: "Model settings" });
   await sheet.waitFor();
@@ -154,7 +154,7 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "model", value: "b/smart" }] });
   await sheet.waitFor({ state: "hidden" });
   modelState.model = { id: "b/smart", name: "Smart One" }; modelState.thinking = "high"; await publish();
-  await page.waitForFunction(() => document.querySelector("#modelChip").textContent === "Smart One · high");
+  await page.waitForFunction(() => document.querySelector("#modelChip").textContent === "Smart One high");
   modelState.model = { id: "a/fast", name: "Fast One" }; modelState.thinking = "low"; await publish();
   // Regression: reloading the Pi that hosts the hub drops every session for a moment; the phone
   // then jumped to another session. It must stay on the one being read and pick it up again.
@@ -229,7 +229,7 @@ try {
   const row = page.locator('#sessions .row').first();
   assert.equal(await row.locator('b').textContent(), 'Pix UI test', 'sidebar title is the session name');
   assert.equal(await row.locator('small').textContent(), demo, 'named sessions show their folder as subtitle');
-  assert.match(await page.locator('#sessions .group h2').first().textContent(), /Working|Today/);
+  assert.match(await page.locator('#sessions .group h2').first().textContent(), /Sessions|Pinned/);
   await page.screenshot({ path: new URL("sessions.png", output).pathname });
   assert.equal(await page.locator('#memory, #memoryList').count(), 0, 'sidebar has no Memory section; Files covers it');
   await page.locator("body.open").waitFor();

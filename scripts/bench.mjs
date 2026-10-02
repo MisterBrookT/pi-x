@@ -19,7 +19,7 @@ import {
 import { renderBenchmarkHtml, summarize, summaryLines } from "../src/benchmark.ts";
 
 const exec = promisify(execFile);
-const REQUIRED_TOOLS = ["web_search", "fetch_content", "subagent", "todo", "question", "discover_tools"];
+const REQUIRED_TOOLS = ["web_search", "fetch_content", "subagent", "todo", "question", "tool_search"];
 const RUNS = 3;
 
 const timed = async (args) => {

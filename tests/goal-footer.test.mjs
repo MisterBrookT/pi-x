@@ -158,3 +158,22 @@ test("running background work sits on the bottom line with a live spinner", asyn
 	h.ctx.ui.setStatus("pix-background", undefined);
 	assert.doesNotMatch(h.render()[1], /running/);
 });
+
+test("footer repaints periodically only while background work runs", async (t) => {
+	const h = await harness(t);
+	const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+	h.render();
+	let before = h.renders();
+	await sleep(300);
+	assert.equal(h.renders(), before, "idle footer schedules no animation repaints");
+	h.ctx.ui.setStatus("pix-background", "1 running");
+	h.render();
+	before = h.renders();
+	await sleep(300);
+	assert.ok(h.renders() > before, "running work repaints at the spinner cadence");
+	h.ctx.ui.setStatus("pix-background", undefined);
+	h.render();
+	before = h.renders();
+	await sleep(300);
+	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
+});

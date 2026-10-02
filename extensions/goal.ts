@@ -6,7 +6,7 @@ import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../src/background-
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
 import { createStateReminder } from "../src/state-reminder.ts";
-import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION } from "../src/tool-discovery.ts";
+import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION, withSpecialistExposure } from "../src/tool-discovery.ts";
 
 const WAKE = "pix-goal-wake";
 const commands = ["status", "pause", "stop", "resume", "clear"];
@@ -58,6 +58,11 @@ export default function goalExtension(pi: ExtensionAPI) {
 		if (!reloading && goal?.status === "active") pause("Session restored; use /goal resume to continue.", ctx);
 		publishState();
 		show(ctx);
+	};
+	const goalAllowed = () => {
+		const permission: { allowed?: boolean } = {};
+		pi.events.emit(GOAL_TOOL_PERMISSION, permission);
+		return permission.allowed ?? pi.getActiveTools().includes("goal");
 	};
 	const wake = (content: string) => pi.sendMessage({
 		customType: WAKE, content, display: true, details: { goalId: goal?.id },
@@ -116,7 +121,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 				pause(`Reached ${GOAL_MAX_CONTINUATIONS} automatic continuations; review progress before /goal resume.`, ctx);
 			} else {
 				save({ ...goal, continuations: goal.continuations + 1 }, ctx);
-				wake(`Goal continuation ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}. Continue useful work toward the active goal, or report verified completion or a genuine blocker with the goal tool.`);
+				wake(`Goal continuation ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}. Continue useful work toward the active goal, taking the next open step from the current todo state if one exists, or report verified completion or a genuine blocker with the goal tool.`);
 			}
 		} catch (error) {
 			if (!closed && goal === current) pause(error instanceof Error ? error.message : String(error), ctx);
@@ -170,9 +175,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 				ctx.ui.notify("Wait for the current turn to finish or press Esc before starting/resuming a goal.", "warning");
 				return;
 			}
-			const permission: { allowed?: boolean } = {};
-			pi.events.emit(GOAL_TOOL_PERMISSION, permission);
-			if (!(permission.allowed ?? pi.getActiveTools().includes("goal"))) {
+			if (!goalAllowed()) {
 				ctx.ui.notify("Enable the goal tool with /tool goal on first.", "error");
 				return;
 			}
@@ -195,24 +198,40 @@ export default function goalExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerTool({
+	pi.registerTool(withSpecialistExposure({
 		name: "goal", label: "Goal",
-		description: "Finish the active /goal. Use its exact id. completed requires concrete verification evidence (checks and results); blocked requires the missing information, permission, or prerequisite. Do not mark waiting background work as blocked. Does not start or resume goals.",
+		description: "Start or finish a session goal. active+objective starts one now, without extra opt-in, for substantial verifiable multi-step tasks the user requests (not quick answers or discussion); never replaces or resumes an unfinished goal. completed/blocked need the exact id and evidence (checks run, or what is missing).",
 		parameters: Type.Object({
-			id: Type.String({ minLength: 1, maxLength: 64 }),
-			status: StringEnum(["completed", "blocked"] as const),
-			evidence: Type.String({ minLength: 1, maxLength: GOAL_MAX_EVIDENCE, pattern: "\\S" }),
+			status: StringEnum(["active", "completed", "blocked"] as const),
+			objective: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_OBJECTIVE, pattern: "\\S", description: "Full scope and acceptance criteria" })),
+			id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+			evidence: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_EVIDENCE, pattern: "\\S" })),
 		}),
 		async execute(_callId, params, signal, _onUpdate, ctx) {
 			signal?.throwIfAborted();
+			if (params.status === "active") {
+				const objective = params.objective?.trim();
+				if (!objective) throw new Error("An objective is required to start a goal.");
+				if (closed || (ctx.mode !== "tui" && ctx.mode !== "rpc")) throw new Error("Goal mode requires a persistent TUI or RPC session.");
+				if (!goalAllowed()) throw new Error("The goal tool is disabled by the user. Only the user may enable it through /tool.");
+				if (goal && goal.status !== "completed") {
+					throw new Error(`Goal ${goal.id} is ${goal.status}; it was not replaced or resumed. Continue it, or ask the user to use /goal resume or /goal clear.`);
+				}
+				// Already inside a run: the steered reminder reaches the next request and
+				// agent_settled continues as usual, so no wake is sent.
+				modelFailed = false;
+				save({ version: 1, id: randomUUID(), objective, status: "active", continuations: 0, reason: "" }, ctx, true);
+				return { content: [{ type: "text", text: `Goal ${goal!.id} started. Continue working toward it now.` }], details: { goal: { ...goal! } } };
+			}
 			const current = goal;
 			if (closed || !current || current.status !== "active" || current.id !== params.id) throw new Error("No matching active goal.");
-			if (!params.evidence.trim()) throw new Error("Concrete evidence or a blocker is required.");
+			const evidence = params.evidence?.trim();
+			if (!evidence) throw new Error("Concrete evidence or a blocker is required.");
 			if (params.status === "completed" && await hasPendingGoalWork(pi)) throw new Error("Background work is still running. Read its results before completing the goal.");
 			signal?.throwIfAborted();
 			if (closed || goal !== current) throw new Error("Goal changed while checking completion.");
-			save({ ...current, status: params.status, reason: params.evidence.trim() }, ctx, true);
-			return { content: [{ type: "text", text: `Goal ${params.status}: ${goal.reason}` }], details: { goal: { ...goal } } };
+			save({ ...current, status: params.status, reason: evidence }, ctx, true);
+			return { content: [{ type: "text", text: `Goal ${params.status}: ${goal!.reason}` }], details: { goal: { ...goal! } } };
 		},
-	});
+	}));
 }

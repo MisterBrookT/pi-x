@@ -17,7 +17,7 @@ const ALL = [
 	"web_search", "source_check", "fetch_content", "get_search_content",
 	"subagent", "subagent_supervisor",
 	"computer", "find_roots", "observe_ui", "act_ui", "launch_browser", "evaluate_browser",
-	"mcp", "mcpScript", "mcp__excalidraw",
+	"mcp__excalidraw", "tool_search",
 ];
 
 const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory(), settings = settingsFor(sessionManager) } = {}) => {
@@ -56,7 +56,7 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 test("everyday tools are on by default", () => {
 	const h = harness();
 	h.start();
-	for (const name of ["todo", "question", "web_search", "subagent", "discover_tools"]) {
+	for (const name of ["todo", "question", "web_search", "subagent", "tool_search"]) {
 		assert.ok(h.active().includes(name), `${name} should be on`);
 	}
 });
@@ -70,12 +70,14 @@ test("computer use is off until asked for", () => {
 	}
 });
 
-test("MCP is off by default, including per-server tools", () => {
-	const h = harness();
+test("MCP server tools follow Pi's exposure unless the user vetoes them", () => {
+	// Pi's built-in MCP activates only direct tools; deferred ones load through tool_search.
+	const h = harness({ active: ["read", "mcp__excalidraw"] });
 	h.start();
-	assert.ok(!h.active().includes("mcp"));
-	assert.ok(!h.active().includes("mcpScript"));
-	assert.ok(!h.active().includes("mcp__excalidraw"), "server tools cannot be listed ahead of time");
+	assert.ok(h.active().includes("mcp__excalidraw"));
+	h.choose({ mcp: false });
+	h.turn();
+	assert.ok(!h.active().includes("mcp__excalidraw"), "the capability-level off covers every server tool");
 });
 
 test("specialist schemas are absent until discovered", () => {
@@ -89,9 +91,9 @@ test("specialist schemas are absent until discovered", () => {
 
 test("a tool active before session start is still turned off", () => {
 	// Another extension enabling the family must not defeat the default.
-	const h = harness({ active: ["read", "computer", "act_ui", "mcp__excalidraw"] });
+	const h = harness({ active: ["read", "computer", "act_ui"] });
 	h.start();
-	assert.deepEqual(h.active().filter((t) => /computer|act_ui|mcp/.test(t)), []);
+	assert.deepEqual(h.active().filter((t) => /computer|act_ui/.test(t)), []);
 });
 
 test("capabilities register no toggle commands; /tool owns that", () => {
@@ -106,14 +108,14 @@ test("a missing package is skipped without error", () => {
 });
 
 test("a package cannot quietly re-enable a withheld tool", () => {
-	// pi-mcp-adapter re-adds "mcp" after session start, so a single startup pass
-	// is not enough to keep it off.
+	// Pi's MCP activates server tools when they connect, after session start,
+	// so a single startup pass is not enough to keep a vetoed tool off.
 	const h = harness();
 	h.start();
-	assert.ok(!h.active().includes("mcp"));
-	h.setActive([...h.active(), "mcp", "mcp__excalidraw"]);
+	h.choose({ mcp: false });
+	h.setActive([...h.active(), "computer", "mcp__excalidraw"]);
 	h.turn();
-	assert.ok(!h.active().includes("mcp"), "withheld again before the turn runs");
+	assert.ok(!h.active().includes("computer"), "withheld again before the turn runs");
 	assert.ok(!h.active().includes("mcp__excalidraw"));
 });
 
@@ -145,9 +147,9 @@ test("turning something back off is remembered too", () => {
 	first.choose({ mcp: true });
 	first.choose({ mcp: false });
 
-	const reloaded = harness({ sessionManager: first.sessionManager });
+	const reloaded = harness({ sessionManager: first.sessionManager, active: ["read", "mcp__excalidraw"] });
 	reloaded.start();
-	assert.ok(!reloaded.active().includes("mcp"));
+	assert.ok(!reloaded.active().includes("mcp__excalidraw"));
 });
 
 test("an on-by-default tool can be turned off explicitly", () => {
@@ -207,15 +209,14 @@ test("legacy conversation records cannot change shared defaults", () => {
 	assert.ok(!h.active().includes("act_ui"), "the later family choice clears its children");
 });
 
-test("tools found by discover_tools survive a reload of the same session", async () => {
+test("tools loaded by tool_search survive a reload of the same session", async () => {
 	// Pix Remote reloads Pi when Pix code changes; web_search then vanished mid-task.
 	const sessionManager = SessionManager.inMemory();
 	const first = harness({ sessionManager });
 	first.start();
 	assert.ok(!first.active().includes("lsp_diagnostics"));
-	const result = await first.registered.get("discover_tools").execute("t1", { query: "lsp_diagnostics", limit: 1 });
-	assert.deepEqual(result.details.activated, ["lsp_diagnostics"]);
-	sessionManager.appendMessage({ role: "toolResult", toolCallId: "t1", toolName: "discover_tools", content: result.content, details: result.details, isError: false, timestamp: 1 });
+	// Pi's tool_search records what it loaded in `details.loaded`.
+	sessionManager.appendMessage({ role: "toolResult", toolCallId: "t1", toolName: "tool_search", content: [], details: { loaded: ["lsp_diagnostics"] }, isError: false, timestamp: 1 });
 	const reloaded = harness({ sessionManager });
 	reloaded.start();
 	assert.ok(reloaded.active().includes("lsp_diagnostics"), "a reload must keep discovered tools");

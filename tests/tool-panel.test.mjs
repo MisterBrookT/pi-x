@@ -22,7 +22,7 @@ const ALL = [
 	"web_search", "fetch_content",
 	"subagent", "subagent_supervisor",
 	"computer", "act_ui", "observe_ui", "launch_browser",
-	"mcp", "mcpScript", "mcp__excalidraw",
+	"mcp__excalidraw",
 ].map((name) => tool(name));
 
 test("basic tools are listed individually", () => {
@@ -111,9 +111,9 @@ test("a capability whose package is absent is not shown", () => {
 	assert.deepEqual(model.rows.map((row) => row.kind), ["tool", "tool"]);
 });
 
-test("Computer and MCP default off, Web and Subagent default on", () => {
+test("Computer defaults off; MCP follows Pi's exposure; Web and Subagent default on", () => {
 	const defaults = Object.fromEntries(CAPABILITIES.map((c) => [c.id, c.defaultOn]));
-	assert.deepEqual(defaults, { web: true, subagent: true, computer: false, mcp: false });
+	assert.deepEqual(defaults, { web: true, subagent: true, computer: false, mcp: true });
 });
 
 test("token figures are labelled as estimates, not measurements", () => {

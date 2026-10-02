@@ -46,7 +46,7 @@ Pix is under active development. macOS and Linux are supported; Windows is not y
 - **Less babysitting.** Visible todos, structured questions, background jobs with completion and configurable health-check wakes, and opt-in goal mode for unfinished work.
 - **A more comfortable editor.** Inline history suggestions, optional AI completion, list continuation, and compact pasted text and images.
 - **Control over the setup.** One tool panel, context inspection, and a configurable footer. Computer use and MCP start on demand.
-- **Mermaid that renders.** Diagrams use the current `lovely-mermaid`, so HTML entities and `<br/>` in edge labels work instead of falling back to source. A diagram too wide for the pane is re-laid out top-down rather than dumped as source. Pi's `markdown.mermaid` setting still applies.
+- **Mermaid that renders.** Diagrams use the current `lovely-mermaid`, so HTML entities and `<br/>` in edge labels work instead of falling back to source. A wide flowchart is re-laid out top-down; a simple wide sequence diagram uses narrower participant boxes and wraps labels and messages instead of dumping source. Pi's `markdown.mermaid` setting still applies.
 
 ## Start here
 

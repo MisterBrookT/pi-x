@@ -231,8 +231,9 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			};
 			job.done = (async () => {
 				try {
-					update(await bash.execute(callId, { command: job.command, timeout: params.timeout }, job.controller.signal, update, ctx));
-					if (job.state === "running") job.state = "completed";
+					const outcome = await bash.execute(callId, { command: job.command, timeout: params.timeout }, job.controller.signal, update, ctx);
+					update(outcome);
+					if (job.state === "running") job.state = outcome.isError ? "failed" : "completed";
 				} catch (error) {
 					job.output = error instanceof Error ? error.message : String(error);
 					if (job.state === "running") job.state = "failed";

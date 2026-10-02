@@ -1,6 +1,6 @@
 {
   "name": "@brooktang/pi-x",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "A focused Pi package: web access, bounded subagents, visible todo tracking, computer use, LSP diagnostics, and health checks.",
   "type": "module",
   "license": "MIT",
@@ -33,15 +33,8 @@
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/client": "2.0.0",
-    "@modelcontextprotocol/core": "2.0.0",
-    "@modelcontextprotocol/ext-apps": "^1.2.2",
     "@mozilla/readability": "^0.6.0",
-    "@napi-rs/keyring": "^1.3.0",
     "@narumitw/pi-lsp": "0.49.6",
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1",
-    "cross-spawn": "^7.0.6",
     "jsonc-parser": "3.3.1",
     "linkedom": "^0.16.11",
     "lovely-mermaid": "^0.3.3",
@@ -49,17 +42,13 @@
     "open": "^10.2.0",
     "pi-subagents": "0.63.0",
     "recheck": "^4.5.0",
-    "smol-toml": "^1.6.1",
-    "strip-json-comments": "^5.0.3",
     "turndown": "^7.2.4",
-    "undici": "^6.28.1",
-    "unpdf": "^1.8.1",
-    "zod": "^3.25.0 || ^4.0.0"
+    "unpdf": "^1.8.1"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.87.1",
-    "@earendil-works/pi-coding-agent": ">=0.87.1",
-    "@earendil-works/pi-tui": ">=0.87.1",
+    "@earendil-works/pi-ai": ">=0.99.1",
+    "@earendil-works/pi-coding-agent": ">=0.99.1",
+    "@earendil-works/pi-tui": ">=0.99.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -88,7 +77,6 @@
       "./extensions/footer.ts",
       "./extensions/goal.ts",
       "./extensions/mermaid.ts",
-      "./extensions/mcp.ts",
       "./extensions/question.ts",
       "./extensions/remote.ts",
       "./extensions/smart-editor.ts",
@@ -109,7 +97,6 @@
     "relay/wrangler.jsonc",
     "scripts",
     "src",
-    "vendor",
     "tests",
     "LICENSE",
     "README.md",
@@ -125,8 +112,8 @@
     "pi-subagents"
   ],
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.87.1",
-    "@earendil-works/pi-tui": "^0.87.1",
+    "@earendil-works/pi-ai": "^0.99.1",
+    "@earendil-works/pi-tui": "^0.99.1",
     "playwright": "^1.63.0"
   }
 }

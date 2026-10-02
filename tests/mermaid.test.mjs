@@ -211,3 +211,78 @@ test("only the nodes the model styled are coloured", () => {
 	assert.ok(!boxA.includes(ESC), "an unstyled node stays plain");
 	assert.ok(boxB.includes(`${ESC}[38;2;0;0;0;48;2;212;245;212m`), "a styled node keeps its fill");
 });
+
+// From the minara/codebase session that exposed the width fallback.
+const SESSION_SEQUENCE = `sequenceDiagram
+  participant V as Viewer (logged into claude.ai)
+  participant P as claude.ai page (host)
+  participant I as Artifact iframe<br/>(claudeusercontent.com, sandboxed)
+  participant A as Anthropic backend
+  V->>P: open artifact link
+  P->>I: load the static HTML/JS (stored by Anthropic)
+  I->>P: postMessage "call Claude / connector / storage"
+  P->>A: request with the VIEWER's session
+  A-->>P: result (billed to the viewer's plan)
+  P-->>I: postMessage result`;
+
+const SESSION_MESSAGES = [
+	"open artifact link",
+	"load the static HTML/JS (stored by Anthropic)",
+	'postMessage "call Claude / connector / storage"',
+	"request with the VIEWER's session",
+	"result (billed to the viewer's plan)",
+	"postMessage result",
+];
+
+/** Text of the diagram with box and line glyphs removed, whitespace collapsed. */
+function prose(plain) {
+	return plain.join(" ").replace(/[│┌┐└┘┬─╌▶◀×()]/g, (ch) => ("()".includes(ch) ? ch : " ")).replace(/\s+/g, " ");
+}
+
+test("a too-wide sequence diagram is redrawn with narrow wrapped participant boxes", () => {
+	assert.ok(renderMermaid(SESSION_SEQUENCE).width > 80);
+	const fitted = renderFitted(SESSION_SEQUENCE, 80);
+	assert.ok(fitted.width <= 80, `width ${fitted.width}`);
+	assert.deepEqual(fitted.warnings, []);
+	for (const line of fitted.plain) assert.ok([...line].length <= 80, `long line: ${line}`);
+	const text = fitted.plain.join("\n");
+	assert.equal(fitted.plain[0].match(/┌/g)?.length, 4, "one box per participant");
+	assert.ok(fitted.plain.some((l) => (l.match(/┬/g) ?? []).length === 4), "boxes open onto lifelines");
+	assert.ok(fitted.plain.at(-1).split("│").length - 1 === 4, "four lifelines");
+	const flat = prose(fitted.plain);
+	for (const [i, label] of ["Viewer (logged into claude.ai)", "claude.ai page (host)", "Artifact iframe (claudeusercontent.com, sandboxed)", "Anthropic backend"].entries()) {
+		const column = fitted.plain.slice(1, 6).map((line) => line.slice(i * 20, (i + 1) * 20).replace(/[│]/g, " ").trim()).join(" ").replace(/\s+/g, "");
+		assert.ok(column.includes(label.replace(/\s+/g, "")), `missing ${label}`);
+	}
+	for (const msg of SESSION_MESSAGES) {
+		assert.ok(flat.replace(/ /g, "").includes(msg.replace(/ /g, "")), `missing message ${msg}\n${text}`);
+	}
+	assert.ok(flat.includes("open artifact link"), "message words wrap intact");
+	assert.match(text, /─▶/, "solid arrow to the right");
+	assert.match(text, /◀╌/, "dashed arrow to the left");
+
+	const out = transformMermaidBlocks("```mermaid\n" + SESSION_SEQUENCE + "\n```", 80);
+	assert.ok(!out.includes("```mermaid"), "sequence diagram fell back to source");
+	for (const line of out.split("\n")) assert.ok(line.length <= 80, `long line: ${line}`);
+});
+
+test("compact sequence layout still fits and keeps every message at a narrow width", () => {
+	const fitted = renderFitted(SESSION_SEQUENCE, 40);
+	assert.ok(fitted.width <= 40, `width ${fitted.width}`);
+	const flat = prose(fitted.plain);
+	for (const msg of SESSION_MESSAGES) {
+		// Words longer than a column are split; compare without spaces.
+		assert.ok(flat.replace(/ /g, "").includes(msg.replace(/ /g, "")), `missing message ${msg}`);
+	}
+});
+
+test("a sequence diagram too wide for any layout is left to the caller", () => {
+	const art = renderFitted(SESSION_SEQUENCE, 20);
+	assert.deepEqual(art.plain, renderMermaid(SESSION_SEQUENCE).plain);
+});
+
+test("a sequence diagram with unsupported statements keeps the original fallback", () => {
+	const src = `${SESSION_SEQUENCE}\n    Note over V,P: unsupported here`;
+	const art = renderFitted(src, 80);
+	assert.deepEqual(art.plain, renderMermaid(src).plain);
+});

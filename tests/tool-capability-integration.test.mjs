@@ -16,7 +16,7 @@ const ALL = [
 	"web_search", "source_check", "fetch_content", "get_search_content",
 	"subagent", "subagent_supervisor",
 	"computer", "find_roots", "observe_ui", "act_ui", "launch_browser", "evaluate_browser",
-	"mcp", "mcpScript", "mcp__excalidraw",
+	"mcp__excalidraw", "tool_search",
 ];
 
 const describe = (name) => ({
@@ -32,7 +32,7 @@ const describe = (name) => ({
  */
 const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = SessionManager.inMemory(), settings = settingsFor(sessionManager) } = {}) => {
 	let activeTools = [...active];
-	const handlers = { session_start: [], before_agent_start: [], session_tree: [] };
+	const handlers = { session_start: [], before_agent_start: [], session_tree: [], tool_result: [], tool_call: [] };
 	const commands = new Map();
 	const registered = new Map();
 	const pi = {
@@ -58,7 +58,12 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 	return {
 		settings,
 		notices,
-		discover: (query, limit) => registered.get("discover_tools").execute("discover", { query, limit }),
+		/** What Pi's native tool_search does on a match: activate it, then report `details.loaded`. */
+		discover: (name) => {
+			activeTools = [...activeTools, name];
+			const event = { type: "tool_result", toolName: "tool_search", toolCallId: "search", input: { query: name }, content: [], details: { loaded: [name] }, isError: false };
+			return handlers.tool_result.map(handler => handler(event, ctx)).find(Boolean) ?? event;
+		},
 		sessionManager,
 		active: () => activeTools,
 		setActive: (names) => { activeTools = [...names]; },
@@ -74,11 +79,12 @@ const harness = ({ all = ALL, active = ["read", "bash"], sessionManager = Sessio
 test("auto removes persisted choices and restores discovery across turns and branches", async () => {
   const h = harness(); h.start();
   await h.tool("computer off");
-  assert.deepEqual((await h.discover("browser")).details.blocked, ["computer"]);
+  assert.deepEqual(h.discover("computer").details.blocked, ["computer"]);
+  assert.ok(!h.active().includes("computer"), "an explicit off drops what tool_search loaded");
   await h.tool("computer auto");
   assert.equal(Object.hasOwn(h.settings.read(), "computer"), false);
   assert.ok(!h.active().includes("computer"));
-  assert.deepEqual((await h.discover("browser")).details.activated, ["computer"]);
+  assert.deepEqual(h.discover("computer").details.loaded, ["computer"]);
   h.turn(); h.navigate(); await h.tool("list");
   assert.ok(h.active().includes("computer"));
   await h.tool("subagent off");
@@ -102,10 +108,10 @@ test("subagent role configuration survives as its own command", () => {
 test("a session starts with everyday tools on and the situational ones off", async () => {
 	const h = harness();
 	h.start();
-	for (const name of ["todo", "question", "web_search", "subagent", "discover_tools"]) {
+	for (const name of ["todo", "question", "web_search", "subagent", "tool_search"]) {
 		assert.ok(h.active().includes(name), `${name} should be on`);
 	}
-	for (const name of ["computer", "act_ui", "mcp", "mcpScript", "mcp__excalidraw", "lsp_fix", "lsp_diagnostics", "subagent_supervisor"]) {
+	for (const name of ["computer", "act_ui", "mcp__excalidraw", "lsp_fix", "lsp_diagnostics", "subagent_supervisor"]) {
 		assert.ok(!h.active().includes(name), `${name} should be off by default`);
 	}
 });
@@ -128,14 +134,14 @@ test("the capability stays on across turns and is not withheld again", async () 
 	assert.ok(h.active().includes("computer"), "an explicit choice is not undone every turn");
 });
 
-test("a package cannot quietly re-enable a withheld tool", () => {
-	// pi-mcp-adapter re-adds "mcp" after session start, so a single startup pass
-	// is not enough to keep it off.
+test("a package cannot quietly re-enable a withheld tool", async () => {
+	// Pi's MCP activates server tools as they connect, after session start.
 	const h = harness();
 	h.start();
-	h.setActive([...h.active(), "mcp", "mcp__excalidraw"]);
+	await h.tool("mcp off");
+	h.setActive([...h.active(), "computer", "mcp__excalidraw"]);
 	h.turn();
-	assert.ok(!h.active().includes("mcp"), "withheld again before the turn runs");
+	assert.ok(!h.active().includes("computer"), "withheld again before the turn runs");
 	assert.ok(!h.active().includes("mcp__excalidraw"));
 });
 
@@ -215,14 +221,14 @@ test("shared choices remain in effect on sibling branches", async () => {
 	h.start();
 	const fork = sessionManager.appendCustomEntry("pix-test-marker", {});
 
-	await h.tool("mcp on");
+	await h.tool("computer on");
 	h.turn();
-	assert.ok(h.active().includes("mcp"));
+	assert.ok(h.active().includes("computer"));
 
 	sessionManager.branch(fork);
 	await h.tool("read off");
 	h.navigate();
-	assert.ok(h.active().includes("mcp"), "branch changes cannot revert shared settings");
+	assert.ok(h.active().includes("computer"), "branch changes cannot revert shared settings");
 	assert.ok(!h.active().includes("read"), "but its own choice applies");
 });
 
@@ -297,13 +303,17 @@ test('opening another session panel synchronizes shared choices and undoes MCP r
  await b.tool('list');
  assert.ok(b.active().includes('computer'));
  await a.tool('computer off');
- b.setActive([...b.active(),'mcp','mcpScript','mcp__excalidraw']);
- await b.tool('list');
- for(const name of ['computer','mcp','mcpScript','mcp__excalidraw']) assert.ok(!b.active().includes(name),name);
- await b.tool('mcp on');
- a.turn();assert.ok(a.active().includes('mcp'));
  await a.tool('mcp off');
- b.turn();assert.ok(!b.active().includes('mcp'));
+ b.setActive([...b.active(),'mcp__excalidraw']);
+ await b.tool('list');
+ for(const name of ['computer','mcp__excalidraw']) assert.ok(!b.active().includes(name),name);
+ await b.tool('mcp on');
+ assert.equal(a.settings.read().mcp,undefined,'on clears the veto instead of forcing server tools on');
+ a.setActive([...a.active(),'mcp__excalidraw']);
+ a.turn();assert.ok(a.active().includes('mcp__excalidraw'));
+ await a.tool('mcp off');
+ b.setActive([...b.active(),'mcp__excalidraw']);
+ b.turn();assert.ok(!b.active().includes('mcp__excalidraw'));
 });
 
 test('old session records cannot override a newer shared off choice', async () => {

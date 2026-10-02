@@ -31,7 +31,7 @@ import {
 import { ToolPanelView } from "../src/tool-panel-view.ts";
 import type { Overrides } from "../src/tool-overrides.ts";
 import { selectedTools, toolSettings, type ToolSettings } from "../src/tool-settings.ts";
-import { discoveredTools, isDiscoverable, ownedMcpTools } from "../src/tool-discovery.ts";
+import { discoveredTools, isDiscoverable } from "../src/tool-discovery.ts";
 
 /**
  * Name a package from its directory, so a local checkout of pix reports the
@@ -51,17 +51,17 @@ const packageName = (baseDir: string): string | undefined => {
 };
 
 export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSettings()) {
-  const capabilityById = (id: string) => baseCapabilityById(id, ownedMcpTools(pi));
-  const modeOf = (names: string[], overrides: Overrides) => toolMode(names, overrides, ownedMcpTools(pi));
-  const discoverable = (name: string) => isDiscoverable(name, ownedMcpTools(pi));
+  const capabilityById = baseCapabilityById;
+  const modeOf = toolMode;
+  const discoverable = isDiscoverable;
   const capabilityActions = (id: string) => queryCapabilityActions(pi, id);
   const knownNames = (): Set<string> => new Set(pi.getAllTools().map(entry => entry.name));
   const sync = () => {
-    pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read(), discoveredTools(pi), ownedMcpTools(pi)));
+    pi.setActiveTools(selectedTools(knownNames(), pi.getActiveTools(), settings.read(), discoveredTools(pi)));
   };
   const panel = (): PanelModel => {
     sync();
-    const model = buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName, ownedMcpTools(pi));
+    const model = buildPanel(pi.getAllTools(), pi.getActiveTools(), packageName);
     const overrides = settings.read();
     for (const row of model.rows) {
       const capability = row.kind === "capability" ? capabilityById(row.id) : undefined;
@@ -70,7 +70,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
       row.discoverable = names.length > 0 && names.every(discoverable);
       row.mode = modeOf(names, overrides);
       row.defaultMode = modeOf(names, {});
-      row.inherited = names.every(name => toolChoice(name, overrides, ownedMcpTools(pi)) === undefined);
+      row.inherited = names.every(name => toolChoice(name, overrides) === undefined);
     }
     return model;
   };
@@ -89,6 +89,16 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 		const capability = capabilityById(id);
 		if (!capability) return [];
 		const targets = capabilityTargets(capability, on, knownNames());
+		if (capability.id === "mcp") {
+			// Pi's /mcp exposure decides which server tools are declared; Pix only
+			// vetoes them. On clears the veto without declaring deferred tools.
+			const owned = capabilityTargets(capability, false, knownNames());
+			settings.update({ mcp: on ? undefined : false, ...Object.fromEntries(owned.map(name => [name, on ? undefined : false])) });
+			if (!on) for (const name of owned) discoveredTools(pi).delete(name);
+			const direct = on ? pi.getAllTools().filter(tool => owned.includes(tool.name) && tool.exposure === "direct").map(tool => tool.name) : [];
+			pi.setActiveTools(selectedTools(knownNames(), [...pi.getActiveTools(), ...direct], settings.read(), discoveredTools(pi)));
+			return owned;
+		}
 		setTools(Object.fromEntries(targets.map((name) => [name, on])));
 		return targets;
 	};
@@ -97,7 +107,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
     settings.update(Object.fromEntries(names.map(name => [name, auto && discoverable(name) && modeOf([name], {}) === "on" ? "auto" : undefined])));
     const loaded = discoveredTools(pi);
     for (const name of names) if (name !== "goal") loaded.delete(name);
-    pi.setActiveTools(selectedTools(knownNames(), [...pi.getActiveTools(), ...names], settings.read(), loaded, ownedMcpTools(pi)));
+    pi.setActiveTools(selectedTools(knownNames(), [...pi.getActiveTools(), ...names], settings.read(), loaded));
   };
 
 	pi.registerCommand("tool", {
@@ -255,7 +265,7 @@ export default function tool(pi: ExtensionAPI, settings: ToolSettings = toolSett
 							discoverable: discoverable(entry.name),
 							mode: modeOf([entry.name], settings.read()),
 							defaultMode: modeOf([entry.name], {}),
-							inherited: toolChoice(entry.name, settings.read(), ownedMcpTools(pi)) === undefined,
+							inherited: toolChoice(entry.name, settings.read()) === undefined,
 							tokens: entry.tokens,
 							origin: entry.origin,
 						})),

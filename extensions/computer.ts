@@ -22,6 +22,7 @@ import { CHROME_CANDIDATES, installWrapper } from "../src/chrome-wrapper.ts";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "../src/computer-script.ts";
 import { renderOutcome, runScript } from "../src/computer-runner.ts";
 import { registerCapabilityAction } from "../src/capability-actions.ts";
+import { withSpecialistExposure } from "../src/tool-discovery.ts";
 import { checkPermissions, renderReport } from "../src/computer-permissions.ts";
 
 const BACKEND = "@injaneity/pi-computer-use";
@@ -228,7 +229,7 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 		run: stop,
 	});
 
-	pi.registerTool({
+	pi.registerTool(withSpecialistExposure({
 		name: "computer",
 		label: "Computer",
 		description:
@@ -310,5 +311,5 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 			];
 			return new Text(lines.join("\n"), 0, 0);
 		},
-	});
+	}));
 }

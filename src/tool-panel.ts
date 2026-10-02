@@ -2,7 +2,7 @@
  * The `/tool` panel model: which rows exist, and what each one means.
  *
  * A flat list of every registered tool is unusable. Thirty rows named
- * `observe_ui`, `subagent_supervisor`, and `mcpScript` ask the user to understand a
+ * `observe_ui` and `subagent_supervisor` ask the user to understand a
  * package's internals before choosing what the assistant may do. The rows that
  * matter are the everyday ones plus a handful of capabilities, so this module
  * decides which tools stay visible and which fold into a capability.
@@ -42,15 +42,17 @@ export interface CapabilitySpec {
 	defaultOn: boolean;
 }
 
-/** MCP registers one tool per configured server, named at connect time. */
-export const isMcpServerTool = (name: string, mcpNames?: ReadonlySet<string>): boolean => name.startsWith("mcp__") || mcpNames?.has(name) === true;
+/** Pi's built-in MCP names each server tool `mcp__<server>__<tool>` at connect time. */
+export const isMcpServerTool = (name: string): boolean => name.startsWith("mcp__");
 
 /**
  * Capability definitions.
  *
  * Web and Subagent are on by default because they support ordinary work.
- * Computer and MCP are off: both are large, both are situational, and their
- * cost is invisible until something like this panel shows it.
+ * Computer is off: it is large, situational, and its cost is invisible until
+ * something like this panel shows it. MCP only groups Pi's server tools: their
+ * exposure (direct, deferred via tool_search, codemode) is configured in /mcp,
+ * so Pix follows Pi unless the user explicitly turns tools off here.
  */
 export const CAPABILITIES: CapabilitySpec[] = [
 	{
@@ -86,11 +88,11 @@ export const CAPABILITIES: CapabilitySpec[] = [
 	{
 		id: "mcp",
 		label: "MCP",
-		summary: "Call tools on configured MCP servers",
-		primary: ["mcp"],
-		secondary: ["mcpScript"],
+		summary: "Tools from MCP servers configured in /mcp",
+		primary: [],
+		secondary: [],
 		match: isMcpServerTool,
-		defaultOn: false,
+		defaultOn: true,
 	},
 ];
 
@@ -98,10 +100,7 @@ export const CAPABILITIES: CapabilitySpec[] = [
 const groupedToolNames = (): Set<string> =>
 	new Set(CAPABILITIES.flatMap((capability) => [...capability.primary, ...capability.secondary]));
 
-export const capabilityById = (id: string, mcpNames?: ReadonlySet<string>): CapabilitySpec | undefined => {
-  const capability = CAPABILITIES.find(candidate => candidate.id === id);
-  return capability?.id === "mcp" ? { ...capability, match: name => isMcpServerTool(name, mcpNames) } : capability;
-};
+export const capabilityById = (id: string): CapabilitySpec | undefined => CAPABILITIES.find(candidate => candidate.id === id);
 
 export type ToolMode = "auto" | "on" | "off";
 export type RowMode = ToolMode | "mixed";
@@ -109,19 +108,20 @@ export type RowMode = ToolMode | "mixed";
 export const OPTIONAL_BUILTINS = ["find", "grep", "ls", ...(process.platform === "win32" ? [] : ["powershell"])];
 
 /** Auto means genuinely on-demand, not merely an absent saved preference. */
-export const defaultToolMode = (name: string, mcpNames?: ReadonlySet<string>): ToolMode => {
+export const defaultToolMode = (name: string): ToolMode => {
 	if (EVERYDAY_WEB.includes(name)) return "on";
-	if (isDiscoverable(name, mcpNames) || name === "goal") return "auto";
+	if (isDiscoverable(name) || name === "goal") return "auto";
 	if (OPTIONAL_BUILTINS.includes(name) || CAPABILITIES.some(capability => capability.secondary.includes(name))) return "off";
 	return "on";
 };
-export const toolChoice = (name: string, overrides: Record<string, boolean | "auto">, mcpNames?: ReadonlySet<string>) =>
-  overrides[name] ?? (overrides.mcp === false && (isMcpServerTool(name, mcpNames) || name === "mcpScript") ? false : undefined);
+/** The capability-level `mcp: false` also covers server tools that connect later. */
+export const toolChoice = (name: string, overrides: Record<string, boolean | "auto">) =>
+  overrides[name] ?? (overrides.mcp === false && isMcpServerTool(name) ? false : undefined);
 
-export const toolMode = (names: string[], overrides: Record<string, boolean | "auto">, mcpNames?: ReadonlySet<string>): RowMode => {
+export const toolMode = (names: string[], overrides: Record<string, boolean | "auto">): RowMode => {
 	const modes = new Set<ToolMode>(names.map(name => {
-    const choice = toolChoice(name, overrides, mcpNames);
-    return choice === true ? "on" : choice === false ? "off" : choice === "auto" ? "auto" : defaultToolMode(name, mcpNames);
+    const choice = toolChoice(name, overrides);
+    return choice === true ? "on" : choice === false ? "off" : choice === "auto" ? "auto" : defaultToolMode(name);
   }));
 	return modes.size > 1 ? "mixed" : modes.values().next().value ?? "auto";
 };
@@ -178,7 +178,7 @@ const PANEL_GROUPS = ["Core tools", "Workflow", "Code checks", "Capabilities", "
 export const panelGroup = (row: PanelRow): typeof PANEL_GROUPS[number] => {
 	if (OPTIONAL_BUILTINS.includes(row.id)) return "Optional built-ins";
 	if (["bash", "powershell", "edit", "read", "write"].includes(row.id)) return "Core tools";
-	if (["background", "discover_tools", "goal", "question", "subagent", "todo"].includes(row.id)) return "Workflow";
+	if (["background", "codemode", "goal", "question", "subagent", "todo", "tool_search"].includes(row.id)) return "Workflow";
 	if (["lsp_diagnostics", "lsp_fix"].includes(row.id)) return "Code checks";
 	return row.kind === "capability" ? "Capabilities" : "Other";
 };
@@ -192,19 +192,17 @@ export const buildPanel = (
 	tools: ToolInfoLike[],
 	active: Iterable<string>,
 	packageName?: PackageNamer,
-	mcpNames?: ReadonlySet<string>,
 ): PanelModel => {
 	const rows = inventory(tools, active, packageName);
 	const grouped = groupedToolNames();
 	const byName = new Map(rows.map((row) => [row.name, row]));
 
 	const basic: ToolRow[] = rows
-		.filter((row) => !grouped.has(row.name) && !isMcpServerTool(row.name, mcpNames))
+		.filter((row) => !grouped.has(row.name) && !isMcpServerTool(row.name))
 		.map((row) => ({ kind: "tool", id: row.name, name: row.name, on: row.active, tokens: row.tokens, origin: row.origin }));
 
 	const capabilityRows: CapabilityRow[] = [];
-	for (const base of CAPABILITIES) {
-    const capability = capabilityById(base.id, mcpNames)!;
+	for (const capability of CAPABILITIES) {
 		const named = [...capability.primary, ...capability.secondary]
 			.map((name) => byName.get(name))
 			.filter((row): row is ToolCost => row !== undefined);

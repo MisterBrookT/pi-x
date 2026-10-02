@@ -41,8 +41,12 @@ export interface RemoteTool {
 }
 
 export interface RemoteBackground {
+  /** "subagent" cards come from pi-subagents completion notices; absent means a pix background shell job. */
+  kind?: "subagent";
   id: string;
-  state: "running" | "completed" | "failed" | "stopped";
+  /** Short agent name(s) shown instead of "Job <id>". */
+  name?: string;
+  state: "running" | "completed" | "failed" | "stopped" | "paused";
   command: string;
   output: string;
   truncated: boolean;
@@ -82,6 +86,19 @@ function stringify(value: unknown): string {
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
 }
 
+// pi-subagents sends "subagent-notify" without details; its first line is the stable header from formatSingleCompletion/formatGroupedCompletion.
+const subagentHeader = /^(?:Background task|Detached foreground task) (completed|failed|paused|stopped): \*\*(.+?)\*\*(?:\s+(\([^)]*\)))?$/;
+const subagentGroupHeader = /^Background tasks (completed) \((\d+)\): (.+)$/;
+function subagentBackground(text: string): RemoteBackground | undefined {
+  const [first = "", ...rest] = text.split("\n");
+  const body = rest.join("\n").trim();
+  const single = first.match(subagentHeader);
+  if (single) return { kind: "subagent", id: "", name: single[2], state: single[1] as RemoteBackground["state"], command: single[3] ?? "", output: clip(body, 4_000), truncated: body.length > 4_000 };
+  const group = first.match(subagentGroupHeader);
+  if (group) return { kind: "subagent", id: "", name: group[3].replace(/\*\*/g, "").slice(0, 240), state: "completed", command: `${group[2]} tasks`, output: clip(body, 4_000), truncated: body.length > 4_000 };
+  return undefined;
+}
+
 /** Build remote messages from Pi agent messages; tool results attach to the assistant call that produced them. */
 export function remoteMessages(messages: readonly any[], files?: MentionContext): RemoteMessage[] {
   const result: RemoteMessage[] = [];
@@ -116,7 +133,7 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       const details = message.customType === "pix-background" ? message.details : undefined;
       const valid = details && typeof details.id === "string" && ["running", "completed", "failed", "stopped"].includes(details.state)
         && typeof details.command === "string" && typeof details.output === "string";
-      const background: RemoteBackground | undefined = valid ? {
+      const background: RemoteBackground | undefined = message.customType === "subagent-notify" ? subagentBackground(text) : valid ? {
         id: details.id, state: details.state, command: clip(details.command, 240), output: clip(details.output, 4_000),
         truncated: Boolean(details.truncated), ...(typeof details.fullOutputPath === "string" ? { fullOutputPath: details.fullOutputPath } : {}),
       } : undefined;

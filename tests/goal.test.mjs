@@ -364,3 +364,59 @@ test("a user pause while subagent status is pending prevents a late continuation
 	assert.equal(h.messages.length, 1);
 	assert.equal(h.state().status, "paused");
 });
+
+test("the agent may start a goal in the current turn but never replaces or resumes an unfinished goal", async () => {
+	const h = harness();
+	assert.equal(h.tool.exposure, "deferred", "native tool_search discovers it");
+	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
+	h.setIdle(false);
+	const result = await start("Substantial task with acceptance criteria.");
+	assert.equal(h.state().status, "active");
+	assert.equal(h.messages.length, 0, "no wake: the current turn continues");
+	assert.equal(h.reminders.at(-1).options.deliverAs, "steer");
+	assert.match(result.content[0].text, /started/);
+	const first = h.state();
+	await assert.rejects(start("Replacement."), /active; it was not replaced/);
+	await h.command("pause");
+	await assert.rejects(start("Replacement."), /paused; it was not replaced or resumed/);
+	assert.equal(h.state().status, "paused");
+	h.setIdle(true);
+	await h.command("resume");
+	await h.finish("blocked", "Need credentials.");
+	await assert.rejects(start("Replacement."), /blocked/);
+	assert.equal(h.state().id, first.id);
+	await h.command("resume");
+	await h.finish("completed");
+	await start("Next goal after completion.");
+	assert.notEqual(h.state().id, first.id);
+	await assert.rejects(h.tool.execute("x", { status: "active" }, undefined, undefined, h.ctx), /objective is required/);
+	for (const mode of ["print", "json"]) {
+		const other = harness();
+		other.ctx.mode = mode;
+		await assert.rejects(other.tool.execute("x", { status: "active", objective: "Goal." }, undefined, undefined, other.ctx), /persistent/);
+		assert.equal(other.state(), null);
+	}
+	const off = harness();
+	off.pi.events.on("pix:goal-tool-permission", (permission) => { permission.allowed = false; });
+	await assert.rejects(off.tool.execute("x", { status: "active", objective: "Goal." }, undefined, undefined, off.ctx), /disabled by the user/);
+	assert.equal(off.state(), null);
+});
+
+test("finishing every todo triggers verification rather than completion", async () => {
+	const h = harness();
+	await h.command("Ship the feature.");
+	const text = h.reminders.at(-1).message.content;
+	assert.match(text, /only continuation controller/);
+	assert.match(text, /Finishing every todo is a cue to verify, not completion/);
+	assert.match(text, /add or reopen todos/);
+	assert.match(text, /full scope/);
+	assert.match(text, /Progress means concrete actions and evidence, not plans/);
+	assert.match(text, /requirement by requirement/);
+	assert.match(text, /add or reopen todos and continue\. Only after every criterion is verified, call goal with status=completed/);
+	assert.match(text, /try safe alternatives[^.]*; do not repeatedly ask for authorization/);
+	assert.match(h.tool.description, /without extra opt-in, for substantial verifiable multi-step tasks/);
+	assert.match(h.tool.description, /not quick answers or discussion/);
+	await h.emit("agent_settled");
+	assert.equal(h.state().status, "active", "only the goal tool completes a goal");
+	assert.match(h.messages.at(-1).message.content, /current todo state/);
+});

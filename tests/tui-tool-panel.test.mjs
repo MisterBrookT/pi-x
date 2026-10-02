@@ -43,7 +43,7 @@ const tool = (name, source = "builtin") => ({
 	sourceInfo: { source, path: `<builtin:${name}>` },
 });
 
-const ALL = ["read", "bash", "web_search", "subagent", "subagent_supervisor", "computer", "act_ui", "observe_ui", "mcp"].map((name) => tool(name));
+const ALL = ["read", "bash", "web_search", "subagent", "subagent_supervisor", "computer", "act_ui", "observe_ui", "mcp__docs__search"].map((name) => tool(name));
 
 const view = (active = ["read", "bash"]) => new ToolPanelView({ model: buildPanel(ALL, active) });
 

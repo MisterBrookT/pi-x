@@ -77,15 +77,15 @@ command list.
 
 ### Tools in model context
 
-Everyday tools stay available: Pi's `read`, `bash`, `edit`, and `write`, Todo, Subagent, web search and retrieval, Background, and Question. One `discover_tools` entry point activates specialists by capability description or exact tool name, for example `{query:"browser interaction"}`. It uses bounded keyword matching (two matches by default, at most five), not another model call. The selected tools become callable on the next model request.
+Everyday tools stay available: Pi's `read`, `bash`, `edit`, and `write`, Todo, Subagent, web search and retrieval, Background, and Question. Pix turns on Pi's native `tool_search` in every session, with or without MCP servers. Pix specialists are registered with `deferred` exposure, so `tool_search` finds them by capability description or exact tool name, for example `{query:"browser interaction"}`, using Pi's BM25 ranking rather than another model call. Loaded tools become callable on the next model request.
 
 Pi's separate `grep`, `find`, and `ls` tools are off by default, grouped under Optional built-ins, and not discoverable. Use Bash (`rg`, `find`, `ls`) without loading extra schemas, or explicitly enable those tool alternatives through `/tool`.
 
-Computer, LSP diagnostics/fixes, subagent supervisor communication, specialist source/video analysis, and configured MCP tools start deferred. Computer discovery exposes only the script wrapper, not its backend primitives. Missing integrations are not installed automatically, and activation does not grant system permissions. The Goal tool is exposed while goal mode is active, unless explicitly overridden.
+Computer, LSP diagnostics/fixes, subagent supervisor communication, specialist source/video analysis, and configured MCP tools start deferred. Loading Computer exposes only the script wrapper, not its backend primitives. Missing integrations are not installed automatically, and activation does not grant system permissions. The Goal tool is deferred: it is exposed while goal mode is active or after `tool_search` loads it, unless explicitly turned off.
 
 Web stays on by default but also supports on-demand activation: choose `auto` in the panel or run `/tool web auto`. This preference persists; search and retrieval schemas remain absent until discovered. Individual web tools can be configured separately.
 
-Discovery is session-local: it survives subsequent turns and branch navigation, but resets on reload or a new session. It never writes preferences. `/tool <name|capability> on` keeps tools enabled; `off` blocks discovery; `auto` selects on-demand activation for discoverable tools. `/tool <name|capability> default` (or Delete in the panel) removes overrides and restores defaults. For ordinary tools without discovery, the older `auto` command remains a default-reset alias. Existing saved on/off choices remain authoritative. Choices live in `~/.pi/agent/pix-tools.json` (or the configured Pi agent directory) and survive reloads, restarts, and branch navigation. Opening the panel or starting a turn rereads them; old conversation entries cannot undo current preferences.
+What `tool_search` loads is session-local: it survives subsequent turns, branch navigation, and reloads of the same session, but not a new session. It never writes preferences. `/tool <name|capability> on` keeps tools enabled; `off` drops the tool even after `tool_search` loads it and blocks its calls, including calls from `codemode` scripts; `auto` selects on-demand activation for discoverable tools. `/tool <name|capability> default` (or Delete in the panel) removes overrides and restores defaults. For ordinary tools without discovery, the older `auto` command remains a default-reset alias. Existing saved on/off choices remain authoritative. Choices live in `~/.pi/agent/pix-tools.json` (or the configured Pi agent directory) and survive reloads, restarts, and branch navigation. Opening the panel or starting a turn rereads them; old conversation entries cannot undo current preferences.
 
 This reduces initially exposed tool schemas and their tool-specific guidance, not conversation history or global/project instructions. UI features such as the footer, graph layout, and editor suggestions are unchanged. Pi records tool changes in its transcript; provider support determines how those changes affect prompt caching.
 
@@ -140,6 +140,12 @@ model errors do not pause it while Pi is still retrying or recovering context.
 An error that remains after recovery does pause it. `/goal resume` explicitly
 restarts a paused goal; ordinary text such as “go on” does not turn goal mode
 back on.
+
+The agent can also discover the deferred `goal` tool and start a goal inside the current turn, without an extra wake.
+It does so automatically for substantial, verifiable multi-step tasks you request (not quick
+answers or discussion). It never replaces or resumes an unfinished, paused, or blocked
+goal, and `/tool goal off` blocks it. The goal owns the outcome and verification;
+todos track steps. Finishing all todos prompts verification, not completion.
 
 The footer shows `goal on` only while a goal is active, including its waiting
 state. Inactive goals add nothing to the footer; `/goal status` shows their details.
@@ -266,11 +272,9 @@ The relay source and generic Wrangler config live in `relay/`; attach your own c
 
 ## MCP
 
-Pix owns the MCP entry point, backed by a pinned, MIT-attributed `pi-mcp-adapter` 2.34.0 source snapshot in `vendor/mcp/`. Existing configuration discovery, authentication stores, `/mcp` commands, direct-tool names, and scripting are retained. Remove the standalone `npm:pi-mcp-adapter` entry from Pi's package settings and reload; do not load both. Configuration and credentials do not need conversion.
+MCP is provided by Pi's built-in `mcp` extension (Pi 0.99.1 or later); Pix no longer bundles its own adapter. Configure servers in `~/.pi/agent/mcp.json` or a trusted project's `.pi/mcp.json`, and manage them with `/mcp` or `pi mcp add|remove|list|login|logout`. See Pi's `docs/mcp.md` for configuration, exposure modes, and OAuth.
 
-MCP defaults to **auto**. Startup and reconnect cannot activate deferred or disabled tools. Discover `mcp` for gateway calls or `mcpScript` for scripts; exact-name discovery loads only that tool. Configured search-mode direct tools can still be activated by an explicit MCP search. Custom-prefix tools share the MCP panel and policy.
-
-See `vendor/mcp/UPSTREAM.md` for provenance and updates. Integration tests cover Pi 0.86.1, a local stdio server, and the scripting worker—not live remote OAuth providers.
+If you previously relied on Pix's vendored adapter (a `pi-mcp-adapter` 2.34.0 snapshot), its adapter-specific settings, auth stores, and `mcpScript` scripting are not carried over; re-add servers and sign in again through Pi. Do not also load the standalone `npm:pi-mcp-adapter` package.
 
 ## LSP
 

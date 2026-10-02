@@ -17,7 +17,7 @@ criteria:
 
 | Command | Effect |
 | --- | --- |
-| `/goal <objective>` | Start or replace a goal while Pi is idle |
+| `/goal <objective>` | Start or replace a goal while Pi is idle (the agent can also start one; see below) |
 | `/goal` | Open the configuration menu in the TUI: state, objective, reason, and available start/pause/resume/replace/clear actions; opening or cancelling changes nothing |
 | `/goal status` | Show objective, state, continuation count, and completion evidence or pause/blocker reason (also the no-argument behavior outside the TUI) |
 | `/goal pause` or `/goal stop` | Stop future goal continuations; current work is not cancelled |
@@ -41,6 +41,37 @@ Goal mode requires a persistent TUI or RPC session. It refuses to start or resum
 while another turn is running or messages are queued. If the `goal` tool has
 been disabled, enable it with `/tool goal on` first. Starting a goal never changes
 tool permissions or enables disabled tools.
+
+## Agent-started goals
+
+The `goal` tool is registered with `deferred` exposure, so Pi's native
+`tool_search` can find and load it like other Pix specialists; its schema is not
+in the default request. The agent may start a goal with `status: "active"` and an
+`objective` holding the full scope and acceptance criteria. It does this automatically, without extra
+opt-in, for substantial verifiable multi-step tasks you request, but not for quick answers or discussion.
+
+- The goal starts **inside the current tool turn**: the goal reminder is steered
+  into the next request, and no extra wake message or turn is sent. The usual
+  `agent_settled` continuation applies afterward.
+- It never replaces an active, paused, or blocked goal, and never resumes one;
+  only `/goal resume`, `/goal clear`, or a new `/goal` can. Starting is allowed only with no
+  goal or a completed one.
+- It requires a persistent TUI or RPC session, and an explicit `/tool goal off`
+  blocks discovery, the start, and every other goal call.
+
+## Goals and todos
+
+The goal owns the outcome and acceptance verification and is the only
+continuation controller; the todo list tracks steps only. Active goal context tells the agent
+to keep the objective's full scope, to treat all todos done as a cue to verify
+rather than as completion, and to add or reopen todos when verification finds a
+gap. Continuation prompts point to the existing todo-state reminder for the next
+step instead of repeating the plan, so there is no duplicate reminder. Only the
+goal tool's `completed` call ends the goal.
+
+There is no stored link between a goal and its todos: no schema migration or todo
+IDs in goal state. The pairing is by instruction, so Pix does not enforce that
+todos cover the objective or that every todo is done before completion.
 
 ## Continuation and stopping
 
@@ -96,7 +127,7 @@ Completing a goal still permits the agent's normal final summary.
   than removing them. This keeps the conversation prefix stable for cached
   continuation. Cache-hit percentages still depend on the provider.
 - Sessions that have never enabled goal mode add no goal-state messages. The
-  small `goal` tool schema is present when enabled, like other Pix tools.
+  small `goal` tool schema is deferred until discovered or a goal is active.
 - `/reload` preserves the current session's goal status, objective, and used
   continuation count. It does not create a new goal or launch an extra turn;
   subsequent turns still receive active goal context.
@@ -113,8 +144,10 @@ handles append-only, deduplicated messages shared with Todo. Background commands
 goals coordinate via Pi's session-scoped event bus in `src/background-state.ts`.
 No new dependency or secondary model is used.
 
-`tests/goal.test.mjs` covers state, limits, races, and public subagent status
-shapes. `tests/goal-runtime.test.mjs` uses real Pi sessions with scripted provider
+`tests/goal.test.mjs` covers state, limits, races, public subagent status
+shapes, agent starts (no replace/resume, off, ephemeral modes), and goal/todo
+completion instructions. `tests/tool-discovery-runtime.test.mjs` discovers the
+goal tool through real `tool_search` and starts a goal mid-turn without a wake. `tests/goal-runtime.test.mjs` uses real Pi sessions with scripted provider
 responses and real shell processes to exercise continuation, background waits,
 pause/clear, interruption, failures, and compaction checkpoint restoration.
 `tests/state-reminder-runtime.test.mjs` checks stable request prefixes through

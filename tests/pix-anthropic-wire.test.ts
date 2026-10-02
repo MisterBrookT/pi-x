@@ -218,11 +218,12 @@ console.log("\n=== UNKNOWN stop_reason MUST NOT BECOME A SUCCESSFUL done ===");
 		`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`,
 	].join("");
 
+	let stopReasonSse = badSse;
 	const srv3 = http.createServer((req, res) => {
 		req.on("data", () => {});
 		req.on("end", () => {
 			res.writeHead(200, { "Content-Type": "text/event-stream" });
-			res.end(badSse);
+			res.end(stopReasonSse);
 		});
 	});
 	await new Promise<void>((r) => srv3.listen(0, "127.0.0.1", () => r()));
@@ -234,10 +235,24 @@ console.log("\n=== UNKNOWN stop_reason MUST NOT BECOME A SUCCESSFUL done ===");
 		{ apiKey: "sk-ant-oat01-FAKE" } as any,
 	);
 	const seen: string[] = [];
-	for await (const ev of s3) seen.push(ev.type);
-	srv3.close();
-
+	let errorMessage = "";
+	for await (const ev of s3) {
+		seen.push(ev.type);
+		if (ev.type === "error") errorMessage = ev.error.errorMessage ?? "";
+	}
 	check("emits error, not done, on unknown stop_reason", seen.includes("error") && !seen.includes("done"), seen.join(","));
+	check("unknown stop_reason is named", errorMessage.includes("some_future_reason_2027"), errorMessage);
+
+	stopReasonSse = badSse.replace("some_future_reason_2027", "refusal");
+	const refusal = createPixAnthropicStream()(
+		{ ...model, baseUrl: `http://127.0.0.1:${p3}` } as any,
+		context,
+		{ apiKey: "sk-ant-oat01-FAKE" } as any,
+	);
+	let refusalMessage = "";
+	for await (const ev of refusal) if (ev.type === "error") refusalMessage = ev.error.errorMessage ?? "";
+	srv3.close();
+	check("refusal is named", refusalMessage.includes("refusal"), refusalMessage);
 }
 
 console.log("\n=== API-KEY PATH IS UNAFFECTED BY THE OAUTH RELOCATION ===");

@@ -1,8 +1,8 @@
 /**
- * Pi picks inline image and link support from the terminal's name, and it does not know Otty yet,
- * so images show as file paths. Otty supports Kitty graphics and OSC 8 links. Decide here from the
- * process environment, so it works however Pi was started (fresh shell, script, phone launch).
- * Skipped over SSH and inside tmux/screen, and never overrides an explicit PI_* setting.
+ * Otty supports Kitty graphics and OSC 8 links, though its graphics can disappear
+ * in scrollback. Keep inline images as the default rather than silently replacing
+ * them with links; that scrollback defect needs a terminal-side fix.
+ * Skip remote and multiplexed terminals; do not change their capabilities.
  */
 export function ottyCapabilities(env: NodeJS.ProcessEnv = process.env): { images?: "kitty"; hyperlinks?: true } {
   const term = (env.TERM ?? "").toLowerCase();

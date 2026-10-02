@@ -131,6 +131,8 @@ export interface RemoteHubOptions {
   home?: string; sessionsDir?: string; memoryRoot?: string;
   /** Milliseconds since the Mac keyboard or mouse was last used; injectable for tests. */
   macIdleMs?: () => number;
+  /** How long one "visible" presence report counts as Pix on screen; injectable for tests. */
+  presenceMs?: number;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -162,10 +164,26 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (next.origin === "mac" && (options.macIdleMs ?? readMacIdleMs)() < macAwayMs) return;
     // Like chat apps: no notification on a phone that has Pix open on screen right now.
     // Idle but background work still running: Pi resumes by itself, so Brook is not needed yet.
-    const hidden = (endpoint: string) => (onScreen.get(endpoint) ?? 0) > Date.now();
-    // Pi is blocked on a question: Brook is needed now, even though the turn is still running.
-    if (next.question && next.question.id !== old.question?.id) void push.notify({ title: next.name, body: "Pi has a question", session: next.id, tag: `ask-${next.id}` }, hidden);
-    if (old.busy && !next.busy && !next.waiting) void push.notify({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` }, endpoint => (onScreen.get(endpoint) ?? 0) > Date.now());
+    if (next.question && next.question.id !== old.question?.id) notifyPhones({ title: next.name, body: "Pi has a question", session: next.id, tag: `ask-${next.id}` });
+    if (old.busy && !next.busy && !next.waiting) notifyPhones({ title: next.name, body: "Pi finished", session: next.id, tag: `turn-${next.id}` });
+  };
+  // A phone that switches apps may be suspended before its "hidden" report arrives, so a "visible"
+  // report is only trusted until it expires. A push held back for an on-screen phone is sent then if
+  // the phone went silent; any newer presence report means it was really showing Pix, so it stays quiet.
+  const presenceMs = options.presenceMs ?? 25_000;
+  const heldBack = new Set<ReturnType<typeof setTimeout>>();
+  const onScreenNow = (endpoint: string) => (onScreen.get(endpoint) ?? 0) > Date.now();
+  const notifyPhones = (message: { title: string; body: string; session: string; tag: string }) => {
+    for (const [endpoint, until] of onScreen) if (until > Date.now()) holdBack(message, endpoint, until);
+    void push!.notify(message, onScreenNow);
+  };
+  const holdBack = (message: { title: string; body: string; session: string; tag: string }, endpoint: string, until: number) => {
+    const timer = setTimeout(() => {
+      heldBack.delete(timer);
+      if (onScreen.get(endpoint) === until) void push!.notify(message, other => other !== endpoint);
+    }, until - Date.now() + 50);
+    timer.unref?.();
+    heldBack.add(timer);
   };
   // Phone endpoint -> time until which it counts as looking at Pix (refreshed every 10 s while visible).
   const onScreen = new Map<string, number>();
@@ -216,7 +234,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (!push) return send(res, 404, { error: "notifications are off" });
         const input = await body(req) as any;
         if (typeof input?.presence === "string" && typeof input.endpoint === "string" && input.endpoint.length < 1000) {
-          if (input.presence === "visible") onScreen.set(input.endpoint, Date.now() + 25_000); else onScreen.delete(input.endpoint);
+          if (input.presence === "visible") onScreen.set(input.endpoint, Date.now() + presenceMs); else onScreen.delete(input.endpoint);
           if (onScreen.size > 20) onScreen.delete(onScreen.keys().next().value!);
           return send(res, 200, { ok: true });
         }
@@ -390,6 +408,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     port,
     close: () => new Promise<void>((resolve) => {
       clearInterval(sweep);
+      for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);
       for (const phone of phones) phone.end();
       server.close(() => resolve());
