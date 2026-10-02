@@ -10,7 +10,8 @@ test("composer is a two-row dock and appearance lives at the sidebar bottom", ()
   const box = remoteAppHtml.match(/<div class="box">[\s\S]*?<\/form>/)[0];
   const [input, controls] = [box.match(/^[\s\S]*?class="box-controls"/)[0], box.match(/class="box-controls">[\s\S]*$/)[0]];
   assert.match(input, /id="input"/, "text area is the top row");
-  for (const id of ["attach", "actionsButton", "modelChip", "ctxRing", "stop", "send"]) assert.match(controls, new RegExp(`id="${id}"`));
+  for (const id of ["attach", "modelChip", "ctxRing", "stop", "send"]) assert.match(controls, new RegExp(`id="${id}"`));
+  assert.doesNotMatch(controls, /id="actionsButton"/, "quick actions live under +, no separate bolt button");
   assert.doesNotMatch(box, /[⚡■↑＋]/, "controls use drawn icons, not glyphs");
   assert.doesNotMatch(box, /appearanceButton/);
   assert.match(remoteAppHtml, /<\/div><button type="button" class="appearance-button" id="appearanceButton"[^>]*>[\s\S]*?Settings<\/button><div id="deviceSettings" hidden>[\s\S]*?<\/div><\/aside>/, "Settings sits under the scrolling list");
@@ -61,7 +62,7 @@ test("appearance sheet persists validated palette and typography per device", as
   const fonts = await page.evaluate(() => {
     document.getElementById("login").hidden = true;
     for (const id of ["modelChip", "ctxRing"]) document.getElementById(id).hidden = false;
-    document.getElementById("modelChip").innerHTML = "Claude Opus<small> high</small>";
+    
     const host = document.getElementById("messages") || document.body;
     host.insertAdjacentHTML("beforeend", '<div class="msg assistant"><div class="bubble rich"><h2>Reading test 阅读测试</h2><p>The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过了懒狗，中文段落使用衬线回退字体。</p><p>Inline <code>code()</code> stays monospace.</p></div></div>');
     host.insertAdjacentHTML("beforeend", '<div class="msg assistant"><div class="bubble rich"><h2 id="h">T</h2><p id="p">文字</p><pre id="pre">x</pre></div></div><div class="msg user"><div class="bubble rich"><p id="u">me</p></div></div>');
@@ -74,7 +75,7 @@ test("appearance sheet persists validated palette and typography per device", as
   const row = await page.evaluate(() => ["attach", "stop"].map(id => Math.round(document.getElementById(id).getBoundingClientRect().top)));
   assert.equal(row[0], row[1], "controls share one row under the text");
   await page.evaluate(() => { document.getElementById("stop").hidden = true; document.getElementById("send").hidden = false; });
-  const dock = await page.evaluate(() => ["attach", "input", "send", "actionsButton", "modelChip", "ctxRing"].map(id => document.getElementById(id).getBoundingClientRect().height));
+  const dock = await page.evaluate(() => ["attach", "input", "send", "modelChip", "ctxRing"].map(id => document.getElementById(id).getBoundingClientRect().height));
   for (const h of dock.filter((_, i) => i !== 1)) assert.ok(h >= 44, "dock targets are 44px");
   await page.evaluate(() => { document.documentElement.dataset.palette = "warm"; document.getElementById("input").value = ""; });
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(250, 249, 245)", "warm light palette");

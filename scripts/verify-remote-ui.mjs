@@ -141,8 +141,9 @@ try {
   const avatarBox = await page.locator("#messages .av").first().boundingBox();
   assert.ok(Math.round(avatarBox.width) === 30, "30px avatar");
   // Model settings: the header chip shows the model and thinking level and opens a picker.
-  const chip = page.getByRole("button", { name: "Model" });
-  assert.equal(await chip.textContent(), "Fast One low");
+  const chip = page.getByRole("button", { name: /^Model/ });
+  assert.equal(await chip.getAttribute("aria-label"), "Model: Fast One, low thinking", "icon-only chip names the model for screen readers");
+  assert.equal(await chip.textContent(), "", "the chip shows an icon, not the model name");
   await chip.click();
   const sheet = page.getByRole("dialog", { name: "Model settings" });
   await sheet.waitFor();
@@ -154,7 +155,7 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "model", value: "b/smart" }] });
   await sheet.waitFor({ state: "hidden" });
   modelState.model = { id: "b/smart", name: "Smart One" }; modelState.thinking = "high"; await publish();
-  await page.waitForFunction(() => document.querySelector("#modelChip").textContent === "Smart One high");
+  await page.waitForFunction(() => document.querySelector("#modelChip").getAttribute("aria-label") === "Model: Smart One, high thinking");
   modelState.model = { id: "a/fast", name: "Fast One" }; modelState.thinking = "low"; await publish();
   // Regression: reloading the Pi that hosts the hub drops every session for a moment; the phone
   // then jumped to another session. It must stay on the one being read and pick it up again.
@@ -167,10 +168,10 @@ try {
   assert.equal(await page.locator("#title").textContent(), "Pix UI test");
   await fetch(`${base}/agent/other2`, { method: "DELETE", headers: auth });
   // Quick actions: a menu next to +, disabled while Pi works, New chat asks first, typed /reload works too.
-  await page.getByRole("button", { name: "Quick actions" }).click();
+  await page.getByRole("button", { name: "Add" }).click();
   const menu = page.getByRole("menu", { name: "Quick actions" });
   await menu.waitFor();
-  assert.deepEqual(await menu.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["↻ Reload Pi", "✎ New chat", "⇲ Compact"]);
+  assert.deepEqual(await menu.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["Photo", "Reload Pi", "New chat", "Compact"]);
   await page.screenshot({ path: new URL("actions.png", output).pathname });
   const reload = page.waitForRequest(r => r.url().endsWith("/api/sessions/fixture/action") && r.method() === "POST");
   await menu.getByRole("menuitem", { name: /Reload Pi/ }).click();
@@ -178,13 +179,13 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "reload" }] });
   await menu.waitFor({ state: "hidden" });
   page.once("dialog", d => d.dismiss());
-  await page.getByRole("button", { name: "Quick actions" }).click();
+  await page.getByRole("button", { name: "Add" }).click();
   await menu.getByRole("menuitem", { name: /New chat/ }).click();
   await page.waitForTimeout(200);
   // Another Pi session is already open, like jevbench; New chat must not fall onto it.
   await fetch(`${base}/agent/other`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "other", name: "Other", named: true, cwd: "/w", busy: false, messages: [] }) });
   page.once("dialog", d => d.accept());
-  await page.getByRole("button", { name: "Quick actions" }).click();
+  await page.getByRole("button", { name: "Add" }).click();
   await menu.getByRole("menuitem", { name: /New chat/ }).click();
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "new" }] }, "cancelling New chat sends nothing; confirming sends it once");
   // Regression guard: after New chat the phone follows the new session, not another open one.
@@ -199,7 +200,7 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "compact" }] }, "typed /compact runs the action, not a chat message");
   await page.waitForFunction(() => document.querySelector("#input").value === "", null, { timeout: 3000 });
   streaming = "busy"; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor();
-  await page.getByRole("button", { name: "Quick actions" }).click();
+  await page.getByRole("button", { name: "Add" }).click();
   assert.equal(await menu.getByRole("menuitem", { name: /Reload Pi/ }).isDisabled(), true, "actions wait until Pi is idle");
   await page.locator("#actionsShade").click({ position: { x: 20, y: 200 } });
   streaming = ""; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
@@ -357,6 +358,10 @@ try {
   await page.getByRole("button", { name: "Send" }).click();
   const response = await fetch(`${base}/agent/fixture/next`, { headers: auth });
   assert.deepEqual(await response.json(), { prompts: ["Phone-side prompt"] });
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole("button", { name: "Add" }).click();
+  await page.getByRole("menu", { name: "Quick actions" }).getByRole("menuitem", { name: /Photo/ }).click();
+  await chooser;
   await page.locator('#file').setInputFiles({ name: 'fixture.png', mimeType: 'image/png', buffer: Buffer.from(imageData, 'base64') });
   await page.locator('#attachment').waitFor({ timeout: 5000 });
   assert.equal(await page.locator('#composerStatus').textContent(), '');
