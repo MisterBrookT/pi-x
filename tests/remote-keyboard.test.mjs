@@ -100,3 +100,9 @@ test("typing drops the home-indicator padding under the message box, even with a
   await page.getByPlaceholder("Message Pi").focus();
   assert.equal(await pad(), "8px", "no safe-area padding while typing (no visual-viewport shrink needed)");
 });
+
+test("iOS never inflates text on rotation (text-size-adjust pinned to 100%)", () => {
+  const css = remoteAppHtml.match(/<style>[\s\S]*?<\/style>/)[0];
+  assert.match(css, /html\{[^}]*-webkit-text-size-adjust:100%/, "WebKit prefix");
+  assert.match(css, /html\{[^}]*(?<!-webkit-)text-size-adjust:100%/, "standard property");
+});

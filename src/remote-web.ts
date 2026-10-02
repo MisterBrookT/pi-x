@@ -20,7 +20,8 @@ export const remoteAppHtml = String.raw`<!doctype html>
 <meta name="apple-mobile-web-app-title" content="Pix"><meta name="theme-color" content="#f5f5f7">
 <link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg">
 <title>Pix Remote</title>
-<style>
+<style>html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+
 :root{color-scheme:light dark;--bg:#fff;--panel:rgba(255,255,255,.94);--card:#f7f7f8;--text:#202124;--muted:#777981;--line:rgba(0,0,0,.075);--accent:#26282c;--me:#f1f2f4;--me-text:#202124;--code:#f3f4f5;--field:#fff;--pill:#f1f1f3}
 @media(prefers-color-scheme:dark){:root{--bg:#17181a;--panel:rgba(23,24,26,.94);--card:#252629;--text:#f3f3f4;--muted:#a0a1a6;--line:rgba(255,255,255,.09);--accent:#ececef;--me:#303136;--me-text:#f3f3f4;--code:#202125;--field:#26272a;--pill:#323337}}
 :root[data-palette="warm"]{--bg:#faf9f5;--panel:rgba(250,249,245,.94);--card:#f2efe7;--text:#29261f;--muted:#7b7568;--line:rgba(60,45,20,.1);--accent:#2b2924;--me:#efebe1;--me-text:#29261f;--code:#f0ece3;--field:#fffefb;--pill:#f2efe7}
