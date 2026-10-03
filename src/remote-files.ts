@@ -2,7 +2,7 @@
 // phone names is resolved and checked again here; nothing outside home or sensitive is served.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { remoteMemoryRoot } from "./remote-mac.ts";
@@ -129,6 +129,39 @@ export function saveEditable(input: { path?: unknown; text?: unknown; hash?: unk
   writeFileSync(tmp, input.text, { mode: statSync(opened.path).mode });
   renameSync(tmp, opened.path);
   return { status: 200, path: opened.path, hash: sourceHash(input.text) } as const;
+}
+
+const safeName = (name: unknown) => typeof name === "string" && /^[^/\\\0:]{1,120}$/.test(name.trim()) && !name.trim().startsWith(".") ? name.trim() : undefined;
+
+/** Create a new, empty Markdown or text file in an allowed folder. Never overwrites. */
+export function createEditable(input: { dir?: unknown; name?: unknown }, roots: FileRoots = {}) {
+  const folder = checkRemotePath(input.dir, roots);
+  let name = safeName(input.name);
+  if (!folder?.dir || !name) return { status: 400, error: "Choose a folder and a file name" } as const;
+  if (!/\.(md|markdown|txt)$/i.test(name)) name += ".md";
+  const path = join(folder.path, name);
+  if (existsSync(path)) return { status: 409, error: `${name} already exists` } as const;
+  writeFileSync(path, "", { flag: "wx" });
+  const file = checkRemotePath(path, roots);
+  return file ? { status: 200, path: file.path, name: file.name, kind: file.kind } as const : { status: 400, error: "That file can't be created here" } as const;
+}
+
+export const imageUploadLimit = 1_200_000; // fits one relay frame after base64
+/** Save a phone photo next to a Markdown file, Typora style: `slug.md` → `slug.assets/name`. */
+export function saveMarkdownImage(input: { path?: unknown; name?: unknown; data?: unknown }, roots: FileRoots = {}) {
+  const doc = checkRemotePath(input.path, roots);
+  const name = safeName(input.name);
+  if (!doc || doc.dir || doc.kind !== "markdown" || !name || !/\.(png|jpe?g|gif|webp)$/i.test(name) || typeof input.data !== "string") return { status: 400, error: "Invalid image" } as const;
+  const bytes = Buffer.from(input.data, "base64");
+  if (!bytes.length || bytes.length > imageUploadLimit) return { status: 413, error: "Image is too large" } as const;
+  const folderName = doc.name.replace(/\.(md|markdown)$/i, "") + ".assets";
+  const folder = join(dirname(doc.path), folderName);
+  mkdirSync(folder, { recursive: true });
+  const dot = name.lastIndexOf(".");
+  let file = name, n = 1;
+  while (existsSync(join(folder, file))) file = `${name.slice(0, dot)}-${++n}${name.slice(dot)}`;
+  writeFileSync(join(folder, file), bytes, { flag: "wx" });
+  return { status: 200, path: join(folder, file), markdown: `![](${encodeURI(folderName + "/" + file)})` } as const;
 }
 
 const keptTags = new Set("p br b strong i em u s strike h1 h2 h3 h4 h5 h6 ul ol li table thead tbody tfoot tr td th blockquote pre code sub sup hr div span".split(" "));

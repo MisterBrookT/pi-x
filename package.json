@@ -42,6 +42,7 @@
     "open": "^10.2.0",
     "pi-subagents": "0.63.0",
     "recheck": "^4.5.0",
+    "remend": "^1.4.0",
     "turndown": "^7.2.4",
     "unpdf": "^1.8.1"
   },

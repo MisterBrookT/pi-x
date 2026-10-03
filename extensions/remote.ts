@@ -14,6 +14,7 @@ import { runningHelpers } from "../src/remote-helpers.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../src/remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
+import remend from "remend";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "../src/remote-mac.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "../src/remote-relay-agent.ts";
@@ -128,7 +129,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(visibleStream, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {
@@ -171,8 +172,10 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     schedulePush();
   };
 
+  let streamTimer: ReturnType<typeof setTimeout> | undefined, streamBusy = false, streamDirty = false;
   const push = async () => {
     if (!connected) return;
+    for (let i = 0; i < 40 && streamBusy; i++) await new Promise(r => setTimeout(r, 25));
     const branch = ctx ? branchMessages(ctx.sessionManager.getBranch()) : [];
     const body = snapshot(branch);
     if (!body) return;
@@ -195,14 +198,13 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   };
   // Live text goes out on its own small channel: only the growing reply, not the whole session,
   // so the phone sees it word by word instead of in lumps. One request in flight; the newest text wins.
-  let streamTimer: ReturnType<typeof setTimeout> | undefined, streamBusy = false, streamDirty = false;
   const sendStream = async () => {
     if (!connected || !ctx) return;
     if (streamBusy) { streamDirty = true; return; }
     streamBusy = true; streamDirty = false;
     const text = streaming.slice(-12_000);
     try {
-      const res = await request(`/agent/${encodeURIComponent(sessionId)}/stream`, { method: "PUT", body: JSON.stringify({ streaming: text, streamingHtml: text ? renderRemoteMarkdown(text, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : "" }) });
+      const res = await request(`/agent/${encodeURIComponent(sessionId)}/stream`, { method: "PUT", body: JSON.stringify({ streaming: text, streamingHtml: text ? renderRemoteMarkdown(remend(text), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : "" }) });
       if (res.status === 404) schedulePush(); // the hub does not know this session yet
     } catch {} finally { streamBusy = false; if (streamDirty) scheduleStream(); }
   };
@@ -303,7 +305,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (delta.type === "text_delta") { streaming += delta.delta; scheduleStream(); }
   });
   pi.on("message_end", (event, next) => {
-    ctx = next; streaming = ""; schedulePush();
+    ctx = next; streaming = ""; clearTimeout(streamTimer); streamTimer = undefined; streamDirty = false; schedulePush();
     const message = event.message;
     if (message.role !== "user" || !Array.isArray(message.content)) return;
     const fromPhone = message.content.filter(part => part.type === "image" && phoneImages.delete(part.data));

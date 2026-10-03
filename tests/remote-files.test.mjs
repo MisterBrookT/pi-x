@@ -155,3 +155,24 @@ test("the phone edits Markdown and text in place; a change on the Mac is never s
   assert.equal(await readFile(join(f.hub, "skills", "about-me", "private", "me.md"), "utf8"), "k");
   assert.equal((await source(join(f.home, "code", "run.mp4"))).status, 404, "only text files open for editing");
 });
+
+test("new files and Markdown photos stay inside allowed folders and never overwrite", async () => {
+  const { createEditable, saveMarkdownImage } = await import("../src/remote-files.ts");
+  const { renderRemoteMarkdown } = await import("../src/remote-markdown.ts");
+  const { mkdtemp, mkdir, writeFile, readFile, realpath } = await import("node:fs/promises");
+  const home = await realpath(await mkdtemp(join((await import("node:os")).tmpdir(), "pix-new-")));
+  const notes = join(home, "Notes"); await mkdir(notes);
+  assert.equal(createEditable({ dir: notes, name: "idea" }, { home }).path, join(notes, "idea.md"), ".md is added");
+  assert.equal(createEditable({ dir: notes, name: "idea.md" }, { home }).status, 409);
+  for (const name of ["../x.md", ".hidden.md", "a/b.md", ""]) assert.equal(createEditable({ dir: notes, name }, { home }).status, 400, name);
+  assert.equal(createEditable({ dir: "/tmp", name: "x.md" }, { home }).status, 400, "outside home");
+  const data = Buffer.from("fake-jpeg-bytes").toString("base64");
+  const first = saveMarkdownImage({ path: join(notes, "idea.md"), name: "p.jpg", data }, { home });
+  assert.equal(first.markdown, "![](idea.assets/p.jpg)");
+  assert.equal(saveMarkdownImage({ path: join(notes, "idea.md"), name: "p.jpg", data }, { home }).markdown, "![](idea.assets/p-2.jpg)", "no overwrite");
+  assert.equal(saveMarkdownImage({ path: join(notes, "idea.md"), name: "x.svg", data }, { home }).status, 400);
+  await writeFile(join(notes, "idea.md"), "![cat](idea.assets/p.jpg) ![web](https://example.com/a.png)");
+  const html = renderRemoteMarkdown(await readFile(join(notes, "idea.md"), "utf8"), { home, dirs: [notes] });
+  assert.match(html, new RegExp(`<img class="md-image" data-src-path="${join(notes, "idea.assets/p.jpg")}" alt="cat">`));
+  assert.match(html, /Image: web/, "web images are not fetched");
+});

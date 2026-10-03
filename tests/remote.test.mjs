@@ -513,3 +513,10 @@ test("live text reaches phones as small stream events, not whole-session updates
   assert.equal((await fetch(`${base}/agent/nope/stream`, { method: "PUT", headers: auth, body: "{}" })).status, 404);
   assert.equal((await fetch(`${base}/agent/s1/stream`, { method: "PUT", body: "{}" })).status, 401);
 });
+
+test("half-written markdown in live text renders as if already closed", async () => {
+  const { default: remend } = await import("remend");
+  const { renderRemoteMarkdown } = await import("../src/remote-markdown.ts");
+  assert.match(renderRemoteMarkdown(remend("Hello **wor")), /<strong>wor<\/strong>/);
+  assert.match(await readFile(new URL("../extensions/remote.ts", import.meta.url), "utf8"), /renderRemoteMarkdown\(remend\(text\)/);
+});

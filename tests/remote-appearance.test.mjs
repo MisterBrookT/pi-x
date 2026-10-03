@@ -99,3 +99,7 @@ test("appearance sheet persists validated palette and typography per device", as
   assert.equal(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), "rgb(23, 24, 26)", "neutral dark palette");
   assert.deepEqual(errors, []);
 });
+
+test("the message box uses the chosen reading font", () => {
+  assert.match(remoteAppHtml, /\.box textarea\{font-family:var\(--prose-font\)\}\.file-view \.rich\.doc\{font-family:var\(--prose-font\)\}/);
+});

@@ -41,7 +41,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
   return JSON.parse(Buffer.concat([decipher.update(data.subarray(0, -16)), decipher.final()]).toString("utf8"));
 };
 
-export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save)$/.test(path)
+export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image)$/.test(path)
   || method === "GET" && (path === "/api/folders" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && path === "/api/launch"; };
 
 export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {

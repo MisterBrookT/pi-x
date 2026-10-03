@@ -225,9 +225,41 @@ test("live text updates in place and keeps the bottom in view", async t => {
   for (let i = 0; i < 40; i++) {
     text += `word${i} ` + (i % 10 === 9 ? "\n\n" : "");
     await fetch(`${base}/agent/s1/stream`, { method: "PUT", headers: auth, body: JSON.stringify({ streaming: text, streamingHtml: text.split("\n\n").map(p => `<p>${p}</p>`).join("") }) });
-    if (i === 1) await page.evaluate(() => { window.liveEl = document.querySelector("#messages .live-text"); });
+    if (i === 12) await page.evaluate(() => { window.liveEl = document.querySelector("#messages .live-text"); window.firstP = window.liveEl.querySelector("p"); });
   }
   await page.getByText("word39").waitFor();
+  assert.equal(await page.evaluate(() => document.querySelector("#messages .live-text p") === window.firstP), true, "finished paragraphs are not replaced while text arrives");
   assert.equal(await page.evaluate(() => document.querySelector("#messages .live-text") === window.liveEl), true, "the same bubble is patched, not rebuilt");
   assert.ok(await page.evaluate(() => { const c = document.getElementById("chat"); return c.scrollHeight - c.clientHeight - c.scrollTop; }) < 4, "following stays at the bottom");
+});
+
+test("create a new Markdown file from Files, add a photo, and see it in the preview", async t => {
+  const { page, note, errors } = await setup(t);
+  const writing = join(note, "..");
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: /chaos\.md/ }).waitFor();
+  page.once("dialog", d => d.accept("new essay"));
+  await page.getByRole("button", { name: "New Markdown file here" }).click();
+  const editor = page.getByRole("textbox", { name: "Edit new essay.md" });
+  await editor.waitFor();
+  assert.equal(await readFile(join(writing, "new essay.md"), "utf8"), "", "an empty .md file is created in the folder shown");
+  await page.keyboard.type("# Day one\n\nA picture:");
+  const png = Buffer.from((await page.evaluate(() => { const c = document.createElement("canvas"); c.width = 40; c.height = 30; const x = c.getContext("2d"); x.fillStyle = "#c63"; x.fillRect(0, 0, 40, 30); return c.toDataURL("image/png"); })).split(",")[1], "base64");
+  const chooser = page.waitForEvent("filechooser");
+  await page.keyboard.press("Control+u");
+  await (await chooser).setFiles({ name: "IMG_0001.png", mimeType: "image/png", buffer: png });
+  await page.waitForFunction(() => /!\[\]\(new%20essay\.assets\/IMG_0001\.jpg\)/.test(document.getElementById("editor").value));
+  await page.getByRole("button", { name: "Done" }).click();
+  const text = await readFile(join(writing, "new essay.md"), "utf8");
+  assert.equal(text, "# Day one\n\nA picture:\n\n![](new%20essay.assets/IMG_0001.jpg)\n", "Typora-style link on its own paragraph");
+  assert.ok((await readFile(join(writing, "new essay.assets", "IMG_0001.jpg"))).length > 50, "photo saved beside the file");
+  await page.waitForFunction(() => document.querySelector("#fileBody img.md-image")?.complete && document.querySelector("#fileBody img.md-image").naturalWidth > 0);
+
+  // Creating a file that exists is refused; nothing is overwritten.
+  await page.getByRole("button", { name: "Close file" }).click();
+  const alert = new Promise(r => { let n = 0; page.on("dialog", d => { if (n++ === 0) d.accept("chaos.md"); else { r(d.message()); d.accept(); } }); });
+  await page.getByRole("button", { name: "New Markdown file here" }).click();
+  assert.match(await alert, /already exists/);
+  assert.match(await readFile(note, "utf8"), /^# Chaos/);
+  assert.deepEqual(errors, []);
 });

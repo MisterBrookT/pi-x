@@ -52,7 +52,12 @@ const parser = new Marked({ renderer: {
     const cell = (c: any, tag: string) => `<${tag}${c.align ? ` style="text-align:${c.align}"` : ""}>${this.parser.parseInline(c.tokens)}</${tag}>`;
     return `<div class="table-scroll" tabindex="0"><table><thead><tr>${token.header.map((c: any) => cell(c, "th")).join("")}</tr></thead><tbody>${token.rows.map((r: any[]) => `<tr>${r.map(c => cell(c, "td")).join("")}</tr>`).join("")}</tbody></table></div>`;
   },
-  image(token) { return `<span class="image-reference">Image: ${escapeHtml(token.text || "untitled")}</span>`; },
+  image(token) {
+    let raw = token.href; try { raw = decodeURIComponent(raw); } catch {}
+    const file = mentionContext && !/^[a-z]+:/i.test(raw) ? resolveMention(raw, mentionContext) : undefined;
+    if (file && !file.dir && file.kind === "image") return `<img class="md-image" data-src-path="${escapeHtml(file.path)}" alt="${escapeHtml(token.text || file.name)}">`;
+    return `<span class="image-reference">Image: ${escapeHtml(token.text || "untitled")}</span>`;
+  },
 } });
 
 /** With `files`, existing Mac paths in inline code and links render as file chips. */

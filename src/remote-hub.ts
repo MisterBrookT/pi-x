@@ -11,7 +11,7 @@ import { validSubscription, type PushSender } from "./remote-push.ts";
 import { remoteServiceWorker } from "./remote-sw.ts";
 import { launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
-import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, readRemoteChunk, saveEditable } from "./remote-files.ts";
+import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 
 export const remoteHost = "127.0.0.1";
@@ -277,6 +277,13 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       // Mac files named in chat or browsed in the Files panel; remote-files.ts checks every path.
       // Phone editor: open and save existing Markdown/text files; saveEditable refuses stale overwrites.
+      const makeMatch = path.match(/^\/api\/sessions\/([^/]+)\/file\/(create|image)$/);
+      if (makeMatch && req.method === "POST") {
+        if (!sessions.has(decodeURIComponent(makeMatch[1]))) return send(res, 404, { error: "session is no longer connected" });
+        const roots = { home: options.home, hubRoot: options.memoryRoot };
+        const { status, ...result } = makeMatch[2] === "create" ? createEditable(await body(req), roots) : saveMarkdownImage(await body(req), roots);
+        return send(res, status, result);
+      }
       const editMatch = path.match(/^\/api\/sessions\/([^/]+)\/file\/(source|save)$/);
       if (editMatch && (req.method === "GET" && editMatch[2] === "source" || req.method === "POST" && editMatch[2] === "save")) {
         if (!sessions.has(decodeURIComponent(editMatch[1]))) return send(res, 404, { error: "session is no longer connected" });
