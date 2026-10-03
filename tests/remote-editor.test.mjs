@@ -164,3 +164,29 @@ test("keyboard modes: Esc to read, arrows scroll, letters press buttons, Enter t
   assert.equal(await input.inputValue(), "s", "letters type normally in the message box");
   assert.deepEqual(errors, []);
 });
+
+test("arrows navigate Files even when it was opened by tap while the cursor sat in the message box", async t => {
+  const { page } = await setup(t);
+  const active = () => page.evaluate(() => document.activeElement.textContent || document.activeElement.id);
+  await page.locator("#input").focus();
+  // iOS keeps focus in the text box when a button is tapped; click programmatically to reproduce that.
+  await page.evaluate(() => document.getElementById("filesButton").click());
+  await page.waitForFunction(() => document.activeElement?.classList.contains("file-row"));
+  assert.match(await active(), /chaos\.md/, "the first file is selected");
+  // Also when the message box regains focus while the panel is open.
+  await page.locator("#input").focus();
+  await page.keyboard.press("ArrowDown");
+  assert.equal(await page.evaluate(() => document.activeElement.classList.contains("file-row")), true, "↓ moves into the list, not the text box");
+  await page.keyboard.press("Enter");
+  await page.getByRole("heading", { name: "Chaos" }).waitFor();
+});
+
+test("Settings lists the keyboard shortcuts", async t => {
+  const { page } = await setup(t);
+  await page.getByRole("button", { name: "Sessions" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: /Keyboard shortcuts/ }).click();
+  const help = page.getByRole("dialog", { name: "Keyboard" });
+  await help.waitFor();
+  for (const key of ["Esc", "S", "F", "⌘S"]) assert.equal(await help.locator("kbd", { hasText: new RegExp(`^${key}$`) }).count(), 1, key);
+});
