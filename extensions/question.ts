@@ -45,6 +45,43 @@ export const QUESTION_OPEN = "pix:question:open";
 export const QUESTION_CLOSE = "pix:question:close";
 export const QUESTION_ANSWER = "pix:question:answer";
 
+type Paint = { fg: (color: any, text: string) => string; bold: (text: string) => string };
+
+/** Codex-style picker: quiet header, numbered options with descriptions in an aligned column
+ * (or below when narrow), › on the current one, and a one-line key hint. No borders. */
+export function renderQuestion(state: { question: string; options: DisplayOption[]; selected: number; editMode: boolean; editorLines: string[] }, width: number, theme: Paint): string[] {
+	const w = Math.max(20, width), lines: string[] = [];
+	const wrap = (indent: string, text: string, first = indent) => wrapTextWithAnsi(text, Math.max(1, w - visibleWidth(indent))).forEach((l, i) => lines.push((i ? indent : first) + l));
+	lines.push("");
+	wrap("  ", theme.fg("dim", "Question"));
+	wrap("  ", theme.bold(state.question));
+	lines.push("");
+	const labels = state.options.map((o, i) => `${i + 1}. ${o.label}`);
+	const col = Math.max(...labels.map(l => visibleWidth(l))) + 2;
+	const inline = 4 + col + 24 <= w;
+	state.options.forEach((o, i) => {
+		const on = i === state.selected;
+		const mark = on ? theme.fg("accent", "› ") : "  ";
+		const label = on ? theme.fg("accent", theme.bold(labels[i])) : theme.fg("text", labels[i]);
+		if (o.description && inline) {
+			const pad = " ".repeat(col - visibleWidth(labels[i]));
+			wrap(" ".repeat(4 + col), theme.fg("muted", o.description), "  " + mark + label + pad);
+		} else {
+			wrap("    ", label, "  " + mark);
+			if (o.description) wrap("       ", theme.fg("muted", o.description));
+		}
+	});
+	if (state.editMode) {
+		lines.push("");
+		for (const l of state.editorLines) lines.push("    " + l);
+	}
+	lines.push("");
+	const n = state.options.length;
+	wrap("  ", theme.fg("dim", state.editMode ? "enter to send   esc to go back" : `↑↓ to move   1–${n} or enter to choose   tab to type   esc to cancel`));
+	lines.push("");
+	return lines;
+}
+
 export default function question(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "question",
@@ -72,7 +109,7 @@ export default function question(pi: ExtensionAPI) {
 				};
 			}
 
-			const allOptions: DisplayOption[] = [...params.options, { label: "Type something.", isOther: true }];
+			const allOptions: DisplayOption[] = [...params.options, { label: "Something else", description: "Type your own answer", isOther: true }];
 
 			// Phone side (Pix Remote): the same question can be answered remotely; first answer wins.
 			let finish: ((value: { answer: string; wasCustom: boolean; index?: number } | null) => void) | undefined;
@@ -135,18 +172,21 @@ export default function question(pi: ExtensionAPI) {
 							return;
 						}
 
-						if (matchesKey(data, Key.up)) {
+						if (matchesKey(data, Key.up) || data === "k") {
 							optionIndex = Math.max(0, optionIndex - 1);
 							refresh();
 							return;
 						}
-						if (matchesKey(data, Key.down)) {
+						if (matchesKey(data, Key.down) || data === "j") {
 							optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
 							refresh();
 							return;
 						}
 
-						if (matchesKey(data, Key.enter)) {
+						const digit = /^[1-9]$/.test(data) ? Number(data) - 1 : -1;
+						if (digit >= 0 && digit < allOptions.length) optionIndex = digit;
+						if (matchesKey(data, Key.tab)) optionIndex = allOptions.length - 1;
+						if (digit >= 0 && digit < allOptions.length || matchesKey(data, Key.tab) || matchesKey(data, Key.enter)) {
 							const selected = allOptions[optionIndex];
 							if (selected.isOther) {
 								editMode = true;
@@ -164,65 +204,8 @@ export default function question(pi: ExtensionAPI) {
 
 					function render(width: number): string[] {
 						if (cachedLines) return cachedLines;
-
-						const lines: string[] = [];
-						const renderWidth = Math.max(1, width);
-
-						function addWrapped(text: string) {
-							lines.push(...wrapTextWithAnsi(text, renderWidth));
-						}
-
-						function addWrappedWithPrefix(prefix: string, text: string) {
-							const prefixWidth = visibleWidth(prefix);
-							if (prefixWidth >= renderWidth) {
-								addWrapped(prefix + text);
-								return;
-							}
-							const wrapped = wrapTextWithAnsi(text, renderWidth - prefixWidth);
-							const continuationPrefix = " ".repeat(prefixWidth);
-							for (let i = 0; i < wrapped.length; i++) {
-								lines.push(`${i === 0 ? prefix : continuationPrefix}${wrapped[i]}`);
-							}
-						}
-
-						lines.push(theme.fg("accent", "─".repeat(renderWidth)));
-						addWrappedWithPrefix(" ", theme.fg("text", params.question));
-						lines.push("");
-
-						for (let i = 0; i < allOptions.length; i++) {
-							const opt = allOptions[i];
-							const selected = i === optionIndex;
-							const isOther = opt.isOther === true;
-							const prefix = selected ? theme.fg("accent", "> ") : "  ";
-							const label = `${i + 1}. ${opt.label}${isOther && editMode ? " ✎" : ""}`;
-							const color = selected || (isOther && editMode) ? "accent" : "text";
-
-							addWrappedWithPrefix(prefix, theme.fg(color, label));
-
-							// Show description if present
-							if (opt.description) {
-								addWrappedWithPrefix("     ", theme.fg("muted", opt.description));
-							}
-						}
-
-						if (editMode) {
-							lines.push("");
-							addWrappedWithPrefix(" ", theme.fg("muted", "Your answer:"));
-							for (const line of editor.render(Math.max(1, renderWidth - 2))) {
-								lines.push(` ${line}`);
-							}
-						}
-
-						lines.push("");
-						if (editMode) {
-							addWrappedWithPrefix(" ", theme.fg("dim", "Enter to submit • Esc to go back"));
-						} else {
-							addWrappedWithPrefix(" ", theme.fg("dim", "↑↓ navigate • Enter to select • Esc to cancel"));
-						}
-						lines.push(theme.fg("accent", "─".repeat(renderWidth)));
-
-						cachedLines = lines;
-						return lines;
+						cachedLines = renderQuestion({ question: params.question, options: allOptions, selected: optionIndex, editMode, editorLines: editMode ? editor.render(Math.max(1, width - 6)) : [] }, width, theme);
+						return cachedLines;
 					}
 
 					return {
@@ -274,7 +257,7 @@ export default function question(pi: ExtensionAPI) {
 			const opts = Array.isArray(args.options) ? args.options : [];
 			if (opts.length) {
 				const labels = opts.map((o: OptionWithDesc) => o.label);
-				const numbered = [...labels, "Type something."].map((o, i) => `${i + 1}. ${o}`);
+				const numbered = [...labels, "Something else"].map((o, i) => `${i + 1}. ${o}`);
 				text += `\n${theme.fg("dim", `  Options: ${numbered.join(", ")}`)}`;
 			}
 			return new Text(text, 0, 0);
