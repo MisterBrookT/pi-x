@@ -100,3 +100,25 @@ test("the Mac notices a relay link that silently died and reconnects", async t =
   await new Promise(r => setTimeout(r, 400));
   assert.equal(connections, 2, "a link that answers pings is kept");
 });
+
+test("the Mac relays live-text stream events to the phone", async t => {
+  const { WebSocketServer } = await import("ws");
+  const { startRemoteHub } = await import("../src/remote-hub.ts");
+  const { startRemoteRelayAgent, openRelayFrame } = await import("../src/remote-relay-agent.ts");
+  const token = "r".repeat(32), secret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  await fetch(`http://127.0.0.1:${hub.port}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "s", cwd: "/tmp", busy: true, messages: [] }) });
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  t.after(() => server.close());
+  await new Promise(r => server.once("listening", r));
+  const frames = [];
+  server.on("connection", socket => socket.on("message", data => { const text = String(data); if (text === "ping") return socket.send("pong"); try { frames.push(openRelayFrame(secret, text)); } catch {} }));
+  const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret, localBase: `http://127.0.0.1:${hub.port}`, localToken: token });
+  t.after(() => agent.stop());
+  await agent.ready;
+  await new Promise(r => setTimeout(r, 200));
+  await fetch(`http://127.0.0.1:${hub.port}/agent/s1/stream`, { method: "PUT", headers: auth, body: JSON.stringify({ streaming: "Hi", streamingHtml: "<p>Hi</p>" }) });
+  for (let i = 0; i < 80 && !frames.some(f => f.event === "stream"); i++) await new Promise(r => setTimeout(r, 25));
+  assert.deepEqual(frames.find(f => f.event === "stream")?.data, { id: "s1", streaming: "Hi", streamingHtml: "<p>Hi</p>" });
+});

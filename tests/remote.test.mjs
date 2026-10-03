@@ -493,3 +493,23 @@ test("the phone sees the current todo plan from a real Pi session", async (t) =>
   for (let i = 0; i < 60; i++) { todos = (await get()).todos; if (todos?.[0]?.status === "done") break; await new Promise(r => setTimeout(r, 50)); }
   assert.deepEqual(todos?.map(x => [x.text, x.status]), [["Read", "done"], ["Fix", "pending"]]);
 });
+
+test("live text reaches phones as small stream events, not whole-session updates", async t => {
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "s", cwd: "/tmp", busy: true, messages: Array.from({ length: 50 }, (_, i) => ({ role: "user", text: "x".repeat(2000) + i })) }) });
+  const controller = new AbortController(); t.after(() => controller.abort());
+  const res = await fetch(`${base}/api/events?token=${token}`, { signal: controller.signal });
+  const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+  const nextEvent = async name => { for (;;) { const i = buffer.indexOf("\n\n"); if (i >= 0) { const block = buffer.slice(0, i); buffer = buffer.slice(i + 2); if (block.startsWith(`event: ${name}\n`)) return block; continue; } const { value } = await reader.read(); buffer += decoder.decode(value, { stream: true }); } };
+  await nextEvent("sessions");
+  const put = await fetch(`${base}/agent/s1/stream`, { method: "PUT", headers: auth, body: JSON.stringify({ streaming: "Hello wor", streamingHtml: "<p>Hello wor</p>" }) });
+  assert.equal(put.status, 200);
+  const block = await nextEvent("stream");
+  assert.ok(block.length < 500, `a stream event carries only the live text (${block.length} bytes)`);
+  assert.deepEqual(JSON.parse(block.split("data: ")[1]), { id: "s1", streaming: "Hello wor", streamingHtml: "<p>Hello wor</p>" });
+  assert.equal((await (await fetch(`${base}/api/sessions/s1`, { headers: auth })).json()).streaming, "Hello wor", "a phone that opens later still sees it");
+  assert.equal((await fetch(`${base}/agent/nope/stream`, { method: "PUT", headers: auth, body: "{}" })).status, 404);
+  assert.equal((await fetch(`${base}/agent/s1/stream`, { method: "PUT", body: "{}" })).status, 401);
+});

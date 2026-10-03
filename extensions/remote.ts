@@ -193,6 +193,20 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       try { await ensureHub(!!relayKey); uploadedMedia.clear(); await publish(); } catch {}
     }
   };
+  // Live text goes out on its own small channel: only the growing reply, not the whole session,
+  // so the phone sees it word by word instead of in lumps. One request in flight; the newest text wins.
+  let streamTimer: ReturnType<typeof setTimeout> | undefined, streamBusy = false, streamDirty = false;
+  const sendStream = async () => {
+    if (!connected || !ctx) return;
+    if (streamBusy) { streamDirty = true; return; }
+    streamBusy = true; streamDirty = false;
+    const text = streaming.slice(-12_000);
+    try {
+      const res = await request(`/agent/${encodeURIComponent(sessionId)}/stream`, { method: "PUT", body: JSON.stringify({ streaming: text, streamingHtml: text ? renderRemoteMarkdown(text, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : "" }) });
+      if (res.status === 404) schedulePush(); // the hub does not know this session yet
+    } catch {} finally { streamBusy = false; if (streamDirty) scheduleStream(); }
+  };
+  const scheduleStream = () => { if (!connected || streamTimer) return; streamTimer = setTimeout(() => { streamTimer = undefined; void sendStream(); }, 80); };
   const schedulePush = (delay = 0) => {
     if (!connected || pushTimer) return;
     pushTimer = setTimeout(() => { pushTimer = undefined; void push(); }, delay);
@@ -286,7 +300,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   pi.on("message_update", (event, next) => {
     ctx = next;
     const delta = event.assistantMessageEvent;
-    if (delta.type === "text_delta") { streaming += delta.delta; schedulePush(120); }
+    if (delta.type === "text_delta") { streaming += delta.delta; scheduleStream(); }
   });
   pi.on("message_end", (event, next) => {
     ctx = next; streaming = ""; schedulePush();

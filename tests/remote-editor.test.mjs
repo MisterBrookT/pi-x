@@ -190,3 +190,44 @@ test("Settings lists the keyboard shortcuts", async t => {
   await help.waitFor();
   for (const key of ["Esc", "S", "F", "⌘S"]) assert.equal(await help.locator("kbd", { hasText: new RegExp(`^${key}$`) }).count(), 1, key);
 });
+
+test("while typing, Ctrl+U attaches a photo and the conversation stays at the bottom as the box grows", async t => {
+  const { page } = await setup(t);
+  const input = page.locator("#input");
+  await input.focus();
+  await input.fill("draft");
+  const chooser = page.waitForEvent("filechooser", { timeout: 3000 });
+  await page.keyboard.press("Control+u");
+  await chooser;
+  assert.equal(await input.inputValue(), "draft", "the draft is untouched");
+  const gap = () => page.evaluate(() => { const c = document.getElementById("chat"); return c.scrollHeight - c.clientHeight - c.scrollTop; });
+  await page.evaluate(() => { const c = document.getElementById("chat"); c.scrollTop = c.scrollHeight; });
+  for (let i = 0; i < 6; i++) await input.press("Shift+Enter");
+  await input.type("more lines");
+  await page.waitForTimeout(150);
+  assert.ok(await gap() < 4, `following keeps the latest message visible while the box grows (gap ${await gap()})`);
+});
+
+test("live text updates in place and keeps the bottom in view", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pix-stream-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub") });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  const messages = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", text: `Message ${i + 1} ` + "words ".repeat(30) }));
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", cwd: dir, busy: true, messages }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`${base}/#token=${token}`);
+  await page.getByText("Message 30").waitFor();
+  let text = "";
+  for (let i = 0; i < 40; i++) {
+    text += `word${i} ` + (i % 10 === 9 ? "\n\n" : "");
+    await fetch(`${base}/agent/s1/stream`, { method: "PUT", headers: auth, body: JSON.stringify({ streaming: text, streamingHtml: text.split("\n\n").map(p => `<p>${p}</p>`).join("") }) });
+    if (i === 1) await page.evaluate(() => { window.liveEl = document.querySelector("#messages .live-text"); });
+  }
+  await page.getByText("word39").waitFor();
+  assert.equal(await page.evaluate(() => document.querySelector("#messages .live-text") === window.liveEl), true, "the same bubble is patched, not rebuilt");
+  assert.ok(await page.evaluate(() => { const c = document.getElementById("chat"); return c.scrollHeight - c.clientHeight - c.scrollTop; }) < 4, "following stays at the bottom");
+});

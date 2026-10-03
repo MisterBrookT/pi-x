@@ -357,6 +357,17 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         while (items.size > 24) items.delete(items.keys().next().value!);
         return send(res, 200, { ok: true });
       }
+      const streamPut = path.match(/^\/agent\/([^/]+)\/stream$/);
+      if (req.method === "PUT" && streamPut) {
+        const session = sessions.get(decodeURIComponent(streamPut[1]));
+        if (!session) return send(res, 404, { error: "not registered" });
+        const input = await body(req);
+        session.streaming = typeof input.streaming === "string" && input.streaming ? input.streaming.slice(-12_000) : undefined;
+        session.streamingHtml = session.streaming && typeof input.streamingHtml === "string" ? input.streamingHtml.slice(0, 200_000) : undefined;
+        session.busy = session.busy || !!session.streaming; session.seenAt = Date.now();
+        publish("stream", { id: session.id, streaming: session.streaming ?? "", streamingHtml: session.streamingHtml ?? "" });
+        return send(res, 200, { ok: true });
+      }
       const agentMatch = path.match(/^\/agent\/([^/]+)(\/next)?$/);
       if (agentMatch) {
         const id = decodeURIComponent(agentMatch[1]);
