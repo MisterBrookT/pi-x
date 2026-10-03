@@ -133,6 +133,10 @@ export interface RemoteHubOptions {
   macIdleMs?: () => number;
   /** How long one "visible" presence report counts as Pix on screen; injectable for tests. */
   presenceMs?: number;
+  /** Pix code version this hub runs; a session with newer code asks it to retire. */
+  version?: string;
+  /** Called when a newer session takes the hub over; the host stops serving. */
+  onRetire?: () => void;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -229,6 +233,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const bearer = req.headers.authorization?.replace(/^Bearer /, "");
       if (!sameToken(bearer ?? url.searchParams.get("token"), token)) return send(res, 401, { error: "unauthorized" });
 
+      if (path === "/agent/version" && req.method === "GET") return send(res, 200, { version: options.version ?? "" });
+      if (path === "/agent/retire" && req.method === "POST") { send(res, 200, { ok: true }); setTimeout(() => options.onRetire?.(), 50); return; }
       if (path === "/api/push" && req.method === "GET") return push ? send(res, 200, { publicKey: await push.publicKey(), phones: await push.count() }) : send(res, 404, { error: "notifications are off" });
       if (path === "/api/push" && req.method === "POST") {
         if (!push) return send(res, 404, { error: "notifications are off" });

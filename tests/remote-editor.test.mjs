@@ -263,3 +263,17 @@ test("create a new Markdown file from Files, add a photo, and see it in the prev
   assert.match(await readFile(note, "utf8"), /^# Chaos/);
   assert.deepEqual(errors, []);
 });
+
+test("in Files, arrows move through file rows only, also after cancelling New", async t => {
+  const { page } = await setup(t);
+  await page.locator("#input").focus();
+  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("button", { name: /chaos\.md/ }).waitFor();
+  page.once("dialog", d => d.dismiss());
+  await page.getByRole("button", { name: "New Markdown file here" }).click();
+  await page.locator("#input").focus(); // iPhone puts the cursor back in the message box after a dialog
+  await page.waitForTimeout(100);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await page.evaluate(() => document.activeElement.classList.contains("file-row")), true, "arrows stay on file rows, not breadcrumbs or New");
+});

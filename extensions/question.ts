@@ -45,6 +45,9 @@ export const QUESTION_OPEN = "pix:question:open";
 export const QUESTION_CLOSE = "pix:question:close";
 export const QUESTION_ANSWER = "pix:question:answer";
 
+/** The printable character a key sends, also under the Kitty keyboard protocol (CSI code u). */
+export const keyChar = (data: string) => { const m = /^\x1b\[(\d+)u$/.exec(data); return m ? String.fromCodePoint(Number(m[1])) : data; };
+
 type Paint = { fg: (color: any, text: string) => string; bold: (text: string) => string };
 
 /** Codex-style picker: quiet header, numbered options with descriptions in an aligned column
@@ -86,7 +89,12 @@ export default function question(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "question",
 		label: "Question",
-		description: "Ask the user a question and let them pick from options. Use when you need user input to proceed.",
+		description: "Ask the user to choose between 2-4 concrete options. Prefer this over asking in prose whenever you need a decision from the user. The user can also type their own answer.",
+		promptSnippet: "Ask the user to pick from options instead of asking in prose",
+		promptGuidelines: [
+			"When you need the user to decide something (which approach, whether to proceed, which of several things), call question with 2-4 short options instead of writing the question in your reply. Ask one question per call. Put your recommended option first and say why in its description.",
+			"Do not use question for open-ended information only the user can write (names, text, credentials); ask those in prose.",
+		],
 		parameters: QuestionParams,
 		executionMode: "sequential",
 
@@ -172,18 +180,19 @@ export default function question(pi: ExtensionAPI) {
 							return;
 						}
 
-						if (matchesKey(data, Key.up) || data === "k") {
+						const ch = keyChar(data);
+						if (matchesKey(data, Key.up) || ch === "k") {
 							optionIndex = Math.max(0, optionIndex - 1);
 							refresh();
 							return;
 						}
-						if (matchesKey(data, Key.down) || data === "j") {
+						if (matchesKey(data, Key.down) || ch === "j") {
 							optionIndex = Math.min(allOptions.length - 1, optionIndex + 1);
 							refresh();
 							return;
 						}
 
-						const digit = /^[1-9]$/.test(data) ? Number(data) - 1 : -1;
+						const digit = /^[1-9]$/.test(ch) ? Number(ch) - 1 : -1;
 						if (digit >= 0 && digit < allOptions.length) optionIndex = digit;
 						if (matchesKey(data, Key.tab)) optionIndex = allOptions.length - 1;
 						if (digit >= 0 && digit < allOptions.length || matchesKey(data, Key.tab) || matchesKey(data, Key.enter)) {
@@ -252,15 +261,9 @@ export default function question(pi: ExtensionAPI) {
 			};
 		},
 
-		renderCall(args, theme, _context) {
-			let text = theme.fg("toolTitle", theme.bold("question ")) + theme.fg("muted", args.question);
-			const opts = Array.isArray(args.options) ? args.options : [];
-			if (opts.length) {
-				const labels = opts.map((o: OptionWithDesc) => o.label);
-				const numbered = [...labels, "Something else"].map((o, i) => `${i + 1}. ${o}`);
-				text += `\n${theme.fg("dim", `  Options: ${numbered.join(", ")}`)}`;
-			}
-			return new Text(text, 0, 0);
+		renderCall(_args, theme, _context) {
+			// The picker below already shows the question and options; the call line stays quiet.
+			return new Text(theme.fg("dim", "Asking you"), 0, 0);
 		},
 
 		renderResult(result, _options, theme, _context) {

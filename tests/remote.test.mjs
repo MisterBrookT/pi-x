@@ -520,3 +520,16 @@ test("half-written markdown in live text renders as if already closed", async ()
   assert.match(renderRemoteMarkdown(remend("Hello **wor")), /<strong>wor<\/strong>/);
   assert.match(await readFile(new URL("../extensions/remote.ts", import.meta.url), "utf8"), /renderRemoteMarkdown\(remend\(text\)/);
 });
+
+test("a hub running older Pix code reports its version and hands over when asked", async () => {
+  let retired = false;
+  const hub = await startRemoteHub({ token, port: 0, version: "old123", onRetire: () => { retired = true; } });
+  try {
+    const base = `http://127.0.0.1:${hub.port}`;
+    assert.deepEqual(await (await fetch(`${base}/agent/version`, { headers: auth })).json(), { version: "old123" });
+    assert.equal((await fetch(`${base}/agent/retire`, { method: "POST", body: "{}" })).status, 401, "only the Mac's own sessions may retire it");
+    assert.equal((await fetch(`${base}/agent/retire`, { method: "POST", headers: auth, body: "{}" })).status, 200);
+    await new Promise(r => setTimeout(r, 120));
+    assert.equal(retired, true);
+  } finally { await hub.close(); }
+});

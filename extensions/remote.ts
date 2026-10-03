@@ -1,4 +1,5 @@
 // /rc: expose this live Pi session to the Pix Remote web app through a loopback-only hub.
+import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -104,21 +105,38 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     await relayAgent.ready;
   };
 
+  // The hub lives in whichever session started it. If that session runs older Pix code (it may have
+  // turned remote off, so it never auto-reloads), a session whose code matches disk takes over.
+  const codeHash = () => createHash("sha256").update(pixCodeVersion(pixRoot)).digest("hex").slice(0, 16);
+  const loadedVersion = codeHash();
+  let lastStaleCheck = 0;
+  const replaceStaleHub = async () => {
+    if (hub || Date.now() - lastStaleCheck < 30_000) return false;
+    lastStaleCheck = Date.now();
+    if (loadedVersion !== codeHash()) return false; // this session is the stale one; it reloads itself
+    try {
+      const running = await (await request("/agent/version", { signal: AbortSignal.timeout(1_500) })).json() as { version?: string };
+      if (running.version === loadedVersion) return false;
+      await request("/agent/retire", { method: "POST", body: "{}" });
+      for (let i = 0; i < 40; i++) { await new Promise(r => setTimeout(r, 50)); try { await fetch(base + "/api/sessions", { signal: AbortSignal.timeout(300) }); } catch { return true; } }
+    } catch {}
+    return false;
+  };
   const ensureHub = async (useRelay = false) => {
     try {
       const probe = await request("/api/sessions", { signal: AbortSignal.timeout(1_500) });
       if (probe.ok) {
-        if (useRelay) await ensureRelay();
-        return;
+        if (!(await replaceStaleHub())) { if (useRelay) await ensureRelay(); return; }
       }
+      else {
       if (probe.status === 401) throw new Error(`Port ${port} is used by a Pix Remote hub with a different token.`);
-      throw new Error(`Port ${port} is in use by another service.`);
+      throw new Error(`Port ${port} is in use by another service.`); }
     } catch (error) {
       if (error instanceof Error && /Pix Remote|another service/.test(error.message)) throw error;
     }
     // A phone-started Pi uses the same network mode as the session hosting the hub.
     const launch = async (dir: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty }); };
-    try { hub = await startRemoteHub({ token, port, launch, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
+    try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay();
   };
@@ -290,7 +308,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     busy = !next.isIdle();
     connected = true;
     await push();
-    heartbeat = setInterval(() => { void push(); autoReload?.tick(); }, heartbeatMs);
+    heartbeat = setInterval(() => { void push(); autoReload?.tick(); void replaceStaleHub().then(stale => { if (stale) return ensureHub(!!relayKey).then(() => push()); }).catch(() => {}); }, heartbeatMs);
     heartbeat.unref?.();
     void poll();
     next.ui.setStatus("pix-remote", "remote on");

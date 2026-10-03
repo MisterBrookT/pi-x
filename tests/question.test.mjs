@@ -26,3 +26,18 @@ test("narrow terminals put descriptions under the option and never overflow", ()
   assert.match(lines.join("\n"), /^  › 1\. Now\n       Set up the package and/m);
   for (const line of lines) assert.ok(visibleWidth(line) <= 34, JSON.stringify(line));
 });
+
+test("number and j/k keys also work under the Kitty keyboard protocol", async () => {
+  const { keyChar } = await import("../extensions/question.ts");
+  assert.equal(keyChar("2"), "2");
+  assert.equal(keyChar("\x1b[50u"), "2");
+  assert.equal(keyChar("\x1b[106u"), "j");
+});
+
+test("the question tool tells the model to ask decisions as choices", async () => {
+  let tool;
+  const { default: register } = await import("../extensions/question.ts");
+  register({ registerTool: t => { tool = t; }, events: { on: () => () => {}, emit() {} } });
+  assert.ok(tool.promptSnippet);
+  assert.match(tool.promptGuidelines.join(" "), /instead of writing the question in your reply/);
+});

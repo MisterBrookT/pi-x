@@ -318,7 +318,7 @@ $('input').addEventListener('focus',()=>updateSend());$('input').addEventListene
 function openPanel(){for(const id of ['sheet','modelSheet','actions'])if(!$(id).hidden)return $(id);if(document.body.classList.contains('files-open')&&$('fileView').hidden)return $('filesPanel');if(document.body.classList.contains('open'))return document.querySelector('aside.list');return null}
 function panelButtons(el){return [...el.querySelectorAll('button')].filter(b=>!b.disabled&&!b.hidden&&b.offsetParent!==null&&!b.closest('[hidden]'))}
 function focusIn(el,pick){const items=panelButtons(el);const b=(pick&&el.querySelector(pick))||items[0];b?.focus();b?.scrollIntoView({block:'nearest'})}
-function moveFocus(el,dir){const items=panelButtons(el);if(!items.length)return;const i=items.indexOf(document.activeElement);const n=i<0?(dir>0?0:items.length-1):Math.max(0,Math.min(items.length-1,i+dir));items[n].focus();items[n].scrollIntoView({block:'nearest'})}
+function moveFocus(el,dir){const items=el===$('filesPanel')?panelButtons(el).filter(b=>b.classList.contains('file-row')):panelButtons(el);if(!items.length)return;const i=items.indexOf(document.activeElement);const n=i<0?(dir>0?0:items.length-1):Math.max(0,Math.min(items.length-1,i+dir));items[n].focus();items[n].scrollIntoView({block:'nearest'})}
 function soon(f){setTimeout(f,60)}
 function readHere(){markKeyboard(true);($('fileView').hidden?$('chat'):$('fileScroll')).focus({preventScroll:true});updateSend()}
 // Quick switcher (⌘K / ⌘P / ⇧⌘P, or P in reading mode): type to filter sessions by name or folder,
@@ -444,8 +444,8 @@ function leaveEditor(){if(!editor)return true;const unsaved=($('editor')?.value?
 // Pictures in a Markdown preview load from the Mac like any file, one at a time.
 async function loadDocImages(root,job){for(const img of root.querySelectorAll('img[data-src-path]')){try{const {blob}=await fetchFileBlob(img.dataset.srcPath,job);if(job!==fileJob)return;img.src=URL.createObjectURL(blob);img.removeAttribute('data-src-path')}catch{if(job!==fileJob)return;img.replaceWith(Object.assign(document.createElement('span'),{className:'image-reference',textContent:'Image: '+(img.alt||'missing')}))}}}
 // New file: asks for a name, creates it in the folder shown, and opens it for editing.
-$('newFile').onclick=async()=>{if(!current||!filesPath)return;const name=prompt('New Markdown file in '+shortPath(filesPath),'untitled.md');if(!name)return;
-try{const r=await api('/api/sessions/'+encodeURIComponent(current.id)+'/file/create',{method:'POST',body:JSON.stringify({dir:filesPath,name})});await showFiles(filesPath);await openFile(r.path,r.kind);if(!$('editFile').hidden)await startEdit()}catch(err){alert(err.message||'Could not create the file')}};
+$('newFile').onclick=async()=>{if(!current||!filesPath)return;const name=prompt('New Markdown file in '+shortPath(filesPath),'untitled.md');if(!name){$('input').blur();soon(()=>focusIn($('filesPanel'),'.file-row'));return}
+try{const r=await api('/api/sessions/'+encodeURIComponent(current.id)+'/file/create',{method:'POST',body:JSON.stringify({dir:filesPath,name})});await showFiles(filesPath);await openFile(r.path,r.kind);if(!$('editFile').hidden)await startEdit()}catch(err){alert(err.status===404&&/older than the phone/.test(err.message||'')?'Pix on the Mac is still starting the new version. Try again in half a minute.':err.message||'Could not create the file');$('input').blur();soon(()=>focusIn($('filesPanel'),'.file-row'))}};
 // Insert photo while editing Markdown: saved beside the file in name.assets/ (Typora's layout), linked at the cursor.
 $('insertImage').onclick=()=>$('mdImageFile').click();
 $('mdImageFile').onchange=async e=>{const file=e.target.files[0];e.target.value='';const ta=$('editor');if(!file||!editor||!ta)return;const ed=editor,at=ta.selectionStart,end=ta.selectionEnd;saveState('Adding photo…');
