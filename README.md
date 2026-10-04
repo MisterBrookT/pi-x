@@ -63,6 +63,12 @@ Use Pi normally—Pix's enabled tools are available to the agent as needed. A fe
 
 See the [full guide](docs/guide.md) for all commands, configuration, and limits.
 
+**Only want some of it?** Every feature is its own Pi extension. Run `pi config` and turn off the ones you don't need, or list only the ones you want in `~/.pi/agent/settings.json`:
+
+```json
+{ "packages": [{ "source": "npm:@brooktang/pi-x", "extensions": ["extensions/remote.ts", "extensions/question.ts"] }] }
+```
+
 <details>
 <summary>Using a Claude subscription</summary>
 
