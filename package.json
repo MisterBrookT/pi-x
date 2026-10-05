@@ -78,6 +78,7 @@
       "./extensions/footer.ts",
       "./extensions/goal.ts",
       "./extensions/mermaid.ts",
+      "./extensions/proactive.ts",
       "./extensions/question.ts",
       "./extensions/remote.ts",
       "./extensions/smart-editor.ts",

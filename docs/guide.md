@@ -157,6 +157,10 @@ without starting another turn. Reopening a closed session or navigating to a
 different branch restores active goals paused, never silently restarted. See
 [Goal mode](goal-mode.md) for controls, verification limits, and implementation.
 
+## Proactive
+
+Watch channels like Feishu, judge what matters, notify through an always-on desktop pill, and act with approval. See [proactive.md](proactive.md).
+
 ## Background commands
 
 `background` keeps long commands from blocking the conversation. The agent starts
