@@ -99,10 +99,14 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     reload: () => pi.sendUserMessage("/rc reload", { expandPromptTemplates: true }),
     log: logRelay,
   });
-  const ensureRelay = async () => {
+  // Only an explicit /rc waits for the relay, to report a broken network. Reloads and other
+  // automatic paths return at once; the agent keeps retrying and the phone reconnects on its own.
+  const ensureRelay = async (wait = false) => {
     if (!hub) return;
     relayAgent ||= startRemoteRelayAgent({ origin: publicOrigin, secret: relayKey, localBase: base, localToken: token, onState: logRelay });
-    await relayAgent.ready;
+    // A slow network is not fatal: warn, keep the agent retrying, and leave remote on.
+    if (wait) await relayAgent.ready.catch(() => ctx?.ui.notify("The relay is slow to reach. Remote is on and keeps retrying; check your network or proxy if the phone stays offline.", "warning"));
+    else relayAgent.ready.catch(() => {});
   };
 
   // The hub lives in whichever session started it. If that session runs older Pix code (it may have
@@ -122,11 +126,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     } catch {}
     return false;
   };
-  const ensureHub = async (useRelay = false) => {
+  const ensureHub = async (useRelay = false, wait = false) => {
     try {
       const probe = await request("/api/sessions", { signal: AbortSignal.timeout(1_500) });
       if (probe.ok) {
-        if (!(await replaceStaleHub())) { if (useRelay) await ensureRelay(); return; }
+        if (!(await replaceStaleHub())) { if (useRelay) await ensureRelay(wait); return; }
       }
       else {
       if (probe.status === 401) throw new Error(`Port ${port} is used by a Pix Remote hub with a different token.`);
@@ -138,7 +142,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const launch = async (dir: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty }); };
     try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
-    if (useRelay) await ensureRelay();
+    if (useRelay) await ensureRelay(wait);
   };
 
   const snapshot = (branch: readonly any[]): RemoteSnapshot | undefined => {
@@ -298,11 +302,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     cleanupPairing = undefined;
   };
 
-  const connect = async (next: ExtensionContext, useRelay: boolean) => {
+  const connect = async (next: ExtensionContext, useRelay: boolean, wait = false) => {
     ctx = next;
     token ||= await readRemoteToken(options.tokenPath);
     if (useRelay) relayKey ||= await readRelayKey(options.relayKeyPath);
-    await ensureHub(useRelay);
+    await ensureHub(useRelay, wait);
     sessionId = next.sessionManager.getSessionId();
     uploadedMedia.clear();
     busy = !next.isIdle();
@@ -423,8 +427,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
           relayAgent?.stop(); relayAgent = undefined;
           relayKey = await rotateRelayKey(options.relayKeyPath);
         }
-        if (!connected) await connect(next, useRelay);
-        else if (useRelay) { relayKey ||= await readRelayKey(options.relayKeyPath); await ensureHub(true); }
+        if (!connected) await connect(next, useRelay, true);
+        else if (useRelay) { relayKey ||= await readRelayKey(options.relayKeyPath); await ensureHub(true, true); }
         if (!showPairing) {
           next.ui.notify("Remote control is on. Refresh Pix Remote on your paired phone. Use /rc pair to add another device.", "info");
         } else if (next.mode === "tui") {

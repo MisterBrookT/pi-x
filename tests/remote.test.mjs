@@ -533,3 +533,47 @@ test("a hub running older Pix code reports its version and hands over when asked
     assert.equal(retired, true);
   } finally { await hub.close(); }
 });
+
+test("reload with an unreachable relay returns at once and keeps remote on", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-remote-slowrelay-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const tokenPath = join(dir, "token");
+	const probe = await startRemoteHub({ token: "x".repeat(40), port: 0 });
+	const port = probe.port;
+	await probe.close();
+	// Port 1 refuses connections, like a relay the network cannot reach.
+	const h = await goalSession(t, () => say("ok"), {
+		tools: [], extensions: [pi => registerRemote(pi, { port, tokenPath, relayUrl: "http://127.0.0.1:1", relayKeyPath: join(dir, "relay-key") })],
+	});
+	// Remote was on via relay before this reload.
+	globalThis.__pixRemoteReloadResume.set(h.session.sessionManager.getSessionId(), { relay: true });
+	const started = Date.now();
+	await h.session.reload();
+	assert.ok(Date.now() - started < 3000, `reload waited ${Date.now() - started}ms for the relay`);
+	const secret = (await readFile(tokenPath, "utf8")).trim();
+	const list = await (await fetch(`http://127.0.0.1:${port}/api/sessions`, { headers: { authorization: `Bearer ${secret}` } })).json();
+	assert.equal(list.length, 1, "remote stays on while the relay retries in the background");
+	await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+});
+
+test("/rc with a slow relay warns but keeps remote on", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "pix-remote-rcslow-"));
+	t.after(() => rm(dir, { recursive: true, force: true }));
+	const tokenPath = join(dir, "token");
+	const probe = await startRemoteHub({ token: "x".repeat(40), port: 0 });
+	const port = probe.port;
+	await probe.close();
+	const h = await goalSession(t, () => say("ok"), {
+		tools: [], extensions: [pi => registerRemote(pi, { port, tokenPath, relayUrl: "http://127.0.0.1:1", relayKeyPath: join(dir, "relay-key") })],
+	});
+	const notes = [];
+	const ui = h.session.extensionRunner.uiContext ?? {};
+	const orig = ui.notify?.bind(ui);
+	if (ui.notify) ui.notify = (m, l) => { notes.push([l, m]); orig(m, l); };
+	await h.session.prompt("/rc");
+	const secret = (await readFile(tokenPath, "utf8")).trim();
+	const list = await (await fetch(`http://127.0.0.1:${port}/api/sessions`, { headers: { authorization: `Bearer ${secret}` } })).json();
+	assert.equal(list.length, 1, "remote stays on and retries instead of failing");
+	assert.ok(!notes.some(([l]) => l === "error"), `no error: ${JSON.stringify(notes)}`);
+	await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+});

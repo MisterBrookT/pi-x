@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { chromium } from "playwright";
-import { remoteAppHtml } from "../src/remote-web.ts";
+import { remoteAppHtml, remoteIconSvg } from "../src/remote-web.ts";
 
 const serve = () => new Promise(resolve => { const server = createServer((req, res) => { res.setHeader("content-type", "text/html"); res.end(req.url === "/" ? remoteAppHtml : ""); }); server.listen(0, "127.0.0.1", () => resolve(server)); });
 
@@ -103,3 +103,36 @@ test("appearance sheet persists validated palette and typography per device", as
 test("the message box uses the chosen reading font", () => {
   assert.match(remoteAppHtml, /\.box textarea\{font-family:var\(--prose-font\)\}\.file-view \.rich\.doc\{font-family:var\(--prose-font\)\}/);
 });
+
+test("app icon is white with an orange P, not black", () => {
+  assert.match(remoteIconSvg, /<rect[^>]*fill="#fff"/);
+  assert.match(remoteIconSvg, /<path[^>]*stroke="url\(#g\)"/);
+  assert.doesNotMatch(remoteIconSvg, /fill="#111"/);
+});
+
+test("question card mirrors the Mac picker: numbered options and Something else", () => {
+  const html = askCardHtml();
+  assert.match(html, /Question/); assert.match(html, /1\.<\/span><span><b>A<\/b>/);
+  assert.match(html, /2\.<\/span><span><b>Something else<\/b><small>Type your own answer/);
+  assert.doesNotMatch(remoteAppHtml.match(/\.ask\{[^}]*\}/)[0], /10,132,255/);
+});
+
+test("question card offers an Other option that opens an inline answer box", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page.evaluate(() => { document.getElementById("messages").innerHTML = askCard({ id: "q1", question: "Pick?", options: [{ label: "A" }] }); });
+    const box = page.locator(".ask-write textarea");
+    assert.equal(await box.isVisible(), false);
+    await page.locator("[data-ask-other]").dispatchEvent("click");
+    assert.equal(await box.isVisible(), true);
+    assert.equal(await page.evaluate(() => document.activeElement?.closest(".ask-write") !== null), true);
+  } finally { await browser.close(); server.close(); }
+});
+
+function askCardHtml() {
+  const src = remoteAppHtml.match(/function askCard\(q\)\{[\s\S]*?\n/)[0];
+  const esc = x => String(x);
+  return new Function("esc", src + "return askCard;")(esc)({ id: "q", question: "Pick?", options: [{ label: "A" }] });
+}
