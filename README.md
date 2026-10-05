@@ -46,6 +46,18 @@ Pix is under active development. macOS and Linux are supported; Windows is not y
 - **Less babysitting.** Visible todos, structured questions, background jobs with completion and configurable health-check wakes, and opt-in goal mode for unfinished work.
 - **A more comfortable editor.** Inline history suggestions, optional AI completion, list continuation, and compact pasted text and images.
 - **Control over the setup.** One tool panel, context inspection, and a configurable footer. Computer use and MCP start on demand.
+- **Proactive, not just responsive.** A background watcher reads your channels (Feishu today, more via plug-ins), decides what matters, and puts it in one list shown on both the Mac and your phone. One tap starts a Pi session that prepares the next step; nothing is sent without you. [How it works](docs/proactive.md)
+
+```mermaid
+flowchart LR
+  S[New messages] --> J{Important?}
+  J -- no --> X[Shown nowhere]
+  J -- yes --> L[(One list)]
+  L --> M[Mac]
+  L --> P[iPhone]
+  M & P -- Do it --> W[Pi session prepares the next step]
+```
+
 - **Mermaid that renders.** Diagrams use the current `lovely-mermaid`, so HTML entities and `<br/>` in edge labels work instead of falling back to source. A wide flowchart is re-laid out top-down; a simple wide sequence diagram uses narrower participant boxes and wraps labels and messages instead of dumping source. Pi's `markdown.mermaid` setting still applies.
 
 ## Start here
@@ -84,6 +96,7 @@ Use `/login pix-anthropic`, then select a model under `pix-anthropic`.
 
 - [User guide](docs/guide.md) — tools, editor, commands, and configuration
 - [Goal mode](docs/goal-mode.md) — continuation behavior and safety limits
+- [Proactive](docs/proactive.md) — receive, judge, one list on Mac and iPhone, act
 - [Design philosophy](docs/guide.md#philosophy) — what belongs in Pix, and what doesn't
 - [Development](docs/guide.md#development) · [Roadmap](ROADMAP.md) · [Report an issue](https://github.com/MisterBrookT/pi-x/issues)
 
