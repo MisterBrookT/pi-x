@@ -76,10 +76,13 @@ export type RemoteMode = "relay" | "tailnet";
 export interface Launch { command: string; args: string[] }
 
 /** The terminal command that starts Pi in `dir` with remote control already on. */
-export function launchCommand(dir: string, mode: RemoteMode, otty: boolean): Launch {
-  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi`;
+/** Otty's CLI: on PATH inside Otty shells; background services (launchd, the pill) use the app bundle. */
+export const ottyAppCli = "/Applications/Otty.app/Contents/MacOS/otty-cli";
+
+export function launchCommand(dir: string, mode: RemoteMode, otty: boolean | string, prompt?: string): Launch {
+  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi${prompt ? ` ${shellQuote(prompt)}` : ""}`;
   return otty
-    ? { command: "otty", args: ["tab", "new", "--cwd", dir, "--command", pi, "--no-focus"] }
+    ? { command: typeof otty === "string" ? otty : "otty", args: ["tab", "new", "--cwd", dir, "--command", pi, "--no-focus"] }
     : { command: "tmux", args: ["new-session", "-d", "-c", dir, pi] };
 }
 
@@ -93,8 +96,12 @@ const detachedSpawn: Spawner = (command, args) => new Promise((resolve, reject) 
   child.unref();
 });
 
-export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean } = {}): Promise<Launch> {
-  const launch = launchCommand(dir, mode, options.hasOtty ?? onPath("otty"));
+/** POSIX single-quote, so a starting prompt reaches Pi as one argument. */
+export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; prompt?: string } = {}): Promise<Launch> {
+  const otty = options.hasOtty ?? (onPath("otty") || (existsSync(ottyAppCli) ? ottyAppCli : false));
+  const launch = launchCommand(dir, mode, otty, options.prompt);
   await (options.spawn ?? detachedSpawn)(launch.command, launch.args);
   return launch;
 }

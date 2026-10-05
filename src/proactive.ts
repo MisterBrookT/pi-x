@@ -1,6 +1,6 @@
 // Proactive loop core: receive -> judge -> notify -> act.
 // Pure helpers only. Channels live in proactive-sources.ts; IO in scripts/proactive-daemon.ts,
-// the TUI side in extensions/proactive.ts, the desktop pill in scripts/proactive-pill.swift.
+// the one list in proactive-store.ts (shared by the Mac pill and Pix Remote "For you").
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 	state: join(dir, "state.json"),
 	inbox: join(dir, "inbox.jsonl"),
 	log: join(dir, "daemon.log"),
+	memoryLog: join(dir, "memory.log"),
 });
 
 /** One watched channel. `kind` picks the adapter in proactive-sources.ts; extra keys are adapter-specific. */
@@ -20,7 +21,9 @@ export interface Config { me: string; sources: Source[]; intervalSec: number; mo
 export const defaultConfig: Config = { me: "", sources: [], intervalSec: 120, model: "pix-anthropic/claude-sonnet-5", maxPerHour: 4 };
 
 export interface Msg { id: string; time: string; sender: string; text: string }
-export interface Verdict { notify: boolean; title: string; why: string; action: string; refs: string[] }
+/** Memory edits proposed by the judge: lines to add, and existing lines (exact text) to remove. */
+export interface MemoryEdit { add: string[]; remove: string[] }
+export interface Verdict { notify: boolean; title: string; why: string; action: string; refs: string[]; memory: MemoryEdit }
 export interface Item extends Verdict { id: string; at: string; source: string; sourceKey: string; project?: string; howToRead: string; status: "pending" | "done" | "dismissed" }
 
 export const sourceKey = (s: Source) => `${s.kind}:${s.id}`;
@@ -32,7 +35,7 @@ export function newSince(msgs: Msg[], lastId?: string): Msg[] {
 	return i < 0 ? msgs : msgs.slice(i + 1);
 }
 
-export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; now: string }): string {
+export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string }): string {
 	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}: ${m.text}`;
 	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and decide whether to interrupt ${o.me}.
 Stay quiet by default. Interrupt only when it clearly matters to ${o.me}:
@@ -51,14 +54,24 @@ ${o.memory || "(empty)"}
 ## Pending alerts (already shown, do not repeat)
 ${o.pending.map(p => `- ${p.title}`).join("\n") || "(none)"}
 
+## How ${o.me} reacted to recent alerts
+${(o.feedback ?? []).map(f => `- ${f.status === "done" ? "acted on" : "dismissed"}: ${f.title}`).join("\n") || "(none yet)"}
+
 ## Earlier messages (context only)
 ${o.context.map(fmt).join("\n") || "(none)"}
 
 ## New messages
 ${o.fresh.map(fmt).join("\n")}
 
+You also keep the memory up to date. Memory is short bullet lines about ${o.me}'s work:
+open promises he made, things he is waiting for, decisions, deadlines, and what he cares about or ignores.
+- add a line when something new and lasting appears (e.g. "- Promised: send benchkit API to the group (2026-10-05)")
+- remove a line (copy its exact text) when it is resolved or no longer true
+- learn from his reactions: if he keeps dismissing a kind of alert, add a line saying he does not care about it
+Keep lines short and factual. Most of the time, change nothing.
+
 Reply with JSON only, no prose:
-{"notify": boolean, "title": "<=60 chars, what happened", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "refs": ["message ids"]}`;
+{"notify": boolean, "title": "<=60 chars, what happened", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "refs": ["message ids"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -67,8 +80,38 @@ export function parseVerdict(raw: string): Verdict | null {
 	try {
 		const v = JSON.parse(m[0]);
 		if (typeof v.notify !== "boolean") return null;
-		return { notify: v.notify, title: String(v.title ?? "").slice(0, 80), why: String(v.why ?? "").slice(0, 200), action: String(v.action ?? "").slice(0, 400), refs: Array.isArray(v.refs) ? v.refs.map(String) : [] };
+		const lines = (x: unknown) => (Array.isArray(x) ? x.map(l => String(l).trim()).filter(Boolean).slice(0, 10).map(l => l.slice(0, 200)) : []);
+		return { notify: v.notify, title: String(v.title ?? "").slice(0, 80), why: String(v.why ?? "").slice(0, 200), action: String(v.action ?? "").slice(0, 400), refs: Array.isArray(v.refs) ? v.refs.map(String) : [], memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) } };
 	} catch { return null; }
+}
+
+const bullet = (l: string) => (l.startsWith("- ") ? l : `- ${l.replace(/^[-*]\s*/, "")}`);
+const norm = (l: string) => l.trim().replace(/^[-*]\s*/, "");
+
+/**
+ * Apply a memory edit to memory.md. Removals match existing lines by text (bullet ignored);
+ * additions go under "## Learned" unless already present. Returns the new text and what changed.
+ */
+export function applyMemory(text: string, edit: MemoryEdit): { text: string; added: string[]; removed: string[] } {
+	const drop = new Set(edit.remove.map(norm));
+	const removed: string[] = [];
+	let lines = text.split("\n").filter(l => {
+		if (l.trim() && drop.has(norm(l))) { removed.push(l.trim()); return false; }
+		return true;
+	});
+	const have = new Set(lines.map(norm));
+	const added = edit.add.map(bullet).filter(l => !have.has(norm(l)) && (have.add(norm(l)), true));
+	if (added.length) {
+		const i = lines.findIndex(l => l.trim() === "## Learned");
+		if (i < 0) lines = [...lines.join("\n").trimEnd().split("\n"), "", "## Learned", ...added];
+		else {
+			let end = i + 1;
+			while (end < lines.length && !lines[end].startsWith("## ")) end++;
+			while (end > i + 1 && !lines[end - 1].trim()) end--;
+			lines.splice(end, 0, ...added);
+		}
+	}
+	return { text: lines.join("\n").replace(/\n*$/, "\n"), added, removed };
 }
 
 /** Rate limit: at most `max` notifications in the last hour. */
@@ -84,6 +127,14 @@ export function parseInbox(text: string): Item[] {
 	}
 	return [...byId.values()];
 }
+
+/** Pending items, newest first: what every view (Mac pill, iPhone, hub API) shows. */
+export function pendingItems(text: string): Item[] {
+	return parseInbox(text).filter(i => i.status === "pending").reverse();
+}
+
+/** Public view of one item for the phone: no internal paths or commands. */
+export const publicItem = (i: Item) => ({ id: i.id, title: i.title, why: i.why, source: i.source, at: i.at });
 
 export function actPrompt(it: Item): string {
 	return `A proactive alert from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:

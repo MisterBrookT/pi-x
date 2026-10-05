@@ -55,7 +55,8 @@ flowchart TB
 | Sources | `src/proactive-sources.ts` | One adapter per channel |
 | Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act` and `dismiss` verbs |
 | Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the count; click to see items |
-| iPhone view | Pix Remote, "For you" section | Same list, same buttons |
+| List + Do it | `src/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
+| iPhone view | Pix Remote, "For you" in the Sessions drawer | Same list, same buttons, a push for each new item |
 
 ## One item
 
@@ -78,6 +79,26 @@ The judge is one small model call per batch of new messages. It reads:
 - items already in the list, so it does not repeat itself
 
 It stays quiet by default and speaks up only when someone needs you, something you waited for arrives, a decision or blocker appears, or a promise is still open. A rate limit caps alerts per hour.
+
+## Who keeps the memory
+
+The judge does, in the same call. Besides "notify or not", it returns small edits to `memory.md`:
+
+- **from the chat**: a promise you made, something you now wait for, a decision. Resolved lines are removed.
+- **from your taps**: it sees which recent items you acted on or dismissed, and notes what you do not care about.
+
+```mermaid
+flowchart LR
+  N[New messages] --> J[Judge]
+  MEM[(memory.md)] --> J
+  T[Your Do it / Not now] --> J
+  J --> L[Important → list]
+  J --> E[Memory edits]
+  E --> MEM
+  E --> LOG[memory.log]
+```
+
+Edits apply on their own and are logged in `memory.log` (`+` added, `-` removed). New lines go under `## Learned`. Memory stays a plain file: read or fix it on the Mac, or from the phone's Memory view.
 
 ## Sources are plug-ins
 
@@ -105,6 +126,7 @@ For a quick integration, use the `command` kind: any command that prints `[{"id"
 | `inbox.jsonl` | The list. Append-only; later status lines win |
 | `state.json` | Last seen message per source |
 | `daemon.log` | One line per judged batch |
+| `memory.log` | Every automatic memory change |
 
 Set `PIX_PROACTIVE_DIR` to use another folder.
 

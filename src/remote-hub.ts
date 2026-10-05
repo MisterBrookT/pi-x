@@ -13,6 +13,9 @@ import { launchableFolder, listFolders, listMemory, readMemory, recentFolders } 
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
+import { watchFile, unwatchFile } from "node:fs";
+import { paths as proactivePaths, publicItem } from "./proactive.ts";
+import { actItem, dismissItem, readPending } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -137,6 +140,9 @@ export interface RemoteHubOptions {
   version?: string;
   /** Called when a newer session takes the hub over; the host stops serving. */
   onRetire?: () => void;
+  /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
+  proactiveDir?: string;
+  proactiveAct?: (id: string) => Promise<unknown>;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -206,6 +212,18 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
   };
+  // "For you": the same proactive list the Mac pill shows. Phones get it as an event, and a push
+  // when a new item appears (title only, like session pushes).
+  const proactiveFile = proactivePaths(options.proactiveDir).inbox;
+  const forYou = () => readPending(options.proactiveDir).map(publicItem);
+  let knownItems = new Set(forYou().map(i => i.id));
+  const onProactive = () => {
+    const list = forYou();
+    publish("foryou", list);
+    for (const it of list) if (!knownItems.has(it.id) && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}` });
+    knownItems = new Set(list.map(i => i.id));
+  };
+  watchFile(proactiveFile, { interval: 2000 }, onProactive);
   const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
   const drop = (id: string) => {
     const session = sessions.get(id);
@@ -252,11 +270,24 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (req.method === "GET" && path === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         res.write(`event: sessions\ndata: ${JSON.stringify(summary())}\n\n`);
+        res.write(`event: foryou\ndata: ${JSON.stringify(forYou())}\n\n`);
         phones.add(res);
         req.on("close", () => phones.delete(res));
         return;
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
+      if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
+      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss)$/);
+      if (req.method === "POST" && forYouMatch) {
+        await body(req);
+        const [, id, verb] = forYouMatch;
+        if (verb === "dismiss") { const ok = dismissItem(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
+        try {
+          const it = await (options.proactiveAct ?? (x => actItem(x, { dir: options.proactiveDir })))(id);
+          onProactive();
+          return it ? send(res, 202, { started: true }) : send(res, 404, { error: "already handled" });
+        } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
+      }
       if (req.method === "GET" && path === "/api/folders") {
         const browse = await listFolders(url.searchParams.get("path") ?? "", options.home);
         if (!browse) return send(res, 404, { error: "folder unavailable" });
@@ -440,6 +471,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     port,
     close: () => new Promise<void>((resolve) => {
       clearInterval(sweep);
+      unwatchFile(proactiveFile, onProactive);
       for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);
       for (const phone of phones) phone.end();

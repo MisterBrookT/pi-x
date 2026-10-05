@@ -42,6 +42,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
 };
 
 export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image)$/.test(path)
+  || method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss)$/.test(path)
   || method === "GET" && (path === "/api/folders" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && path === "/api/launch"; };
 
 export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
@@ -67,6 +68,8 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     if (!res.ok) return;
     const sessions = await res.json() as { id: string }[];
     send({ kind: "event", event: "sessions", data: sessions });
+    const forYou = await local("/api/foryou");
+    if (forYou.ok) send({ kind: "event", event: "foryou", data: await forYou.json() });
     for (const { id } of sessions) {
       const one = await local(`/api/sessions/${encodeURIComponent(id)}`);
       if (one.ok) send({ kind: "event", event: "session", data: await one.json() });
@@ -83,7 +86,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         let end: number;
         while ((end = buffer.indexOf("\n\n")) >= 0) {
           const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-          const type = block.match(/^event: (sessions|session|stream)$/m)?.[1];
+          const type = block.match(/^event: (sessions|session|stream|foryou)$/m)?.[1];
           const data = block.match(/^data: (.+)$/m)?.[1];
           if (type && data) { try { send({ kind: "event", event: type, data: JSON.parse(data) }); } catch {} }
         }

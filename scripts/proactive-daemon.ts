@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Proactive daemon: receive (any source adapter) -> judge (pi -p) -> notify (macOS) -> inbox for /proactive.
 // Usage: node scripts/proactive-daemon.ts [--once] [--dry-run]
-//        node scripts/proactive-daemon.ts act <id>      mark done, open pi on the next step
+//        node scripts/proactive-daemon.ts act <id>      mark done, start a Pi session on the next step
 //        node scripts/proactive-daemon.ts dismiss <id>  mark dismissed
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -9,8 +9,9 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { actPrompt, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor } from "../src/proactive-sources.ts";
+import { actItem, dismissItem } from "../src/proactive-store.ts";
 
 const run = promisify(execFile);
 const P = paths();
@@ -42,7 +43,6 @@ async function notify(it: Item) {
 
 async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
-	const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
 	for (const src of cfg.sources) {
 		try {
 			const adapter = adapterFor(src);
@@ -58,9 +58,20 @@ async function tick(cfg: Config) {
 			if (!fresh.length) continue;
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const pending = items.filter(i => i.status === "pending").slice(-10);
+			const feedback = items.filter(i => i.status !== "pending").slice(-10);
+			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
 			const ctx = msgs.slice(0, msgs.length - fresh.length).slice(-15);
-			const raw = await judge(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, now: new Date().toString() }), cfg.model);
+			const raw = await judge(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
 			const v = parseVerdict(raw);
+			if (v && (v.memory.add.length || v.memory.remove.length) && !dry) {
+				const r = applyMemory(memory, v.memory);
+				if (r.added.length || r.removed.length) {
+					writeFileSync(P.memory, r.text);
+					const stamp = new Date().toISOString();
+					appendFileSync(P.memoryLog, [...r.added.map(l => `${stamp} + ${l}`), ...r.removed.map(l => `${stamp} - ${l}`)].join("\n") + "\n");
+					log(`memory: +${r.added.length} -${r.removed.length}`);
+				}
+			}
 			log(`${src.name}: ${fresh.length} new -> ${v ? (v.notify ? `NOTIFY ${v.title}` : "quiet") : `bad verdict: ${raw.slice(0, 120)}`}`);
 			if (!v?.notify) continue;
 			if (!underLimit(items, cfg.maxPerHour)) { log("rate limited"); continue; }
@@ -73,15 +84,8 @@ async function tick(cfg: Config) {
 
 const [verb, itemId] = process.argv.slice(2);
 if (verb === "act" || verb === "dismiss") {
-	const it = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "").find(i => i.id === itemId);
-	if (!it) { console.error(`no alert ${itemId}`); process.exit(1); }
-	appendFileSync(P.inbox, JSON.stringify({ id: it.id, status: verb === "act" ? "done" : "dismissed" }) + "\n");
-	if (verb === "act") {
-		const cwd = (it.project ?? "~").replace(/^~/, process.env.HOME ?? "");
-		const { spawnSync } = await import("node:child_process");
-		const r = spawnSync("pi", [actPrompt(it)], { cwd: existsSync(cwd) ? cwd : process.env.HOME, stdio: "inherit" });
-		process.exit(r.status ?? 0);
-	}
+	const ok = verb === "act" ? !!(await actItem(itemId)) : dismissItem(itemId);
+	if (!ok) { console.error(`no pending alert ${itemId}`); process.exit(1); }
 	process.exit(0);
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actPrompt, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
+import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
 import { adapterFor, adapters, parseFeishu } from "../src/proactive-sources.ts";
 
 const raw = { data: { messages: [
@@ -55,4 +55,27 @@ test("sources are pluggable: unknown kind errors, command adapter reads JSON", a
 	const cmd = `echo '[{"id":"e1","time":"t","sender":" Ann ","text":"hi"}]'`;
 	const msgs = await adapterFor({ kind: "command", id: "mail", name: "Mail", command: cmd }).fetch({ kind: "command", id: "mail", name: "Mail", command: cmd });
 	assert.deepEqual(msgs, [{ id: "e1", time: "t", sender: "Ann", text: "hi" }]);
+});
+
+test("parseVerdict: memory edits default to empty and are capped", () => {
+	assert.deepEqual(parseVerdict('{"notify":false}').memory, { add: [], remove: [] });
+	const v = parseVerdict(JSON.stringify({ notify: false, memory: { add: Array(20).fill("x"), remove: ["  y  "] } }));
+	assert.equal(v.memory.add.length, 10);
+	assert.deepEqual(v.memory.remove, ["y"]);
+});
+
+test("applyMemory: adds under Learned, removes by text, skips duplicates", () => {
+	const base = "# Memory\n\n- Waiting: Knight's doc\n- Promised: API\n";
+	const a = applyMemory(base, { add: ["Decided: use FMP", "- Promised: API"], remove: ["Waiting: Knight's doc"] });
+	assert.deepEqual(a.removed, ["- Waiting: Knight's doc"]);
+	assert.deepEqual(a.added, ["- Decided: use FMP"]);
+	assert.equal(a.text, "# Memory\n\n- Promised: API\n\n## Learned\n- Decided: use FMP\n");
+	const b = applyMemory(a.text + "\n## Other\n- z\n", { add: ["second"], remove: [] });
+	assert.match(b.text, /## Learned\n- Decided: use FMP\n- second\n\n## Other/);
+});
+
+test("judgePrompt shows how brook reacted, so the judge can learn", () => {
+	const p = judgePrompt({ me: "brook", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [], feedback: [{ title: "Lunch poll", status: "dismissed" }], now: "now" });
+	assert.match(p, /dismissed: Lunch poll/);
+	assert.match(p, /"memory": \{"add"/);
 });

@@ -65,7 +65,7 @@ test("slash commands stay minimal", async () => {
  * an implementation detail. Verbs live under a parent command instead of
  * claiming another top-level name.
  */
-test("Pix keeps ten top-level slash commands", async () => {
+test("Pix keeps nine top-level slash commands", async () => {
   // ai-completion is loaded by smart-editor rather than by the manifest, so the
   // whole extension tree is scanned instead of the declared entry points.
   const names = [];
@@ -80,7 +80,6 @@ test("Pix keeps ten top-level slash commands", async () => {
     "fast",
     "footer",
     "goal",
-    "proactive",
     "rc",
     "subagent-config",
     "todo",

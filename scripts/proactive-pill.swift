@@ -1,6 +1,7 @@
 // Always-on desktop pill for the pix proactive loop.
 // Collapsed: a small floating capsule with a bell and pending count.
-// Click: expands to the alert list; each alert has Act (opens pi in Otty) and Dismiss.
+// Click: expands to the list; each item has Do it (starts a Pi session) and Not now.
+// The iPhone shows the same list in Pix Remote ("For you").
 // Reads ~/.pix/proactive/inbox.jsonl; all state changes go through proactive-daemon.ts.
 // Build: swiftc -O scripts/proactive-pill.swift -o ~/.pix/proactive/pill
 import AppKit
@@ -9,7 +10,6 @@ import SwiftUI
 let home = FileManager.default.homeDirectoryForCurrentUser.path
 let dir = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DIR"] ?? "\(home)/.pix/proactive"
 let inbox = "\(dir)/inbox.jsonl"
-let otty = ProcessInfo.processInfo.environment["PIX_OTTY"] ?? "/Applications/Otty.app/Contents/MacOS/otty-cli"
 let daemon = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DAEMON"] ?? "\(home)/workspace/tools/pix/scripts/proactive-daemon.ts"
 
 struct Alert: Identifiable { let id, title, why, source, at: String }
@@ -42,8 +42,8 @@ final class Model: ObservableObject {
     init() { refresh(); timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() } }
     func refresh() { let a = loadPending(); if a.map(\.id) != alerts.map(\.id) { alerts = a; if a.isEmpty { open = false } } }
     func act(_ a: Alert) {
-        // Open a new Otty window running the daemon's `act` verb (marks done, starts pi on the next step).
-        sh([otty, "open", "--title", "pix: \(a.title)", "--command", "PIX_PROACTIVE_DIR='\(dir)' node '\(daemon)' act \(a.id)"])
+        // Same path as the phone: the daemon's `act` verb starts a normal Pi session with remote on.
+        sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "act", a.id])
         refresh()
     }
     func dismiss(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "dismiss", a.id]); refresh() }
@@ -62,8 +62,8 @@ struct Pill: View {
                             HStack {
                                 Text(a.source).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
                                 Spacer()
-                                Button("Dismiss") { m.dismiss(a) }.buttonStyle(.borderless).font(.system(size: 12))
-                                Button("Act") { m.act(a) }.buttonStyle(.borderedProminent).controlSize(.small)
+                                Button("Not now") { m.dismiss(a) }.buttonStyle(.borderless).font(.system(size: 12))
+                                Button("Do it") { m.act(a) }.buttonStyle(.borderedProminent).controlSize(.small)
                             }
                         }
                         if a.id != m.alerts.last?.id { Divider() }
