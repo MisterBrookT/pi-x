@@ -179,3 +179,12 @@ test("ottyWindow prefers the focused window and tolerates errors", async () => {
   assert.equal(await ottyWindow("otty", async () => JSON.stringify({ data: [] })), undefined);
   assert.equal(await ottyWindow("otty", async () => { throw Error("no socket"); }), undefined);
 });
+
+test("focusOttyTab finds the tab by title and focuses it", async () => {
+  const { focusOttyTab } = await import("../src/remote-mac.ts");
+  const calls = [];
+  const run = async (cmd, args) => { calls.push(args.join(" ")); return JSON.stringify({ data: [{ id: "t1", title: "π - minara" }, { id: "t2", title: "π - For you - tangyinghao" }] }); };
+  assert.equal(await focusOttyTab("For you", "otty", run), true);
+  assert.equal(calls[1], "tab focus t2");
+  assert.equal(await focusOttyTab("nope", "otty", run), false);
+});

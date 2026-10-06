@@ -38,8 +38,13 @@ test("store: one list, Not now and Do it both remove the item; Do it starts Pi i
   // Live For you session: the task is queued into it, no new tab.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { project })) + "\n");
   const sent = [];
-  await actItem("c", { dir, send: (sid, text) => (sent.push([sid, text]), true), launch: async () => assert.fail("no tab when live") });
+  await actItem("c", { dir, send: (sid, text) => (sent.push([sid, text]), true), launch: async () => assert.fail("no tab when live"), focusTab: async () => assert.fail("phone tap: no focus") });
   assert.equal(sent[0][0], "pix-foryou");
+  // Mac tap with a live session: bring its tab to the front.
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d", { project })) + "\n");
+  const focused = [];
+  await actItem("d", { dir, focus: true, send: () => true, focusTab: async name => (focused.push(name), true) });
+  assert.deepEqual(focused, ["For you"]);
 });
 
 test("relay lets the phone use For you, and nothing broader", () => {

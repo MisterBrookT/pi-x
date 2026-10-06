@@ -142,7 +142,7 @@ export interface RemoteHubOptions {
   onRetire?: () => void;
   /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
   proactiveDir?: string;
-  proactiveAct?: (id: string) => Promise<unknown>;
+  proactiveAct?: (id: string, focus?: boolean) => Promise<unknown>;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -279,7 +279,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
       const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss)$/);
       if (req.method === "POST" && forYouMatch) {
-        await body(req);
+        const input = await body(req).catch(() => ({})) as any;
         const [, id, verb] = forYouMatch;
         if (verb === "dismiss") { const ok = dismissItem(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
         try {
@@ -291,7 +291,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
             if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
             return true;
           };
-          const it = await (options.proactiveAct ?? (x => actItem(x, { dir: options.proactiveDir, send: sendLive })))(id);
+          const focus = input?.focus === true;
+          const it = await (options.proactiveAct ?? ((x, f) => actItem(x, { dir: options.proactiveDir, send: sendLive, focus: f })))(id, focus);
           onProactive();
           return it ? send(res, 202, { started: true }) : send(res, 404, { error: "already handled" });
         } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }

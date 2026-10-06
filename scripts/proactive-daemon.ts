@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor } from "../src/proactive-sources.ts";
 import { actItem, dismissItem } from "../src/proactive-store.ts";
@@ -88,9 +89,20 @@ async function tick(cfg: Config) {
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 }
 
+async function hubAct(id: string, focus: boolean): Promise<boolean | undefined> {
+	try {
+		const token = readFileSync(remoteTokenPath, "utf8").trim();
+		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/foryou/${encodeURIComponent(id)}/act`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ focus }), signal: AbortSignal.timeout(5000) });
+		return res.status === 404 ? false : res.ok ? true : undefined;
+	} catch { return undefined; }
+}
+
 const [verb, itemId] = process.argv.slice(2);
 if (verb === "act" || verb === "dismiss") {
-	const ok = verb === "act" ? !!(await actItem(itemId, { focus: process.argv.includes("--focus") })) : dismissItem(itemId);
+	const focus = process.argv.includes("--focus");
+	// Prefer the hub: it can hand the task to a live For you session. Without a hub, act directly.
+	const viaHub = verb === "act" ? await hubAct(itemId, focus) : undefined;
+	const ok = viaHub ?? (verb === "act" ? !!(await actItem(itemId, { focus })) : dismissItem(itemId));
 	if (!ok) { console.error(`no pending alert ${itemId}`); process.exit(1); }
 	process.exit(0);
 }

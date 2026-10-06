@@ -115,6 +115,16 @@ export async function ottyWindow(cli: string, run: (cmd: string, args: string[])
     return String((list.find((w: any) => w.focused) ?? list[0]).id);
   } catch { return undefined; }
 }
+/** Bring an existing Otty tab whose title contains `name` to the front. True if one was found. */
+export async function focusOttyTab(name: string, cli = onPath("otty") ? "otty" : ottyAppCli, run: (cmd: string, args: string[]) => Promise<string> = defaultRun): Promise<boolean> {
+  try {
+    const tabs = JSON.parse(await run(cli, ["tab", "list", "--json", "--timeout", "1500"]))?.data;
+    const tab = Array.isArray(tabs) && tabs.find((t: any) => String(t.title ?? "").includes(name));
+    if (!tab) return false;
+    await run(cli, ["tab", "focus", String(tab.id)]);
+    return true;
+  } catch { return false; }
+}
 const defaultRun = (cmd: string, args: string[]) => new Promise<string>((ok, bad) => execFile(cmd, args, { timeout: 3000 }, (e, out) => (e ? bad(e) : ok(String(out)))));
 
 export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; prompt?: string; sessionId?: string; name?: string; model?: string; focus?: boolean; window?: (cli: string) => Promise<string | undefined> } = {}): Promise<Launch> {
