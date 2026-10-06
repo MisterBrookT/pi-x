@@ -115,3 +115,17 @@ test("feishu-all expands to every chat; explicit entries keep their project; no 
     assert.equal(out[0].project, "~/p");
   } finally { adapters["feishu-all"].expand = real; }
 });
+
+test("regression: the user's own reply re-judges a chat with pending alerts so it can close them", async () => {
+	const { planBatch, judgePrompt } = await import("../src/proactive.ts");
+	const msgs = [{ id: "a", sender: "Knight", time: "", text: "q?" }, { id: "b", sender: "brook", time: "", text: "收到" }, { id: "c", sender: "brook", time: "", text: "checking" }];
+	const p = planBatch(msgs, "a", "brook", 1);
+	assert.equal(p.judge, true);
+	assert.deepEqual(p.fresh.map(m => m.id), ["b", "c"]);
+	assert.deepEqual(p.context.map(m => m.id), ["a"]);
+	assert.equal(planBatch(msgs, "a", "brook", 0).judge, false, "own chatter with nothing pending costs no call");
+	assert.equal(planBatch(msgs, "c", "brook", 1).judge, false);
+	const prompt = judgePrompt({ me: "brook", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: p.context, fresh: p.fresh, pending: [], now: "" });
+	assert.match(prompt, /brook \(me\): 收到/);
+	assert.doesNotMatch(prompt, /Knight \(me\)/);
+});

@@ -70,20 +70,19 @@ for (const apiKey of ["test-api-key", "sk-ant-oat01-test"]) {
   });
 }
 
-test("registers an isolated Pix provider using Pi's current provider contract", () => {
+test("registers an isolated Pix provider using Pi's current provider contract", async () => {
   let registration;
-  registerPixAnthropic({
-    registerProvider(id, config) {
-      registration = { id, config };
+  await registerPixAnthropic({
+    registerProvider(config) {
+      registration = { id: config.id, config };
     },
   });
 
   assert.equal(registration.id, "pix-anthropic");
-  assert.equal(registration.config.api, "anthropic-messages");
-  assert.equal(registration.config.apiKey, "$PIX_ANTHROPIC_API_KEY");
+  assert.equal(typeof registration.config.auth.apiKey.resolve, "function");
   assert.equal(typeof registration.config.streamSimple, "function");
-  assert.equal(typeof registration.config.oauth.login, "function");
-  const ids = new Set(registration.config.models.map(({ id }) => id));
+  assert.equal(registration.config.oauth, undefined);
+  const ids = new Set(registration.config.getModels().map(({ id }) => id));
   for (const id of [
     "claude-fable-5-1",
     "claude-fable-5",
@@ -94,7 +93,7 @@ test("registers an isolated Pix provider using Pi's current provider contract", 
   ]) {
     assert.ok(ids.has(id), `missing current OMP model ${id}`);
   }
-  assert.equal(registration.config.models.length, 13);
+  assert.equal(registration.config.getModels().length, 13);
 });
 
 test("subscription transport reports Anthropic cache usage exactly", async () => {
@@ -299,39 +298,4 @@ test("subscription transport does not retry unrelated server errors", async () =
   assert.equal(events.at(-1).type, "error");
   assert.match(events.at(-1).error.errorMessage, /Anthropic API error 500/);
   setFastModeEnabled(false);
-});
-
-test("OAuth exchange honours the runtime-owned refresh deadline", async () => {
-  let registration;
-  registerPixAnthropic({
-    registerProvider(id, config) {
-      registration = { id, config };
-    },
-  });
-
-  // The runtime shim separates prompt cancellation from this deadline.
-  // A stalled token endpoint must still be bounded; this unit test alone does
-  // not establish persistence safety (covered through the real ModelRuntime).
-  const originalFetch = globalThis.fetch;
-  let requestSignal;
-  globalThis.fetch = (_url, init) => {
-    requestSignal = init.signal;
-    return new Promise((_resolve, reject) => {
-      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
-    });
-  };
-
-  try {
-    const controller = new AbortController();
-    const pending = registration.config.oauth.refreshToken(
-      { type: "oauth", access: "access", refresh: "refresh", expires: 0 },
-      controller.signal,
-    );
-    controller.abort(new Error("refresh deadline exceeded"));
-    await assert.rejects(pending, /refresh deadline exceeded/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.ok(requestSignal?.aborted, "refresh request must observe its operation deadline");
 });

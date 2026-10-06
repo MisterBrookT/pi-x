@@ -25,11 +25,11 @@ Detailed usage, configuration, and design boundaries.
 - `/context` for the context-window breakdown, `Alt+E` to export the exact active prompt, and `/context html` (`Alt+H`) to open the whole context as a readable page in your browser
 - a configurable footer with cache efficiency and latest-response token speed
 
-For Claude Pro/Max plan usage, use `/login pix-anthropic` and select a model under the separate `pix-anthropic` provider. Pix leaves Pi's native `anthropic` provider unchanged; that provider uses Anthropic's third-party extra-usage billing.
+For Claude Pro/Max plan usage, sign in with Claude Code and select a model under the separate `pix-anthropic` provider. Pix leaves Pi's native `anthropic` provider unchanged; that provider uses Anthropic's third-party extra-usage billing.
 
 > **Anthropic subscription warning:** `pix-anthropic` is an unofficial, OMP-derived compatibility transport that reproduces Claude Code's request fingerprint. Anthropic may change or reject this behavior, and using it may risk account restriction. Use Pi's native `anthropic` provider if that risk is unacceptable.
 >
-> `pix-anthropic` has its own provider and credential namespace, so Pi updates cannot overwrite Pix's implementation or the built-in `anthropic` provider. Pix vendors a reviewed OMP snapshot and tests both its locked Pi version and the latest Pi release; protocol updates are adopted deliberately.
+> `pix-anthropic` uses Claude Code credentials read-only (macOS Keychain or `~/.claude/.credentials.json` on other platforms; `CLAUDE_CONFIG_DIR` selects a separate location). Open Claude Code to renew an expired token; `/login pix-anthropic` is not needed. If Pi has an older `pix-anthropic` OAuth entry in `~/.pi/agent/auth.json`, back up the file and remove only that entry once; a stored OAuth entry takes precedence over native provider auth. `PIX_ANTHROPIC_API_KEY` overrides Claude Code and uses API billing. Pi updates cannot overwrite Pix's transport or the built-in `anthropic` provider. Pix vendors a reviewed OMP snapshot and tests both its locked Pi version and the latest Pi release; protocol updates are adopted deliberately.
 
 ## Compatibility
 

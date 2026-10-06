@@ -10,7 +10,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
 import { actItem, dismissItem } from "../src/proactive-store.ts";
 
@@ -48,19 +48,18 @@ async function tick(cfg: Config) {
 			const adapter = adapterFor(src);
 			const msgs = await adapter.fetch(src);
 			const key = sourceKey(src);
-			const fresh = newSince(msgs, state[key]).filter(m => m.sender.trim() !== cfg.me);
 			const last = msgs.at(-1)?.id;
 			if (!state[key]) { // first run: set cursor, don't flood
 				if (last) state[key] = last;
 				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
 			}
-			if (last) state[key] = last;
-			if (!fresh.length) continue;
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
+			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], cfg.me, items.filter(i => i.status === "pending" && i.sourceKey === key).length);
+			if (last) state[key] = last;
+			if (!judge) continue;
 			const pending = items.filter(i => i.status === "pending").slice(-10);
 			const feedback = items.filter(i => i.status !== "pending").slice(-10);
 			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
-			const ctx = msgs.slice(0, msgs.length - fresh.length).slice(-15);
 			const raw = await ask(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
 			const v = parseVerdict(raw);
 			if (v && (v.memory.add.length || v.memory.remove.length) && !dry) {

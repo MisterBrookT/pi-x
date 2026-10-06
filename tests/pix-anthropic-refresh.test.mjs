@@ -1,180 +1,165 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { join } from "node:path";
 import test from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import registerPixAnthropic from "../extensions/pix-anthropic/index.ts";
+import { claudeKeychainService, readClaudeToken } from "../extensions/pix-anthropic/claude-auth.ts";
 
 const provider = "pix-anthropic";
-const expired = { type: "oauth", access: "old-access", refresh: "old-refresh", expires: 0, accountId: "account", orgId: "org" };
-const other = { type: "api_key", key: "unrelated-key" };
-const tokenResponse = () => new Response(JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 28800 }));
+const legacy = { type: "oauth", access: "old", refresh: "old-refresh", expires: 0 };
 
-// Real Pi runtime and file-backed credentials. Only the HTTP boundary is faked;
-// in particular, no permissive mock can hide Pi's post-refresh cancellation check.
 async function harness(t) {
-  const dir = await mkdtemp(join(tmpdir(), "pix-refresh-"));
+  const dir = await mkdtemp(join(tmpdir(), "pix-claude-auth-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const authPath = join(dir, "auth.json");
-  await writeFile(authPath, JSON.stringify({ [provider]: expired, unrelated: other }), { mode: 0o600 });
-  const createRuntime = async () => {
-    const runtime = await ModelRuntime.create({ authPath, modelsPath: null, modelsStorePath: join(dir, "models-cache.json"), refreshOnCreate: false });
-    registerPixAnthropic({ registerProvider: runtime.registerProvider.bind(runtime) });
-    return runtime;
-  };
-  return {
-    runtime: await createRuntime(), createRuntime,
-    read: async () => JSON.parse(await readFile(authPath, "utf8")),
-  };
+  const configDir = join(dir, "claude");
+  await mkdir(configDir);
+  await writeFile(authPath, "{}", { mode: 0o600 });
+  const runtime = await ModelRuntime.create({ authPath, modelsPath: null, modelsStorePath: join(dir, "models-cache.json"), refreshOnCreate: false });
+  await registerPixAnthropic({ registerProvider: runtime.registerNativeProvider.bind(runtime) });
+  return { runtime, authPath, configDir };
 }
 
-function delayedRefresh(t) {
-  const started = Promise.withResolvers();
-  const response = Promise.withResolvers();
-  let calls = 0;
-  let requestSignal;
-  t.mock.method(globalThis, "fetch", async (url, init) => {
-    assert.equal(url, "https://api.anthropic.com/v1/oauth/token");
-    assert.equal(JSON.parse(init.body).refresh_token, expired.refresh);
-    calls++;
-    requestSignal = init.signal;
-    started.resolve();
-    return response.promise;
-  });
-  return { started: started.promise, finish: response.resolve, calls: () => calls, signal: () => requestSignal };
+async function credential(dir, token = "sk-ant-oat01-test", expiresAt = Date.now() + 3600000) {
+  await writeFile(join(dir, ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: token, expiresAt } }));
 }
 
-for (const phase of ["before response", "while reading response body"]) {
-  test(`cancel ${phase}: stop waiting immediately but save the rotated token for a fresh runtime`, async (t) => {
-    const h = await harness(t);
-    const remote = delayedRefresh(t);
-    const controller = new AbortController();
-    const cancelled = assert.rejects(h.runtime.getAuth(provider, { signal: controller.signal }), /cancelled prompt/);
-    await remote.started;
-    const body = Promise.withResolvers();
-    const reading = Promise.withResolvers();
-    if (phase === "while reading response body") {
-      const response = tokenResponse();
-      // Rotation is already committed server-side; delay receipt of the body.
-      t.mock.method(response, "text", () => { reading.resolve(); return body.promise; });
-      remote.finish(response);
-      await reading.promise;
-    }
-    controller.abort(new Error("cancelled prompt"));
-    await cancelled;
-    assert.equal(remote.signal().aborted, false, "prompt cancellation must not cancel the owned exchange");
-    assert.equal((await h.read())[provider].refresh, expired.refresh);
-
-    if (phase === "before response") remote.finish(tokenResponse());
-    else body.resolve(await tokenResponse().text());
-    // A second runtime waits on Pi's real file lock and must reuse the result,
-    // not consume the same one-time refresh token again.
-    const peer = await h.createRuntime();
-    const auth = await peer.getAuth(provider);
-    assert.equal(auth.auth.apiKey, "new-access");
-    assert.equal(remote.calls(), 1);
-    const stored = await h.read();
-    assert.equal(stored[provider].refresh, "new-refresh");
-    assert.equal(stored[provider].accountId, expired.accountId);
-    assert.equal(stored[provider].orgId, expired.orgId);
-    assert.deepEqual(stored.unrelated, other);
-  });
-}
-
-test("cancellation before auth starts performs no refresh or credential write", async (t) => {
+test("real Pi runtime uses public native auth without stored OAuth and reads fresh Claude credentials each request", async (t) => {
   const h = await harness(t);
-  const fetch = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected HTTP request"); });
-  const controller = new AbortController();
-  controller.abort(new Error("already cancelled"));
-  await assert.rejects(h.runtime.getAuth(provider, { signal: controller.signal }), /already cancelled/);
+  const before = await readFile(h.authPath, "utf8");
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = h.configDir;
+  t.after(() => { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; });
+  const fetch = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected refresh"); });
+  if (process.platform === "darwin") {
+    const bin = join(h.configDir, "security");
+    await writeFile(bin, `#!/bin/sh
+[ "$1" = find-generic-password ] && [ "$2" = -s ] && [ "$3" = "${claudeKeychainService(h.configDir)}" ] && [ "$4" = -w ] || exit 1
+cat "${join(h.configDir, ".credentials.json")}"
+`);
+    await chmod(bin, 0o700);
+    const path = process.env.PATH;
+    process.env.PATH = `${h.configDir}:${path}`;
+    t.after(() => { process.env.PATH = path; });
+  }
+  {
+    await credential(h.configDir);
+    assert.equal((await h.runtime.getAuth(provider)).auth.apiKey, "sk-ant-oat01-test");
+    await credential(h.configDir, "sk-ant-oat01-new");
+    assert.equal((await h.runtime.getAuth(h.runtime.getModel(provider, "claude-haiku-4-5"))).auth.apiKey, "sk-ant-oat01-new");
+  }
+  assert.equal((await h.runtime.getAuth(provider)).auth.apiKey, "sk-ant-oat01-new");
   assert.equal(fetch.mock.callCount(), 0);
-  assert.deepEqual(await h.read(), { [provider]: expired, unrelated: other });
+  assert.equal(await readFile(h.authPath, "utf8"), before);
+  await registerPixAnthropic({ registerProvider: h.runtime.registerNativeProvider.bind(h.runtime) });
+  assert.equal((await h.runtime.getAuth(provider)).auth.apiKey, "sk-ant-oat01-new");
 });
 
-test("concurrent model and provider auth requests refresh once even when one caller cancels", async (t) => {
+test("obsolete stored OAuth must be removed once before native auth takes precedence", async (t) => {
   const h = await harness(t);
-  const peer = await h.createRuntime();
-  const remote = delayedRefresh(t);
-  const controller = new AbortController();
-  const cancelled = assert.rejects(h.runtime.getAuth(provider, { signal: controller.signal }), /cancelled/);
-  await remote.started;
-  const model = peer.getModel(provider, "claude-haiku-4-5");
-  assert.ok(model);
-  const survivor = peer.getAuth(model, { signal: new AbortController().signal });
-  controller.abort(new Error("cancelled"));
-  await cancelled;
-  remote.finish(tokenResponse());
-  assert.equal((await survivor).auth.apiKey, "new-access");
-  assert.equal(remote.calls(), 1);
-  assert.equal((await h.read())[provider].refresh, "new-refresh");
+  await writeFile(h.authPath, JSON.stringify({ [provider]: legacy }));
+  const old = process.env.PIX_ANTHROPIC_API_KEY;
+  process.env.PIX_ANTHROPIC_API_KEY = "configured-test-key";
+  t.after(() => { if (old === undefined) delete process.env.PIX_ANTHROPIC_API_KEY; else process.env.PIX_ANTHROPIC_API_KEY = old; });
+  const runtime = await ModelRuntime.create({ authPath: h.authPath, modelsPath: null, refreshOnCreate: false });
+  await registerPixAnthropic({ registerProvider: runtime.registerNativeProvider.bind(runtime) });
+  assert.notEqual((await runtime.getAuth(provider))?.auth?.apiKey, "configured-test-key");
+  assert.deepEqual(JSON.parse(await readFile(h.authPath, "utf8")), { [provider]: legacy });
 });
 
-test("a late refresh rejection is handled and preserves stored credentials", async (t) => {
+test("models are available through real Pi enumeration without stored pix OAuth", async (t) => {
   const h = await harness(t);
-  const remote = delayedRefresh(t);
-  const controller = new AbortController();
-  const cancelled = assert.rejects(h.runtime.getAuth(provider, { signal: controller.signal }), /cancelled/);
-  await remote.started;
-  controller.abort(new Error("cancelled"));
-  await cancelled;
-  remote.finish(new Response('{"error":"invalid_grant"}', { status: 400 }));
-  // Queue behind the failed transaction and confirm normal errors still surface.
-  await assert.rejects(h.runtime.getAuth(provider), /OAuth refresh failed/);
-  assert.deepEqual(await h.read(), { [provider]: expired, unrelated: other });
+  await writeFile(h.authPath, "{}");
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = h.configDir;
+  t.after(() => { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; });
+  if (process.platform === "darwin") {
+    const bin = join(h.configDir, "security");
+    await writeFile(bin, `#!/bin/sh\ncat "${join(h.configDir, ".credentials.json")}"\n`);
+    await chmod(bin, 0o700);
+    const path = process.env.PATH;
+    process.env.PATH = `${h.configDir}:${path}`;
+    t.after(() => { process.env.PATH = path; });
+  }
+  await credential(h.configDir);
+  const available = await h.runtime.getAvailable(provider);
+  assert.equal(available.length, 13);
+  assert.ok(available.some(model => model.id === "claude-haiku-4-5"));
+  const request = await h.runtime.prepareRequest(available.find(model => model.id === "claude-haiku-4-5"));
+  assert.equal(request.options.apiKey, "sk-ant-oat01-test");
+  assert.equal(await readFile(h.authPath, "utf8"), "{}");
 });
 
-test("reloading the extension installs the runtime shim only once", async (t) => {
+test("security subprocess times out rather than hanging on a stalled Keychain", { skip: process.platform !== "darwin" }, async (t) => {
   const h = await harness(t);
-  const installed = ModelRuntime.prototype.getAuth;
-  registerPixAnthropic({ registerProvider: h.runtime.registerProvider.bind(h.runtime) });
-  assert.equal(ModelRuntime.prototype.getAuth, installed);
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = h.configDir;
+  t.after(() => { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; });
+  const bin = join(h.configDir, "security");
+  await writeFile(bin, "#!/bin/sh\nexec sleep 30\n");
+  await chmod(bin, 0o700);
+  const path = process.env.PATH;
+  process.env.PATH = `${h.configDir}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+  const start = Date.now();
+  await assert.rejects(readClaudeToken(), /credentials unavailable/);
+  assert.ok(Date.now() - start < 10000, "security must terminate within ten seconds");
 });
 
-test("bundled CLI keeps credentials when a real model request is cancelled", { timeout: 20000 }, async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "pix-refresh-cli-"));
+test("missing, malformed and expired Claude credentials yield safe actionable errors", async (t) => {
+  const h = await harness(t);
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = h.configDir;
+  t.after(() => { if (old === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = old; });
+  if (process.platform === "darwin") {
+    const bin = join(h.configDir, "security");
+    await writeFile(bin, `#!/bin/sh
+cat "${join(h.configDir, ".credentials.json")}"
+`);
+    await chmod(bin, 0o700);
+    const path = process.env.PATH;
+    process.env.PATH = `${h.configDir}:${path}`;
+    t.after(() => { process.env.PATH = path; });
+  }
+  await assert.rejects(readClaudeToken(), /Sign in with Claude Code/);
+  await writeFile(join(h.configDir, ".credentials.json"), "secret-invalid-json");
+  await assert.rejects(readClaudeToken(), e => /malformed/.test(e.message) && !e.message.includes("secret-invalid-json"));
+  await credential(h.configDir, "sk-ant-oat01-secret", 0);
+  await assert.rejects(h.runtime.getAuth(provider), e => /expired/.test(e.message) && !e.message.includes("secret"));
+});
+
+test("Claude config directory gives a distinct stable Keychain service", () => {
+  assert.equal(claudeKeychainService(), process.env.CLAUDE_CONFIG_DIR ? claudeKeychainService(process.env.CLAUDE_CONFIG_DIR) : "Claude Code-credentials");
+  assert.notEqual(claudeKeychainService("/tmp/one"), claudeKeychainService("/tmp/two"));
+});
+
+test("other providers retain Pi auth resolution and cancelled calls do not read Claude credentials", async (t) => {
+  const h = await harness(t);
+  const abort = new AbortController();
+  abort.abort(new Error("cancelled"));
+  await assert.rejects(h.runtime.getAuth(provider, { signal: abort.signal }), /cancelled/);
+  assert.equal(await h.runtime.getAuth("unregistered-provider"), undefined);
+});
+
+test("globally bundled Pi lists Pix models with isolated Claude credentials", async (t) => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { resolve } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "pix-global-cli-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  await writeFile(join(dir, "auth.json"), JSON.stringify({ [provider]: { ...expired, expires: Date.now() + 3600000 } }), { mode: 0o600 });
-  const running = promisify(execFile)(process.execPath, [
-    resolve("node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"),
-    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-session",
-    "-e", resolve("extensions/pix-anthropic/index.ts"),
-    "-e", resolve("tests/helpers/pix-refresh-probe.ts"),
-    "--provider", provider, "--model", "claude-haiku-4-5", "-p", "unused",
-  ], {
-    cwd: dir, timeout: 15000,
-    env: { ...process.env, PI_CODING_AGENT_DIR: dir, PI_OFFLINE: "1", PIX_ANTHROPIC_API_KEY: "", TERM: "dumb" },
-  });
-  running.child.stdin.end();
-  const { stdout, stderr } = await running;
-  assert.match(stdout, /PIX_REFRESH_PERSISTED/, stderr);
-});
-
-test("other providers retain normal cancellation", async (t) => {
-  const h = await harness(t);
-  const started = Promise.withResolvers();
-  const credentials = new (await import("@earendil-works/pi-ai")).InMemoryCredentialStore();
-  await credentials.modify("untouched", async () => expired);
-  const runtime = await ModelRuntime.create({
-    credentials,
-    modelsPath: null, refreshOnCreate: false,
-  });
-  let refreshSignal;
-  const config = h.runtime.getRegisteredProviderConfig(provider);
-  runtime.registerProvider("untouched", { ...config, oauth: {
-    ...config.oauth,
-    refreshToken: async (_credentials, signal) => {
-      refreshSignal = signal;
-      started.resolve();
-      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
-    },
-  } });
-  const controller = new AbortController();
-  const pending = assert.rejects(runtime.getAuth("untouched", { signal: controller.signal }));
-  await started.promise;
-  controller.abort(new Error("cancelled"));
-  await pending;
-  assert.equal(refreshSignal.aborted, true);
+  const configDir = join(dir, "claude");
+  await mkdir(configDir);
+  await credential(configDir);
+  const env = { ...process.env, PI_CODING_AGENT_DIR: join(dir, "agent"), CLAUDE_CONFIG_DIR: configDir };
+  if (process.platform === "darwin") {
+    const bin = join(dir, "security");
+    await writeFile(bin, `#!/bin/sh\n[ "$1" = find-generic-password ] && [ "$2" = -s ] && [ "$3" = "${claudeKeychainService(configDir)}" ] && [ "$4" = -w ] || exit 1\ncat "${join(configDir, ".credentials.json")}"\n`);
+    await chmod(bin, 0o700);
+    env.PATH = `${dir}:${env.PATH}`;
+  }
+  const { stdout, stderr } = await promisify(execFile)("pi", ["--no-extensions", "--extension", resolve("extensions/pix-anthropic/index.ts"), "--list-models", "pix-anthropic"], { env, timeout: 30000 });
+  assert.equal((stdout.match(/pix-anthropic/g) ?? []).length, 13);
+  assert.doesNotMatch(stderr, /warn|error|refresh/i);
 });

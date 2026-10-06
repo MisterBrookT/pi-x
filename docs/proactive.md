@@ -85,6 +85,8 @@ flowchart TB
 
 One model, one call per batch of new messages (`model` in config, default `openai-codex/gpt-6-luna`). It is a tool-less `pi -p` call, so any provider Pi is logged into works. It writes items, closes pending items the chat resolved, and edits memory.
 
+Your own messages count too, marked `(me)`: when you reply in a chat that has an open item, the judge runs and closes the item. Your messages alone, with nothing open there, cost no call. Images reach the judge only as `[image]`, so a reply sent only as a picture may not close an item.
+
 Over `maxPerHour`, new items still enter the list, marked quiet: no push, never dropped.
 
 ## Do it
@@ -95,6 +97,10 @@ All "Do it" taps go to **one** Pi session, `For you` (session id `pix-foryou`, m
 - If not, it opens as a **new tab in the open Otty window** (tmux if Otty is not running; never a second Otty app), resuming the same session.
 
 The item records the session, so "Pi is on it" links to exactly that session.
+
+## @ in Pi
+
+In any Pi session, type `@`: open items appear above the file suggestions (match by title or id). Pick one to insert `@foryou:<id>`. When you send, it becomes the item's task, and the item is marked done by **this** session, so it leaves the Mac pill and the phone. Ids that are already handled stay as typed text.
 
 ## Who keeps the memory
 

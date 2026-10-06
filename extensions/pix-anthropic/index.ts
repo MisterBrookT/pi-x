@@ -5,27 +5,9 @@
  * (@oh-my-pi/pi-coding-agent, @oh-my-pi/pi-ai) v17.4.2 — MIT, (c) Mario Zechner,
  * Can Bölük, Stencil Labs, Inc. See THIRD_PARTY_NOTICES.md.
  *
- * WHAT IT ENABLES
- * The same Anthropic access omp has, inside pi: logging in with a Claude
- * Pro/Max account (`/login pix-anthropic`) bills requests against that
- * SUBSCRIPTION PLAN QUOTA rather than per-token API credits. That works only
- * because the OAuth request reproduces omp's wire fingerprint byte-for-byte —
- * user-agent, beta profile, system-block layout, 64k output clamp, `_` tool
- * prefix, billing header + cch attestation. Change any of those and the
- * subscription credential stops being honoured.
- *
- * Registers a SEPARATE provider id (`pix-anthropic`) so pi's built-in
- * `anthropic` provider is left completely untouched. Existing sessions,
- * models.json entries and `~/.pi/agent/auth.json` credentials keep working
- * exactly as before; this provider stores its own OAuth credential under its
- * own id and can be removed at any time by deleting this directory.
- *
- * USAGE
- *   /login pix-anthropic          # one-time OAuth (Claude Pro/Max subscription)
- *   /model pix-anthropic/claude-opus-4-5
- *
- *   # or with an API key instead (billed as API credits, not the plan):
- *   PIX_ANTHROPIC_API_KEY=sk-ant-... pi
+ * Reads Claude Code's existing subscription credential for each request, without
+ * refreshing or storing it in Pi. The built-in anthropic provider is unchanged.
+ * Set PIX_ANTHROPIC_API_KEY to use API credits instead.
  *
  * WHY THIS EXISTS
  * omp ships raw .ts under node_modules and targets bun, so a pi extension
@@ -44,9 +26,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loginAnthropic, refreshAnthropicToken, type PixAnthropicOAuthCredentials } from "./oauth.ts";
 import { createPixAnthropicStream } from "./stream.ts";
-import { installRefreshPersistence } from "./refresh-persistence.ts";
+import { claudeAuth } from "./claude-auth.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = "https://api.anthropic.com";
@@ -174,31 +155,23 @@ const MODELS: ModelSpec[] = [
 	},
 ];
 
-export default function (pi: ExtensionAPI) {
-	installRefreshPersistence();
+export default async function (pi: ExtensionAPI) {
 	const debug = process.env.PIX_ANTHROPIC_DEBUG === "1";
 	const extraBetas = (process.env.PIX_ANTHROPIC_EXTRA_BETAS ?? "")
 		.split(",")
 		.map((s) => s.trim())
 		.filter(Boolean);
 
-	pi.registerProvider(PROVIDER_ID, {
+	pi.registerProvider({
+		id: PROVIDER_ID,
 		name: "Anthropic Subscription (pix)",
 		baseUrl: BASE_URL,
-		api: "anthropic-messages",
-		// Falls back to an API key when no OAuth credential is stored.
-		apiKey: "$PIX_ANTHROPIC_API_KEY",
+		auth: { apiKey: claudeAuth },
 		streamSimple: createPixAnthropicStream({ extraBetas, debug }),
+		stream: createPixAnthropicStream({ extraBetas, debug }),
 
-		oauth: {
-			name: "Anthropic Subscription (Claude Pro/Max)",
-			login: loginAnthropic,
-			refreshToken: (credentials, signal) =>
-				refreshAnthropicToken(credentials as PixAnthropicOAuthCredentials, signal),
-			getApiKey: (credentials) => credentials.access,
-		},
-
-		models: MODELS.map((m) => ({
+		getModels: () => MODELS.map((m) => ({
+			provider: PROVIDER_ID,
 			id: m.id,
 			name: m.name,
 			api: "anthropic-messages" as const,

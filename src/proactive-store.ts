@@ -32,6 +32,14 @@ export function dismissItem(id: string, dir?: string): boolean {
 	return true;
 }
 
+/** Hand a pending item to an existing session (e.g. "@"-mentioned in Pi): mark it done there. */
+export function takeItem(id: string, session: string, dir?: string): Item | undefined {
+	const it = readPending(dir).find(i => i.id === id);
+	if (!it) return undefined;
+	appendFileSync(paths(dir).inbox, JSON.stringify({ id, status: "done", session, at_status: new Date().toISOString() }) + "\n");
+	return it;
+}
+
 /** The one Pi session that works on all "Do it" items, so they never pile up as tabs. */
 export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6-luna" };
 

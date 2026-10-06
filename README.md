@@ -84,7 +84,7 @@ See the [full guide](docs/guide.md) for all commands, configuration, and limits.
 <details>
 <summary>Using a Claude subscription</summary>
 
-Use `/login pix-anthropic`, then select a model under `pix-anthropic`.
+Sign in with Claude Code, then select a model under `pix-anthropic`. Pix reads Claude Code credentials on each request and never refreshes or saves them. If an older `pix-anthropic` OAuth entry remains in `~/.pi/agent/auth.json`, back up the file and remove only that entry once; otherwise it takes precedence over Claude Code auth. Set `PIX_ANTHROPIC_API_KEY` to use API credits instead.
 
 **This is an unofficial compatibility transport.** Anthropic may change or reject it, and using it may risk account restriction. Pi's native `anthropic` provider remains unchanged and uses Anthropic's third-party extra-usage billing. Use that provider if the subscription-transport risk is unacceptable.
 

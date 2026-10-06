@@ -200,7 +200,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 
 	pi.registerTool(withSpecialistExposure({
 		name: "goal", label: "Goal",
-		description: "Start or finish a session goal. active+objective starts one now, without extra opt-in, for substantial verifiable multi-step tasks the user requests (not quick answers or discussion); never replaces or resumes an unfinished goal. completed/blocked need the exact id and evidence (checks run, or what is missing).",
+		description: "Start or finish a session goal. active+objective starts one now, without extra opt-in, for substantial verifiable multi-step tasks the user requests (not quick answers or discussion); replaces a paused/blocked goal only if the user confirms; never an active one. completed/blocked need the exact id and evidence (checks run, or what is missing).",
 		parameters: Type.Object({
 			status: StringEnum(["active", "completed", "blocked"] as const),
 			objective: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_OBJECTIVE, pattern: "\\S", description: "Full scope and acceptance criteria" })),
@@ -214,7 +214,15 @@ export default function goalExtension(pi: ExtensionAPI) {
 				if (!objective) throw new Error("An objective is required to start a goal.");
 				if (closed || (ctx.mode !== "tui" && ctx.mode !== "rpc")) throw new Error("Goal mode requires a persistent TUI or RPC session.");
 				if (!goalAllowed()) throw new Error("The goal tool is disabled by the user. Only the user may enable it through /tool.");
-				if (goal && goal.status !== "completed") {
+				// A paused or blocked goal may be replaced only with the user's explicit confirmation.
+				let replaced = false;
+				if (goal && (goal.status === "paused" || goal.status === "blocked") && ctx.hasUI) {
+					const old = goal;
+					const ok = await ctx.ui.confirm(`Replace ${old.status} goal?`, `Current: ${old.objective.slice(0, 200)}\n\nNew: ${objective.slice(0, 200)}`, { signal });
+					signal?.throwIfAborted();
+					replaced = ok && !closed && goal === old;
+				}
+				if (goal && goal.status !== "completed" && !replaced) {
 					throw new Error(`Goal ${goal.id} is ${goal.status}; it was not replaced or resumed. Continue it, or ask the user to use /goal resume or /goal clear.`);
 				}
 				// Already inside a run: the steered reminder reaches the next request and

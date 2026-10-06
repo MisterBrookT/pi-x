@@ -39,10 +39,20 @@ export function newSince(msgs: Msg[], lastId?: string): Msg[] {
 	return i < 0 ? msgs : msgs.slice(i + 1);
 }
 
-const fmtMsg = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}: ${m.text}`;
+/**
+ * What to judge for one source. New messages include the user's own replies: they are what
+ * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
+ * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.
+ */
+export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, pendingHere: number): { fresh: Msg[]; context: Msg[]; judge: boolean } {
+	const fresh = newSince(msgs, lastId);
+	const context = msgs.slice(0, msgs.length - fresh.length).slice(-15);
+	const fromOthers = fresh.some(m => m.sender.trim() !== me);
+	return { fresh, context, judge: fromOthers || (fresh.length > 0 && pendingHere > 0) };
+}
 
 export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string }): string {
-	const fmt = fmtMsg;
+	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${o.me && m.sender.trim() === o.me ? " (me)" : ""}: ${m.text}`;
 	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and decide whether to interrupt ${o.me}.
 Stay quiet by default. Interrupt only when it clearly matters to ${o.me}:
 - someone asks ${o.me} something, @mentions him, or waits on him
@@ -50,6 +60,7 @@ Stay quiet by default. Interrupt only when it clearly matters to ${o.me}:
 - it changes what he should do next in his project (see memory)
 - he promised something and it is still open
 Do NOT interrupt for chit-chat, his own messages, or things already in the pending list.
+Messages marked (me) are ${o.me}'s own. If he already replied to, answered, or took on a pending alert, close it.
 
 Now: ${o.now}
 Source: ${o.source.name} [${o.source.kind}]${o.source.project ? ` (project: ${o.source.project})` : ""}

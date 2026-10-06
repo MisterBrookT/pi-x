@@ -14,6 +14,8 @@ function harness(sessionManager = SessionManager.inMemory()) {
 	const notices = [];
 	const selections = [];
 	const inputs = [];
+	const confirms = [];
+	let nextConfirm = false;
 	let nextSelection;
 	let nextInput;
 	let command;
@@ -42,6 +44,7 @@ function harness(sessionManager = SessionManager.inMemory()) {
 			setStatus: () => {},
 			select: async (title, options) => { selections.push({ title, options }); return nextSelection; },
 			input: async (title) => { inputs.push(title); return nextInput; },
+			confirm: async (title, message) => { confirms.push({ title, message }); return nextConfirm; },
 		},
 	};
 	registerGoal(pi);
@@ -50,7 +53,8 @@ function harness(sessionManager = SessionManager.inMemory()) {
 		return parseGoal(entry?.data);
 	};
 	return {
-		pi, tool, ctx, messages, reminders, notices, selections, inputs, state,
+		pi, tool, ctx, messages, reminders, notices, selections, inputs, confirms, state,
+		confirmNext: (value) => { nextConfirm = value; },
 		command: (args) => command.handler(args, ctx),
 		emit: (name, event = {}) => handlers.get(name)?.(event, ctx),
 		finish: async (status, evidence = "Focused tests passed; acceptance criteria checked.", id = state()?.id, signal) => tool.execute("finish", validateToolArguments(tool, { type: "toolCall", id: "finish", name: "goal", arguments: { id, status, evidence } }), signal, undefined, ctx),
@@ -363,6 +367,36 @@ test("a user pause while subagent status is pending prevents a late continuation
 	await settling;
 	assert.equal(h.messages.length, 1);
 	assert.equal(h.state().status, "paused");
+});
+
+test("starting a goal over a paused or blocked one asks the user and replaces only on confirmation", async () => {
+	const h = harness();
+	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
+	await start("Old M1 goal.");
+	const old = h.state();
+	await assert.rejects(start("While active."), /active; it was not replaced/);
+	assert.equal(h.confirms.length, 0, "an active goal is never offered for replacement");
+	await h.command("pause");
+	h.confirmNext(false);
+	await assert.rejects(start("Declined."), /paused; it was not replaced/);
+	assert.equal(h.confirms.length, 1);
+	assert.match(h.confirms[0].title, /Replace paused goal/);
+	assert.match(h.confirms[0].message, /Old M1 goal[\s\S]*Declined/);
+	assert.equal(h.state().id, old.id);
+	h.confirmNext(true);
+	await start("Overnight goal.");
+	assert.notEqual(h.state().id, old.id);
+	assert.equal(h.state().status, "active");
+	assert.equal(h.state().objective, "Overnight goal.");
+	await h.finish("blocked", "Need credentials.");
+	await start("After blocked.");
+	assert.equal(h.state().objective, "After blocked.");
+	const headless = harness();
+	headless.ctx.hasUI = false;
+	await headless.tool.execute("s", { status: "active", objective: "A." }, undefined, undefined, headless.ctx);
+	await headless.command("pause");
+	await assert.rejects(headless.tool.execute("s", { status: "active", objective: "B." }, undefined, undefined, headless.ctx), /paused; it was not replaced/);
+	assert.equal(headless.confirms.length, 0);
 });
 
 test("the agent may start a goal in the current turn but never replaces or resumes an unfinished goal", async () => {
