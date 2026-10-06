@@ -7,6 +7,27 @@ import { promisify } from "node:util";
 
 
 const execFile = promisify(execFileCallback);
+let renewal: Promise<void> | undefined;
+
+async function renewWithClaude(): Promise<void> {
+	if (!renewal) {
+		renewal = (async () => {
+			const env = { ...process.env };
+			delete env.CLAUDECODE; // Permit the CLI to run outside an inherited Claude Code session.
+			delete env.ANTHROPIC_API_KEY;
+			delete env.ANTHROPIC_AUTH_TOKEN;
+			try {
+				await execFile("claude", ["-p", "Reply only AUTH_OK", "--model", "haiku", "--max-turns", "1", "--tools", ""], {
+					env, timeout: 30000, maxBuffer: 1024 * 1024,
+				});
+			} catch {
+				throw new Error("pix-anthropic: Claude Code token expired and Claude CLI renewal failed. Run Claude Code to renew your login.");
+			}
+		})();
+		void renewal.finally(() => { renewal = undefined; }).catch(() => {});
+	}
+	return renewal;
+}
 
 export function claudeKeychainService(configDir = process.env.CLAUDE_CONFIG_DIR): string {
 	return configDir
@@ -15,6 +36,15 @@ export function claudeKeychainService(configDir = process.env.CLAUDE_CONFIG_DIR)
 }
 
 export async function readClaudeToken(): Promise<string> {
+	let token = await readCredentialToken();
+	if (token.expires > Date.now()) return token.value;
+	await renewWithClaude();
+	token = await readCredentialToken();
+	if (token.expires <= Date.now()) throw new Error("pix-anthropic: Claude Code token remains expired after CLI renewal. Run Claude Code to renew your login.");
+	return token.value;
+}
+
+async function readCredentialToken(): Promise<{ value: string; expires: number }> {
 	let raw: string;
 	try {
 		if (platform() === "darwin") {
@@ -36,8 +66,7 @@ export async function readClaudeToken(): Promise<string> {
 	if (typeof token !== "string" || !token.startsWith("sk-ant-oat") || typeof expires !== "number" || !Number.isFinite(expires)) {
 		throw new Error("pix-anthropic: Claude Code OAuth credential is malformed. Sign in again with Claude Code.");
 	}
-	if (expires <= Date.now()) throw new Error("pix-anthropic: Claude Code token expired. Open Claude Code to renew your login.");
-	return token;
+	return { value: token, expires };
 }
 
 /** Native provider auth runs in Pi's runtime, including globally installed Pi. */

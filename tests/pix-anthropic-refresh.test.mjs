@@ -127,7 +127,41 @@ cat "${join(h.configDir, ".credentials.json")}"
   await writeFile(join(h.configDir, ".credentials.json"), "secret-invalid-json");
   await assert.rejects(readClaudeToken(), e => /malformed/.test(e.message) && !e.message.includes("secret-invalid-json"));
   await credential(h.configDir, "sk-ant-oat01-secret", 0);
-  await assert.rejects(h.runtime.getAuth(provider), e => /expired/.test(e.message) && !e.message.includes("secret"));
+  const cli = join(h.configDir, "claude");
+  await writeFile(cli, '#!/bin/sh\nexit 1\n');
+  await chmod(cli, 0o700);
+  const path = process.env.PATH;
+  process.env.PATH = `${h.configDir}:${path}`;
+  t.after(() => { process.env.PATH = path; });
+  await assert.rejects(h.runtime.getAuth(provider), e => /renewal failed/.test(e.message) && !e.message.includes("secret"));
+  await writeFile(cli, '#!/bin/sh\nexit 0\n');
+  await assert.rejects(readClaudeToken(), e => /remains expired/.test(e.message) && !e.message.includes("secret"));
+});
+
+test("expired Claude credentials renew once through Claude CLI for concurrent callers", async (t) => {
+  const h = await harness(t);
+  const old = process.env.CLAUDE_CONFIG_DIR;
+  const path = process.env.PATH;
+  process.env.CLAUDE_CONFIG_DIR = h.configDir;
+  process.env.PATH = `${h.configDir}:${path}`;
+  t.after(() => { process.env.CLAUDE_CONFIG_DIR = old; process.env.PATH = path; });
+  await credential(h.configDir, "sk-ant-oat01-old", 0);
+  const cli = join(h.configDir, "claude");
+  await writeFile(cli, `#!/bin/sh
+[ "$1" = -p ] && [ "$2" = 'Reply only AUTH_OK' ] && [ "$3" = --model ] && [ "$4" = haiku ] && [ "$5" = --max-turns ] && [ "$6" = 1 ] && [ "$7" = --tools ] && [ "$8" = '' ] || exit 2
+[ -z "$CLAUDECODE" ] && [ -z "$ANTHROPIC_API_KEY" ] || exit 3
+echo call >> "${join(h.configDir, "calls")}" 
+sleep 0.1
+printf '%s' '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-renewed","expiresAt":9999999999999}}' > "${join(h.configDir, ".credentials.json")}" 
+`);
+  await chmod(cli, 0o700);
+  if (process.platform === "darwin") {
+    const bin = join(h.configDir, "security");
+    await writeFile(bin, `#!/bin/sh\ncat "${join(h.configDir, ".credentials.json")}"\n`);
+    await chmod(bin, 0o700);
+  }
+  assert.deepEqual(await Promise.all([readClaudeToken(), readClaudeToken()]), ["sk-ant-oat01-renewed", "sk-ant-oat01-renewed"]);
+  assert.equal((await readFile(join(h.configDir, "calls"), "utf8")).trim(), "call");
 });
 
 test("Claude config directory gives a distinct stable Keychain service", () => {
