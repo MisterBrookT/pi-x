@@ -90,7 +90,7 @@ async function tick(cfg: Config) {
 
 const [verb, itemId] = process.argv.slice(2);
 if (verb === "act" || verb === "dismiss") {
-	const ok = verb === "act" ? !!(await actItem(itemId)) : dismissItem(itemId);
+	const ok = verb === "act" ? !!(await actItem(itemId, { focus: process.argv.includes("--focus") })) : dismissItem(itemId);
 	if (!ok) { console.error(`no pending alert ${itemId}`); process.exit(1); }
 	process.exit(0);
 }

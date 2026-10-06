@@ -42,13 +42,13 @@ export const forYouFolder = (home = homedir()) => home;
  * "Do it": hand the item to the For you session. If it is live (connected to Remote), the task is queued
  * into it via `send`; otherwise a new tab starts it (same fixed session id, so history continues).
  */
-export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; send?: (session: string, text: string) => boolean } = {}): Promise<Item | undefined> {
+export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; send?: (session: string, text: string) => boolean } = {}): Promise<Item | undefined> {
 	const it = readPending(options.dir).find(i => i.id === id);
 	if (!it) return undefined;
 	appendFileSync(paths(options.dir).inbox, JSON.stringify({ id, status: "done", session: forYouSession.id, at_status: new Date().toISOString() }) + "\n");
 	const prompt = actPrompt(it);
 	if (options.send?.(forYouSession.id, prompt)) return it;
 	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
-	await (options.launch ?? launchPi)(forYouFolder(), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model });
+	await (options.launch ?? launchPi)(forYouFolder(), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model, focus: options.focus });
 	return it;
 }

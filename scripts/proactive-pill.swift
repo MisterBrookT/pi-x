@@ -43,7 +43,7 @@ final class Model: ObservableObject {
     func refresh() { let a = loadPending(); if a.map(\.id) != alerts.map(\.id) { alerts = a; if a.isEmpty { open = false } } }
     func act(_ a: Alert) {
         // Same path as the phone: the daemon's `act` verb starts a normal Pi session with remote on.
-        sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "act", a.id])
+        sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "act", a.id, "--focus"])
         refresh()
     }
     func dismiss(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "dismiss", a.id]); refresh() }

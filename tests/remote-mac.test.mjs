@@ -168,6 +168,9 @@ test("launchPi adds a tab to an open Otty window, never starts a second Otty, an
   assert.equal(calls[0].at(-2), "env PIX_REMOTE_AUTOSTART=relay pi --session-id 'foryou-x' --name 'For you' 'go'");
   await launchPi("/p", "relay", { hasOtty: true, window: async () => undefined, spawn });
   assert.equal(calls[1][0], "tmux", "Otty not running: tmux, not a new Otty app");
+  assert.ok(calls[0].includes("--no-focus"), "phone taps open quietly");
+  await launchPi("/p", "relay", { hasOtty: true, window: async () => "w_1", spawn, focus: true });
+  assert.ok(!calls[2].includes("--no-focus"), "Mac taps bring the tab to the front");
 });
 
 test("ottyWindow prefers the focused window and tolerates errors", async () => {
