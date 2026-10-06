@@ -179,11 +179,46 @@ function toVertical(src: string): string | null {
 export function renderFitted(src: string, width: number): MermaidArt {
   const art = renderMermaid(src);
   if (art.warnings.length > 0 || art.width <= width) return art;
-  const vertical = toVertical(src);
-  if (vertical === null) return compactSequence(src, width) ?? art;
-  const alt = renderMermaid(vertical);
-  if (alt.warnings.length > 0 || alt.plain.length === 0 || alt.width > width) return art;
-  return alt;
+  if (!/^\s*(flowchart|graph)\b/m.test(src)) return compactSequence(src, width) ?? art;
+  // Flowcharts: try ever more compact versions; keep the first one that fits.
+  const vertical = toVertical(src) ?? src;
+  const steps = [
+    vertical,
+    wrapLabels(vertical, 18),
+    flattenSubgraphs(wrapLabels(vertical, 18)),
+    wrapLabels(flattenSubgraphs(vertical), 12),
+    dropEdgeLabels(wrapLabels(flattenSubgraphs(vertical), 12)),
+  ];
+  for (const step of steps) {
+    if (step === src) continue;
+    const alt = renderMermaid(step);
+    if (alt.warnings.length === 0 && alt.plain.length > 0 && alt.width <= width) return alt;
+  }
+  return art;
+}
+
+/** Node shapes whose label can be wrapped: [..] (..) ([..]) [(..)] ((..)) {..} [[..]], quoted or not. */
+const NODE_LABEL = /(\b[A-Za-z_][\w-]*)(\[\(|\(\[|\(\(|\[\[|\[|\(|\{)("?)([^\]\)\}"]+?)\3(\)\]|\]\)|\)\)|\]\]|\]|\)|\})/g;
+
+/** Insert `<br/>` into long node labels so boxes get narrower. Existing breaks are kept. */
+export function wrapLabels(src: string, width: number): string {
+  return src.split("\n").map(line => {
+    if (/^\s*(subgraph|classDef|class|style|linkStyle|%%)\b/.test(line)) return line;
+    return line.replace(NODE_LABEL, (raw, id, open, q, text, close) => {
+      const parts = String(text).split(/<br\s*\/?>/i).flatMap(part => wrapText(part, width));
+      return parts.length > 1 ? `${id}${open}"${parts.join("<br/>")}"${close}` : raw;
+    });
+  }).join("\n");
+}
+
+/** Remove subgraph boxes (keep their nodes and edges). Boxes cost width a narrow pane cannot spare. */
+export function flattenSubgraphs(src: string): string {
+  return src.split("\n").filter(line => !/^\s*(subgraph\b.*|end\s*)$/.test(line)).join("\n");
+}
+
+/** Last resort: drop edge labels (`-->|x|`, `-- x -->`). */
+export function dropEdgeLabels(src: string): string {
+  return src.replace(/(-->|---|-.->|==>)\|[^|]*\|/g, "$1").replace(/--\s+[^-\n>][^\n]*?\s+-->/g, "-->");
 }
 
 /** Sequence arrow operators, longest first so `-->>` is not read as `->`. */

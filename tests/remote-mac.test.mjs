@@ -159,3 +159,20 @@ test("phone Delete quits Pi and removes only that session's file; Close keeps it
     assert.equal(existsSync(file), action === "close");
   }
 });
+
+test("launchPi adds a tab to an open Otty window, never starts a second Otty, and passes session id and name", async () => {
+  const calls = [];
+  const spawn = async (command, args) => { calls.push([command, ...args]); };
+  await launchPi("/p", "relay", { hasOtty: true, window: async () => "w_1", spawn, sessionId: "foryou-x", name: "For you", prompt: "go" });
+  assert.deepEqual(calls[0].slice(0, 6), ["otty", "tab", "new", "--window", "w_1", "--cwd"]);
+  assert.equal(calls[0].at(-2), "env PIX_REMOTE_AUTOSTART=relay pi --session-id 'foryou-x' --name 'For you' 'go'");
+  await launchPi("/p", "relay", { hasOtty: true, window: async () => undefined, spawn });
+  assert.equal(calls[1][0], "tmux", "Otty not running: tmux, not a new Otty app");
+});
+
+test("ottyWindow prefers the focused window and tolerates errors", async () => {
+  const { ottyWindow } = await import("../src/remote-mac.ts");
+  assert.equal(await ottyWindow("otty", async () => JSON.stringify({ data: [{ id: "a" }, { id: "b", focused: true }] })), "b");
+  assert.equal(await ottyWindow("otty", async () => JSON.stringify({ data: [] })), undefined);
+  assert.equal(await ottyWindow("otty", async () => { throw Error("no socket"); }), undefined);
+});

@@ -286,3 +286,25 @@ test("a sequence diagram with unsupported statements keeps the original fallback
 	const art = renderFitted(src, 80);
 	assert.deepEqual(art.plain, renderMermaid(src).plain);
 });
+
+test("renderFitted: a wide top-down flowchart with a subgraph and long labels still fits a narrow pane", async () => {
+  const { renderFitted, wrapLabels, flattenSubgraphs, dropEdgeLabels } = await import("../src/mermaid.ts");
+  const src = `flowchart TB
+  subgraph S["Always running on the Mac (no window)"]
+    D["Daemon: receive and judge"]
+    H["Remote hub<br/>(For you page + push)"]
+  end
+  D -->|"0 to n items, plus close these ids"| L[(The list)]
+  D --> M[(memory.md:<br/>About me / Open loops / Learned)]
+  L --> H
+  H --> PH[iPhone]
+  PH -- Do it --> SES[Session, saved on the item]
+  SES -->|session ends| L`;
+  const art = renderFitted(src, 70);
+  assert.equal(art.warnings.length, 0);
+  assert.ok(art.width <= 70, `width ${art.width}`);
+  assert.match(art.plain.join("\n"), /iPhone/);
+  assert.equal(wrapLabels('A["one two three four five"] --> B', 9), 'A["one two<br/>three<br/>four five"] --> B');
+  assert.equal(flattenSubgraphs("flowchart TB\n  subgraph X[y]\n    A\n  end\n  A --> B"), "flowchart TB\n    A\n  A --> B");
+  assert.equal(dropEdgeLabels("A -->|x| B\nC -- y --> D"), "A --> B\nC --> D");
+});

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
 import { startRemoteHub } from "../src/remote-hub.ts";
-import { actItem, dismissItem, itemFolder, readPending } from "../src/proactive-store.ts";
+import { actItem, dismissItem, readPending } from "../src/proactive-store.ts";
 import { relayAllowed } from "../src/remote-relay-agent.ts";
 
 const token = "foryou-token-1234567890";
@@ -28,12 +28,18 @@ test("store: one list, Not now and Do it both remove the item; Do it starts Pi i
   const calls = [];
   const it = await actItem("a", { dir, mode: "relay", launch: async (...args) => { calls.push(args); } });
   assert.equal(it.id, "a");
-  assert.equal(calls[0][0], project);
   assert.equal(calls[0][1], "relay");
+  assert.equal(calls[0][2].sessionId, "pix-foryou", "all Do it items go to one For you session");
+  assert.equal(calls[0][2].model, "openai-codex/gpt-6-luna");
   assert.match(calls[0][2].prompt, /Title a[\s\S]*do not send without my confirmation/);
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"a","status":"done","session":"pix-foryou"/, "item remembers its session");
   assert.deepEqual(readPending(dir), []);
   assert.equal(await actItem("a", { dir, launch: async () => assert.fail("must not launch twice") }), undefined);
-  assert.equal(itemFolder(item("x", { project: join(dir, "missing") }), "/home"), "/home");
+  // Live For you session: the task is queued into it, no new tab.
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { project })) + "\n");
+  const sent = [];
+  await actItem("c", { dir, send: (sid, text) => (sent.push([sid, text]), true), launch: async () => assert.fail("no tab when live") });
+  assert.equal(sent[0][0], "pix-foryou");
 });
 
 test("relay lets the phone use For you, and nothing broader", () => {
@@ -91,4 +97,19 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("All clear").waitFor();
   assert.ok(await page.getByText("2 handled").isVisible(), "today's handled items stay visible");
   assert.deepEqual(errors, []);
+});
+
+test("hub: Do it with a live For you session queues the task into it (no new tab)", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a")) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: dir, busy: false, messages: [] }) });
+  const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
+  const res = await fetch(`${base}/api/foryou/a/act`, { method: "POST", headers: auth, body: "{}" });
+  assert.equal(res.status, 202);
+  const prompts = await next;
+  assert.match(JSON.stringify(prompts), /Title a/);
 });

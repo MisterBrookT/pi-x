@@ -32,18 +32,23 @@ export function dismissItem(id: string, dir?: string): boolean {
 	return true;
 }
 
-/** Folder an item's session starts in: its project if it exists, else home. */
-export function itemFolder(it: Item, home = homedir()): string {
-	const dir = (it.project ?? "").replace(/^~(?=\/|$)/, home);
-	return dir && existsSync(dir) ? dir : home;
-}
+/** The one Pi session that works on all "Do it" items, so they never pile up as tabs. */
+export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6-luna" };
 
-/** "Do it": start a normal Pi session (remote on, so it shows on the phone too) with the next step. */
-export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi } = {}): Promise<Item | undefined> {
+/** Where the For you session runs: home, so it can reach every project by path. */
+export const forYouFolder = (home = homedir()) => home;
+
+/**
+ * "Do it": hand the item to the For you session. If it is live (connected to Remote), the task is queued
+ * into it via `send`; otherwise a new tab starts it (same fixed session id, so history continues).
+ */
+export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; send?: (session: string, text: string) => boolean } = {}): Promise<Item | undefined> {
 	const it = readPending(options.dir).find(i => i.id === id);
 	if (!it) return undefined;
-	mark(id, "done", options.dir);
+	appendFileSync(paths(options.dir).inbox, JSON.stringify({ id, status: "done", session: forYouSession.id, at_status: new Date().toISOString() }) + "\n");
+	const prompt = actPrompt(it);
+	if (options.send?.(forYouSession.id, prompt)) return it;
 	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
-	await (options.launch ?? launchPi)(itemFolder(it), mode, { prompt: actPrompt(it) });
+	await (options.launch ?? launchPi)(forYouFolder(), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model });
 	return it;
 }

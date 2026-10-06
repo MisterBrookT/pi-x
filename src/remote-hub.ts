@@ -220,7 +220,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const onProactive = () => {
     const view = forYou(), list = view.pending;
     publish("foryou", view);
-    for (const it of list) if (!knownItems.has(it.id) && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
+    for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);
@@ -283,7 +283,15 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         const [, id, verb] = forYouMatch;
         if (verb === "dismiss") { const ok = dismissItem(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
         try {
-          const it = await (options.proactiveAct ?? (x => actItem(x, { dir: options.proactiveDir })))(id);
+          // Live For you session: queue the task into it, like a phone prompt. Otherwise actItem opens a tab.
+          const sendLive = (sid: string, text: string) => {
+            const live = sessions.get(sid);
+            if (!live) return false;
+            live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
+            if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
+            return true;
+          };
+          const it = await (options.proactiveAct ?? (x => actItem(x, { dir: options.proactiveDir, send: sendLive })))(id);
           onProactive();
           return it ? send(res, 202, { started: true }) : send(res, 404, { error: "already handled" });
         } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }

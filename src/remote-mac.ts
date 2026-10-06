@@ -1,6 +1,6 @@
 // Mac-side helpers behind the phone's folder picker, session launcher, session deletion, and
 // read-only Memory view. Every path the phone names is resolved and checked here.
-import { spawn as nodeSpawn } from "node:child_process";
+import { execFile, spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat, open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -75,14 +75,19 @@ export async function launchableFolder(path: unknown, home = homedir(), sessions
 export type RemoteMode = "relay" | "tailnet";
 export interface Launch { command: string; args: string[] }
 
-/** The terminal command that starts Pi in `dir` with remote control already on. */
 /** Otty's CLI: on PATH inside Otty shells; background services (launchd, the pill) use the app bundle. */
 export const ottyAppCli = "/Applications/Otty.app/Contents/MacOS/otty-cli";
 
-export function launchCommand(dir: string, mode: RemoteMode, otty: boolean | string, prompt?: string): Launch {
-  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi${prompt ? ` ${shellQuote(prompt)}` : ""}`;
+/** Extra Pi arguments for a launch: a fixed session to create or resume, its name, and a first prompt. */
+export interface PiArgs { prompt?: string; sessionId?: string; name?: string; model?: string }
+
+/** The terminal command that starts Pi in `dir` with remote control already on. */
+export function launchCommand(dir: string, mode: RemoteMode, otty: boolean | string, pi_: string | PiArgs = {}, window?: string): Launch {
+  const a: PiArgs = typeof pi_ === "string" ? { prompt: pi_ } : pi_;
+  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi${a.sessionId ? ` --session-id ${shellQuote(a.sessionId)}` : ""}${a.name ? ` --name ${shellQuote(a.name)}` : ""}${a.model ? ` --model ${shellQuote(a.model)}` : ""}${a.prompt ? ` ${shellQuote(a.prompt)}` : ""}`;
   return otty
-    ? { command: typeof otty === "string" ? otty : "otty", args: ["tab", "new", "--cwd", dir, "--command", pi, "--no-focus"] }
+    // Always a tab in an existing Otty window; never a second Otty process.
+    ? { command: typeof otty === "string" ? otty : "otty", args: ["tab", "new", ...(window ? ["--window", window] : []), "--cwd", dir, "--command", pi, "--no-focus"] }
     : { command: "tmux", args: ["new-session", "-d", "-c", dir, pi] };
 }
 
@@ -99,9 +104,25 @@ const detachedSpawn: Spawner = (command, args) => new Promise((resolve, reject) 
 /** POSIX single-quote, so a starting prompt reaches Pi as one argument. */
 export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
-export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; prompt?: string } = {}): Promise<Launch> {
-  const otty = options.hasOtty ?? (onPath("otty") || (existsSync(ottyAppCli) ? ottyAppCli : false));
-  const launch = launchCommand(dir, mode, otty, options.prompt);
+/**
+ * An open Otty window to add a tab to. Undefined when Otty is not running: then the caller uses tmux,
+ * so a background service never starts a second Otty app.
+ */
+export async function ottyWindow(cli: string, run: (cmd: string, args: string[]) => Promise<string> = defaultRun): Promise<string | undefined> {
+  try {
+    const list = JSON.parse(await run(cli, ["window", "list", "--json", "--timeout", "1500"]))?.data;
+    if (!Array.isArray(list) || !list.length) return undefined;
+    return String((list.find((w: any) => w.focused) ?? list[0]).id);
+  } catch { return undefined; }
+}
+const defaultRun = (cmd: string, args: string[]) => new Promise<string>((ok, bad) => execFile(cmd, args, { timeout: 3000 }, (e, out) => (e ? bad(e) : ok(String(out)))));
+
+export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; prompt?: string; sessionId?: string; name?: string; model?: string; window?: (cli: string) => Promise<string | undefined> } = {}): Promise<Launch> {
+  // Tests force the choice with hasOtty. Otherwise: Otty only if a window is already open (adds a tab), else tmux.
+  const cli = options.hasOtty === false ? false : options.hasOtty === true ? "otty" : onPath("otty") ? "otty" : existsSync(ottyAppCli) ? ottyAppCli : false;
+  const win = cli && (options.hasOtty === undefined || options.window) ? await (options.window ?? ottyWindow)(cli) : undefined;
+  const useOtty = cli && (win !== undefined || options.hasOtty === true && !options.window) ? cli : false;
+  const launch = launchCommand(dir, mode, useOtty, { prompt: options.prompt, sessionId: options.sessionId, name: options.name, model: options.model }, win);
   await (options.spawn ?? detachedSpawn)(launch.command, launch.args);
   return launch;
 }

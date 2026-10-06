@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
+import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, triagePasses, triagePrompt, underLimit } from "../src/proactive.ts";
 import { adapterFor, adapters, parseFeishu } from "../src/proactive-sources.ts";
 
 const raw = { data: { messages: [
@@ -24,7 +24,7 @@ test("newSince: only after cursor; unknown cursor returns all", () => {
 });
 
 test("parseVerdict: tolerant of prose, rejects bad shapes", () => {
-	assert.equal(parseVerdict('ok {"notify":true,"title":"t","why":"w","action":"a","refs":["m3"]}').notify, true);
+	assert.equal(parseVerdict('ok {"notify":true,"title":"t","why":"w","action":"a","refs":["m3"]}').alerts[0].title, "t", "old one-alert shape still reads");
 	assert.equal(parseVerdict("no json"), null);
 	assert.equal(parseVerdict('{"notify":"yes"}'), null);
 });
@@ -83,4 +83,33 @@ test("judgePrompt shows how brook reacted, so the judge can learn", () => {
 test("parseInbox: a status line without its item is ignored, not a broken item", () => {
 	const items = parseInbox(JSON.stringify({ id: "x", status: "dismissed" }) + "\n" + JSON.stringify({ id: "y", title: "T", sourceKey: "feishu:c", status: "pending" }));
 	assert.deepEqual(items.map(i => i.id), ["y"]);
+});
+
+test("parseVerdict: several alerts (max 3), close ids, untitled alerts dropped", () => {
+	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "a" }, { title: "" }, { title: "b" }, { title: "c" }, { title: "d" }], close: ["x1"] }));
+	assert.deepEqual(v.alerts.map(a => a.title), ["a", "b", "c"]);
+	assert.deepEqual(v.close, ["x1"]);
+	assert.deepEqual(parseVerdict('{"alerts":[]}').alerts, []);
+});
+
+test("triage: only a clear no skips the judge; errors and junk pass", () => {
+	assert.equal(triagePasses("no"), false);
+	assert.equal(triagePasses("No."), false);
+	assert.equal(triagePasses("maybe"), true);
+	assert.equal(triagePasses("error pi exited 1"), true);
+	assert.equal(triagePasses(""), true);
+	assert.equal(triagePasses("nothing important? maybe"), true);
+	assert.match(triagePrompt({ me: "brook", memory: "- Waiting: doc", fresh: [{ id: "1", time: "t", sender: "K", text: "hi" }], pending: [] }), /Waiting: doc[\s\S]*K: hi[\s\S]*maybe or no/);
+});
+
+test("judgePrompt lists pending ids so the judge can close them", () => {
+	const p = judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [{ id: "ab12", title: "Doc" }], now: "n" });
+	assert.match(p, /id=ab12: Doc/);
+	assert.match(p, /"close"/);
+});
+
+test("underLimit ignores quiet items, so they never block a real push", () => {
+	const now = Date.now(), at = new Date(now).toISOString();
+	assert.equal(underLimit([{ at, quiet: true }, { at, quiet: true }], 1, now), true);
+	assert.equal(underLimit([{ at }], 1, now), false);
 });
