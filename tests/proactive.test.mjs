@@ -103,3 +103,15 @@ test("underLimit ignores quiet items, so they never block a real push", () => {
 	assert.equal(underLimit([{ at, quiet: true }, { at, quiet: true }], 1, now), true);
 	assert.equal(underLimit([{ at }], 1, now), false);
 });
+
+test("feishu-all expands to every chat; explicit entries keep their project; no duplicates", async () => {
+  const { parseFeishuChats, expandSources, adapters } = await import("../src/proactive-sources.ts");
+  assert.deepEqual(parseFeishuChats({ data: { chats: [{ chat_id: "oc_1", name: "A " }, { name: "no id" }] } }), [{ kind: "feishu", id: "oc_1", name: "A" }]);
+  const real = adapters["feishu-all"].expand;
+  adapters["feishu-all"].expand = async () => [{ kind: "feishu", id: "oc_1", name: "A" }, { kind: "feishu", id: "oc_2", name: "B" }];
+  try {
+    const out = await expandSources([{ kind: "feishu", id: "oc_2", name: "B", project: "~/p" }, { kind: "feishu-all", id: "all", name: "All" }]);
+    assert.deepEqual(out.map(s => s.id), ["oc_2", "oc_1"]);
+    assert.equal(out[0].project, "~/p");
+  } finally { adapters["feishu-all"].expand = real; }
+});

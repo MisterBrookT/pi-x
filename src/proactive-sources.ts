@@ -11,6 +11,14 @@ export interface Adapter {
 	fetch(src: Source): Promise<Msg[]>;
 	/** How an agent can read the original items when acting on an alert. */
 	howToRead(src: Source, refs: string[]): string;
+	/** Optional: turn one config entry into many real sources (e.g. "all my Feishu chats"). */
+	expand?(src: Source): Promise<Source[]>;
+}
+
+/** Feishu chat list -> one feishu source per chat. */
+export function parseFeishuChats(json: unknown): Source[] {
+	const list = (json as { data?: { chats?: any[] } })?.data?.chats ?? [];
+	return list.filter(c => c?.chat_id).map(c => ({ kind: "feishu", id: String(c.chat_id), name: String(c.name ?? c.chat_id).trim() }));
 }
 
 /** Feishu chat messages -> Msg[], oldest first. */
@@ -43,7 +51,29 @@ const command: Adapter = {
 	howToRead: (src, refs) => `Source command: ${src.command}. Item ids: ${refs.join(", ") || "n/a"}.`,
 };
 
-export const adapters: Record<string, Adapter> = { feishu, command };
+/** Every unmuted Feishu chat (groups and direct messages). Muted chats are skipped: mute = not important. */
+const feishuAll: Adapter = {
+	fetch: async () => [],
+	howToRead: () => "",
+	async expand() {
+		const { stdout } = await run("lark-cli", ["im", "+chat-list", "--as", "user", "--types", "p2p,group", "--exclude-muted", "--sort", "active_time", "--page-size", "100"], { maxBuffer: 1 << 24, timeout: 60_000 });
+		return parseFeishuChats(JSON.parse(stdout));
+	},
+};
+
+export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, command };
+
+/** Config sources with any "many chats" entries expanded. Explicit entries win (they may carry a project). */
+export async function expandSources(sources: Source[]): Promise<Source[]> {
+	const out: Source[] = [];
+	for (const src of sources) {
+		const a = adapterFor(src);
+		out.push(...(a.expand ? await a.expand(src) : [src]));
+	}
+	const explicit = new Map(sources.filter(s => !adapterFor(s).expand).map(s => [`${s.kind}:${s.id}`, s]));
+	const seen = new Set<string>();
+	return out.map(s => explicit.get(`${s.kind}:${s.id}`) ?? s).filter(s => { const k = `${s.kind}:${s.id}`; return !seen.has(k) && !!seen.add(k); });
+}
 
 export function adapterFor(src: Source): Adapter {
 	const a = adapters[src.kind];

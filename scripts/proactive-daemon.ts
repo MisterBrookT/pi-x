@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
-import { adapterFor } from "../src/proactive-sources.ts";
+import { adapterFor, expandSources } from "../src/proactive-sources.ts";
 import { actItem, dismissItem } from "../src/proactive-store.ts";
 
 const P = paths();
@@ -41,7 +41,9 @@ async function ask(prompt: string, model: string): Promise<string> {
 
 async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
-	for (const src of cfg.sources) {
+	let sources = cfg.sources;
+	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
+	for (const src of sources) {
 		try {
 			const adapter = adapterFor(src);
 			const msgs = await adapter.fetch(src);
@@ -87,6 +89,7 @@ async function tick(cfg: Config) {
 		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); }
 	}
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
+	log(`checked ${sources.length} sources`);
 }
 
 async function hubAct(id: string, focus: boolean): Promise<boolean | undefined> {

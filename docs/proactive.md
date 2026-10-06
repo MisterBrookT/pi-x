@@ -133,6 +133,14 @@ For a quick integration, use the `command` kind: any command that prints `[{"id"
 { "kind": "command", "id": "mail", "name": "Mail", "command": "my-mail-export --json" }
 ```
 
+To watch every unmuted Feishu chat (groups and direct messages), add one entry:
+
+```json
+{ "kind": "feishu-all", "id": "all", "name": "Feishu" }
+```
+
+It expands to one source per chat at each check. Muting a chat in Feishu removes it. A chat you also list explicitly keeps its `project`.
+
 ## Files
 
 | File in `~/.pix/proactive/` | Content |
