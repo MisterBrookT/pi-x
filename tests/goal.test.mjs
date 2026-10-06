@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerGoal from "../extensions/goal.ts";
+import registerGoal, { GOAL_REPLACE_TIMEOUT_MS } from "../extensions/goal.ts";
+import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../extensions/question.ts";
 import { BACKGROUND_STATE_QUERY, backgroundState } from "../src/background-state.ts";
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, goalInstructions, parseGoal } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
@@ -44,7 +45,7 @@ function harness(sessionManager = SessionManager.inMemory()) {
 			setStatus: () => {},
 			select: async (title, options) => { selections.push({ title, options }); return nextSelection; },
 			input: async (title) => { inputs.push(title); return nextInput; },
-			confirm: async (title, message) => { confirms.push({ title, message }); return nextConfirm; },
+			confirm: (title, message, opts) => { confirms.push({ title, message, opts }); return nextConfirm === "wait" ? new Promise((resolve) => opts?.signal?.addEventListener("abort", () => resolve(false))) : Promise.resolve(nextConfirm); },
 		},
 	};
 	registerGoal(pi);
@@ -397,6 +398,45 @@ test("starting a goal over a paused or blocked one asks the user and replaces on
 	await headless.command("pause");
 	await assert.rejects(headless.tool.execute("s", { status: "active", objective: "B." }, undefined, undefined, headless.ctx), /paused; it was not replaced/);
 	assert.equal(headless.confirms.length, 0);
+});
+
+test("the replace prompt reaches Pix Remote as a question, and a phone answer decides it", async () => {
+	const h = harness();
+	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
+	const opened = [];
+	const closed = [];
+	h.pi.events.on(QUESTION_OPEN, (q) => opened.push(q));
+	h.pi.events.on(QUESTION_CLOSE, (q) => closed.push(q));
+	await start("Old M1 goal.");
+	const old = h.state();
+	await h.command("pause");
+	h.confirmNext("wait");
+	const declined = start("Declined on phone.");
+	await new Promise((r) => setImmediate(r));
+	assert.equal(opened.length, 1);
+	assert.match(opened[0].question, /Replace paused goal[\s\S]*Old M1 goal[\s\S]*Declined on phone/);
+	assert.deepEqual(opened[0].options.map((o) => o.label), ["Replace it", "Keep old goal"]);
+	assert.equal(h.confirms.at(-1).opts.timeout, GOAL_REPLACE_TIMEOUT_MS, "the terminal dialog cannot hang forever");
+	h.pi.events.emit(QUESTION_ANSWER, { id: opened[0].id, answer: "Keep old goal" });
+	await assert.rejects(declined, /paused; it was not replaced/);
+	assert.equal(h.state().id, old.id);
+	assert.deepEqual(closed.map((q) => q.id), [opened[0].id], "the phone question closes");
+	const accepted = start("Accepted on phone.");
+	await new Promise((r) => setImmediate(r));
+	h.pi.events.emit(QUESTION_ANSWER, { id: opened[1].id, answer: "Replace it" });
+	await accepted;
+	assert.equal(h.state().objective, "Accepted on phone.");
+	assert.equal(closed.length, 2);
+});
+
+test("an unanswered replace prompt times out and keeps the old goal", async () => {
+	const h = harness();
+	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
+	await start("Old.");
+	await h.command("pause");
+	h.ctx.ui.confirm = (title, message, opts) => new Promise((resolve) => setTimeout(() => resolve(false), opts.timeout === GOAL_REPLACE_TIMEOUT_MS ? 1 : 1e9));
+	await assert.rejects(start("New."), /paused; it was not replaced/);
+	assert.equal(h.state().objective, "Old.");
 });
 
 test("the agent may start a goal in the current turn but never replaces or resumes an unfinished goal", async () => {

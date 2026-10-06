@@ -6,9 +6,13 @@ import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../src/background-
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
 import { createStateReminder } from "../src/state-reminder.ts";
+import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION, withSpecialistExposure } from "../src/tool-discovery.ts";
 
 const WAKE = "pix-goal-wake";
+export const GOAL_REPLACE_TIMEOUT_MS = 10 * 60_000;
+const REPLACE = "Replace it";
+const KEEP = "Keep old goal";
 const commands = ["status", "pause", "stop", "resume", "clear"];
 
 export default function goalExtension(pi: ExtensionAPI) {
@@ -198,6 +202,41 @@ export default function goalExtension(pi: ExtensionAPI) {
 		},
 	});
 
+
+	// Asks in the terminal and on Pix Remote at once (the phone cannot see ctx.ui dialogs);
+	// the first answer wins, and no answer within the timeout keeps the old goal.
+	async function askReplace(old: GoalState, objective: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<boolean> {
+		const id = `goal-replace-${randomUUID()}`;
+		const title = `Replace ${old.status} goal?`;
+		const body = `Current: ${old.objective.slice(0, 300)}\n\nNew: ${objective.slice(0, 300)}`;
+		const dismiss = new AbortController();
+		const onAbort = () => dismiss.abort();
+		signal?.addEventListener("abort", onAbort, { once: true });
+		let offAnswer = () => {};
+		try {
+			const phone = new Promise<boolean>((resolve) => {
+				offAnswer = pi.events.on(QUESTION_ANSWER, (data: unknown) => {
+					const a = data as { id?: string; answer?: string };
+					if (a?.id !== id || typeof a.answer !== "string") return;
+					const text = a.answer.trim().toLowerCase();
+					resolve(text === REPLACE.toLowerCase() || /^(y|yes|replace|ok|go|1)\b/.test(text));
+				});
+			});
+			pi.events.emit(QUESTION_OPEN, { id, question: `${title}\n\n${body}`, options: [
+				{ label: REPLACE, description: "Discard the old goal and start the new one." },
+				{ label: KEEP, description: "The agent is told the goal was not replaced." },
+			] });
+			const terminal = ctx.ui.confirm(title, body, { signal: dismiss.signal, timeout: GOAL_REPLACE_TIMEOUT_MS }).catch(() => false);
+			const ok = await Promise.race([phone, terminal]);
+			return ok === true;
+		} finally {
+			dismiss.abort();
+			offAnswer();
+			signal?.removeEventListener("abort", onAbort);
+			pi.events.emit(QUESTION_CLOSE, { id });
+		}
+	}
+
 	pi.registerTool(withSpecialistExposure({
 		name: "goal", label: "Goal",
 		description: "Start or finish a session goal. active+objective starts one now, without extra opt-in, for substantial verifiable multi-step tasks the user requests (not quick answers or discussion); replaces a paused/blocked goal only if the user confirms; never an active one. completed/blocked need the exact id and evidence (checks run, or what is missing).",
@@ -218,7 +257,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 				let replaced = false;
 				if (goal && (goal.status === "paused" || goal.status === "blocked") && ctx.hasUI) {
 					const old = goal;
-					const ok = await ctx.ui.confirm(`Replace ${old.status} goal?`, `Current: ${old.objective.slice(0, 200)}\n\nNew: ${objective.slice(0, 200)}`, { signal });
+					const ok = await askReplace(old, objective, ctx, signal);
 					signal?.throwIfAborted();
 					replaced = ok && !closed && goal === old;
 				}
