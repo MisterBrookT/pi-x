@@ -63,14 +63,19 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
-  await page.getByRole("button", { name: "Sessions" }).or(page.locator("#menu")).first().click().catch(() => {});
+  // Main chat stays clean: For you is its own page, opened from the Sessions drawer.
+  await page.locator("#menu").click();
+  await page.locator("#forYouCount").filter({ hasText: "1" }).waitFor();
+  await page.locator("#forYouOpen").click();
   await page.getByText("Title a").waitFor();
+  assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
   assert.ok(await page.getByText("Why a").isVisible());
 
   // A new item appears on the Mac side: the phone list updates and a push goes out.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b")) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
-  assert.deepEqual(pushes.map(p => p.body), ["Title b"]);
+  assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
+  assert.equal(await page.locator("#forYouCount").textContent(), "2");
 
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
   await page.getByText("Title b").waitFor({ state: "detached" });
@@ -79,6 +84,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('[data-fy="a"] [data-fy-act="act"]').click();
   await page.getByText("Title a").waitFor({ state: "detached" });
   assert.deepEqual(acted, ["a"]);
-  assert.equal(await page.locator("#forYou").isHidden(), true, "empty list hides the section");
+  assert.equal(await page.locator("#forYouPage").isHidden(), true, "Do it leaves the page to show the new session");
+  assert.equal(await page.locator("#forYouOpen").isHidden(), true, "empty list hides the drawer entry");
   assert.deepEqual(errors, []);
 });

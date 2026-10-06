@@ -56,7 +56,7 @@ flowchart TB
 | Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act` and `dismiss` verbs |
 | Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the count; click to see items |
 | List + Do it | `src/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
-| iPhone view | Pix Remote, "For you" in the Sessions drawer | Same list, same buttons, a push for each new item |
+| iPhone view | Pix Remote "For you" page (opened from the menu, or by tapping the push) | Same list, same buttons, a push for each new item |
 
 ## One item
 

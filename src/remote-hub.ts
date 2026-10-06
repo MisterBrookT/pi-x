@@ -183,11 +183,11 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const presenceMs = options.presenceMs ?? 25_000;
   const heldBack = new Set<ReturnType<typeof setTimeout>>();
   const onScreenNow = (endpoint: string) => (onScreen.get(endpoint) ?? 0) > Date.now();
-  const notifyPhones = (message: { title: string; body: string; session: string; tag: string }) => {
+  const notifyPhones = (message: { title: string; body: string; session: string; tag: string; foryou?: boolean }) => {
     for (const [endpoint, until] of onScreen) if (until > Date.now()) holdBack(message, endpoint, until);
     void push!.notify(message, onScreenNow);
   };
-  const holdBack = (message: { title: string; body: string; session: string; tag: string }, endpoint: string, until: number) => {
+  const holdBack = (message: { title: string; body: string; session: string; tag: string; foryou?: boolean }, endpoint: string, until: number) => {
     const timer = setTimeout(() => {
       heldBack.delete(timer);
       if (onScreen.get(endpoint) === until) void push!.notify(message, other => other !== endpoint);
@@ -220,7 +220,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const onProactive = () => {
     const list = forYou();
     publish("foryou", list);
-    for (const it of list) if (!knownItems.has(it.id) && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}` });
+    for (const it of list) if (!knownItems.has(it.id) && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);

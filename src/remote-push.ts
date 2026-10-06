@@ -73,7 +73,7 @@ export function createPushSender(path: string, options: { subject?: string; fetc
     },
     count: async () => store || existsSync(path) ? (await load()).subscriptions.length : 0,
     /** Send to every phone. Subscriptions the push service reports as gone are removed. */
-    notify: async (message: { title: string; body: string; session?: string; tag?: string }, skip: (endpoint: string) => boolean = () => false) => {
+    notify: async (message: { title: string; body: string; session?: string; tag?: string; foryou?: boolean }, skip: (endpoint: string) => boolean = () => false) => {
       // No phone has subscribed yet: do nothing, and do not create keys on disk.
       if (!store && !existsSync(path)) return;
       const s = await load();

@@ -159,7 +159,7 @@ different branch restores active goals paused, never silently restarted. See
 
 ## Proactive
 
-Watch channels like Feishu, judge what matters, show it in one list on the Mac pill and in Pix Remote on the phone, and act with approval. See [proactive.md](proactive.md).
+Watch channels like Feishu, judge what matters, show it in one list on the Mac pill and on the phone (Pix Remote, For you page), and act with approval. See [proactive.md](proactive.md).
 
 ## Background commands
 
