@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, triagePasses, triagePrompt, underLimit } from "../src/proactive.ts";
+import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
 import { adapterFor, adapters, parseFeishu } from "../src/proactive-sources.ts";
 
 const raw = { data: { messages: [
@@ -90,16 +90,6 @@ test("parseVerdict: several alerts (max 3), close ids, untitled alerts dropped",
 	assert.deepEqual(v.alerts.map(a => a.title), ["a", "b", "c"]);
 	assert.deepEqual(v.close, ["x1"]);
 	assert.deepEqual(parseVerdict('{"alerts":[]}').alerts, []);
-});
-
-test("triage: only a clear no skips the judge; errors and junk pass", () => {
-	assert.equal(triagePasses("no"), false);
-	assert.equal(triagePasses("No."), false);
-	assert.equal(triagePasses("maybe"), true);
-	assert.equal(triagePasses("error pi exited 1"), true);
-	assert.equal(triagePasses(""), true);
-	assert.equal(triagePasses("nothing important? maybe"), true);
-	assert.match(triagePrompt({ me: "brook", memory: "- Waiting: doc", fresh: [{ id: "1", time: "t", sender: "K", text: "hi" }], pending: [] }), /Waiting: doc[\s\S]*K: hi[\s\S]*maybe or no/);
 });
 
 test("judgePrompt lists pending ids so the judge can close them", () => {

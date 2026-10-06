@@ -51,7 +51,7 @@ flowchart TB
 
 | Piece | File | Job |
 |---|---|---|
-| Core | `src/proactive.ts` | Types, triage and judge prompts, verdict, list format, rate limit |
+| Core | `src/proactive.ts` | Types, judge prompt, verdict, list format, rate limit |
 | Sources | `src/proactive-sources.ts` | One adapter per channel |
 | Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act` and `dismiss` verbs |
 | Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the count; click to see items |
@@ -78,19 +78,12 @@ A launchd service with no window. Every 2 minutes, for each source:
 flowchart TB
   R[Read new messages] --> N{Anything new?}
   N -- no --> W[Wait 2 min, no cost]
-  N -- yes --> T{"Triage<br/>cheap model"}
-  T -- no --> W
-  T -- maybe --> J["Judge<br/>careful model"]
+  N -- yes --> J["Judge<br/>gpt-6-luna"]
   J --> L[(List: 0 to 3 items,<br/>close resolved ones)]
   J --> M[(memory.md)]
 ```
 
-| Step | Model (config key) | Job |
-|---|---|---|
-| Triage | `triageModel`, default `openai-codex/gpt-6-luna` | Reads every batch; answers only "maybe" or "no". Errs toward maybe; an error counts as maybe |
-| Judge | `model`, default `pix-anthropic/claude-sonnet-5` | Only on "maybe": writes items, closes pending items the chat resolved, edits memory |
-
-Both are tool-less `pi -p` calls, so any provider Pi is logged into works. Most chat is noise, so the careful model runs rarely.
+One model, one call per batch of new messages (`model` in config, default `openai-codex/gpt-6-luna`). It is a tool-less `pi -p` call, so any provider Pi is logged into works. It writes items, closes pending items the chat resolved, and edits memory.
 
 Over `maxPerHour`, new items still enter the list, marked quiet: no push, never dropped.
 
@@ -144,7 +137,7 @@ For a quick integration, use the `command` kind: any command that prints `[{"id"
 
 | File in `~/.pix/proactive/` | Content |
 |---|---|
-| `config.json` | Your name, sources, poll interval, `triageModel`, `model`, pushes per hour |
+| `config.json` | Your name, sources, poll interval, `model`, pushes per hour |
 | `memory.md` | What matters to you. The judge reads it every time; edit freely |
 | `inbox.jsonl` | The list. Append-only; later status lines win |
 | `state.json` | Last seen message per source |

@@ -17,12 +17,8 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 
 /** One watched channel. `kind` picks the adapter in proactive-sources.ts; extra keys are adapter-specific. */
 export interface Source { kind: string; id: string; name: string; project?: string; [key: string]: unknown }
-/**
- * `triageModel` is a cheap fast model that reads every batch and only says "maybe" or "no".
- * `model` is the careful judge, called only for "maybe" batches. Leave `triageModel` empty to skip triage.
- */
-export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; triageModel: string; maxPerHour: number }
-export const defaultConfig: Config = { me: "", sources: [], intervalSec: 120, model: "pix-anthropic/claude-sonnet-5", triageModel: "openai-codex/gpt-6-luna", maxPerHour: 4 };
+export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; maxPerHour: number }
+export const defaultConfig: Config = { me: "", sources: [], intervalSec: 120, model: "openai-codex/gpt-6-luna", maxPerHour: 4 };
 
 export interface Msg { id: string; time: string; sender: string; text: string }
 /** Memory edits proposed by the judge: lines to add, and existing lines (exact text) to remove. */
@@ -44,28 +40,6 @@ export function newSince(msgs: Msg[], lastId?: string): Msg[] {
 }
 
 const fmtMsg = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}: ${m.text}`;
-
-/** Step 1, cheap model: is there any chance this batch matters? Errs toward "maybe". */
-export function triagePrompt(o: { me: string; memory: string; fresh: Msg[]; pending: Item[] }): string {
-	return `You screen new messages for ${o.me}. Answer "maybe" if ANY message could matter to him:
-someone asks, mentions or waits on him; a delivery, decision, deadline or blocker; anything touching his open loops below;
-anything that resolves one of his pending alerts. Answer "no" only for clear noise (chit-chat, emoji, small talk, unrelated).
-When unsure, answer "maybe".
-
-## Memory
-${o.memory || "(empty)"}
-
-## Pending alerts
-${o.pending.map(p => `- ${p.title}`).join("\n") || "(none)"}
-
-## New messages
-${o.fresh.map(fmtMsg).join("\n")}
-
-Reply with one word: maybe or no.`;
-}
-
-/** Triage passes unless the reply is clearly "no"; a broken reply never hides a message. */
-export const triagePasses = (raw: string) => !/^\W*no\b/i.test(raw.trim());
 
 export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string }): string {
 	const fmt = fmtMsg;

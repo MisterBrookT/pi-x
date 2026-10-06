@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Proactive daemon: receive (any source adapter) -> triage (cheap model) -> judge (careful model) -> the one list.
+// Proactive daemon: receive (any source adapter) -> judge (one model call) -> the one list.
 // Views (Mac pill, Pix Remote "For you") read the list; this process never shows UI itself.
 // Usage: node scripts/proactive-daemon.ts [--once] [--dry-run]
 //        node scripts/proactive-daemon.ts act <id>      mark done, start a Pi session on the next step
@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, triagePasses, triagePrompt, underLimit, type Config, type Item } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, judgePrompt, newSince, parseInbox, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor } from "../src/proactive-sources.ts";
 import { actItem, dismissItem } from "../src/proactive-store.ts";
 
@@ -30,7 +30,7 @@ function setup(): Config {
 /** One tool-less, sessionless model call through Pi, so any provider Pi is logged into works. */
 async function ask(prompt: string, model: string): Promise<string> {
 	const ext = model.startsWith("pix-anthropic/") ? ["-e", pixAnthropic] : [];
-	const child = execFile("pi", ["-p", "--no-session", "-nt", "-ne", ...ext, "--model", model, "--thinking", "off"], { maxBuffer: 1 << 22, timeout: 120_000 });
+	const child = execFile("pi", ["-p", "--no-session", "-nt", "-ne", ...ext, "--model", model, "--thinking", "low"], { maxBuffer: 1 << 22, timeout: 120_000 });
 	child.stdin?.end(prompt);
 	let out = ""; child.stdout?.on("data", d => (out += d));
 	await new Promise<void>((ok, bad) => child.on("close", c => (c === 0 ? ok() : bad(new Error(`pi exited ${c}`)))));
@@ -57,12 +57,6 @@ async function tick(cfg: Config) {
 			const pending = items.filter(i => i.status === "pending").slice(-10);
 			const feedback = items.filter(i => i.status !== "pending").slice(-10);
 			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
-			// Step 1: cheap triage. A failed triage call falls through to the judge rather than hiding messages.
-			if (cfg.triageModel) {
-				const t = await ask(triagePrompt({ me: cfg.me, memory, fresh, pending }), cfg.triageModel).catch(e => `error ${(e as Error).message}`);
-				if (!triagePasses(t)) { log(`${src.name}: ${fresh.length} new -> triage no`); continue; }
-			}
-			// Step 2: careful judge.
 			const ctx = msgs.slice(0, msgs.length - fresh.length).slice(-15);
 			const raw = await ask(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
 			const v = parseVerdict(raw);
