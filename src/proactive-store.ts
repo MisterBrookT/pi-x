@@ -2,13 +2,24 @@
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { actPrompt, paths, pendingItems, type Item } from "./proactive.ts";
+import { actPrompt, parseInbox, paths, pendingItems, publicItem, type Item } from "./proactive.ts";
 import { launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
 
 export function readPending(dir?: string): Item[] {
 	const { inbox } = paths(dir);
 	return existsSync(inbox) ? pendingItems(readFileSync(inbox, "utf8")) : [];
+}
+
+/** What the phone's For you page shows: pending items, what was handled in the last day, and how many sources are watched. */
+export function forYouView(dir?: string, now = Date.now()) {
+	const P = paths(dir);
+	const all = existsSync(P.inbox) ? parseInbox(readFileSync(P.inbox, "utf8")) : [];
+	const handled = all.filter(i => i.status !== "pending" && now - Date.parse((i as any).at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
+	let watching = 0;
+	try { watching = JSON.parse(readFileSync(P.config, "utf8")).sources?.length ?? 0; } catch {}
+	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
+	return { pending: all.filter(i => i.status === "pending").sort(newest).map(publicItem), handled: handled.map(publicItem), watching };
 }
 
 function mark(id: string, status: Item["status"], dir?: string) {

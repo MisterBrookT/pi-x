@@ -55,17 +55,17 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 
   assert.equal((await fetch(`${base}/api/foryou`)).status, 401);
-  assert.deepEqual((await (await fetch(`${base}/api/foryou`, { headers: auth })).json()).map(i => i.id), ["a"]);
-  assert.ok(!("howToRead" in (await (await fetch(`${base}/api/foryou`, { headers: auth })).json())[0]), "no internal commands leak to the phone");
+  const view = await (await fetch(`${base}/api/foryou`, { headers: auth })).json();
+  assert.deepEqual(view.pending.map(i => i.id), ["a"]);
+  assert.ok(!("howToRead" in view.pending[0]), "no internal commands leak to the phone");
 
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
-  // Main chat stays clean: For you is its own page, opened from the Sessions drawer.
-  await page.locator("#menu").click();
-  await page.locator("#forYouCount").filter({ hasText: "1" }).waitFor();
+  // Main chat stays clean: only a red dot on the bell; For you is its own page.
+  await page.locator("#forYouDot").waitFor();
   await page.locator("#forYouOpen").click();
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
@@ -75,16 +75,20 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b")) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
-  assert.equal(await page.locator("#forYouCount").textContent(), "2");
+  assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
+  assert.ok(await page.getByText("Draft a reply").first().isVisible(), "card shows what Pi will do");
 
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
-  await page.getByText("Title b").waitFor({ state: "detached" });
+  await page.locator('[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
   await page.locator('[data-fy="a"] [data-fy-act="act"]').click();
-  await page.getByText("Title a").waitFor({ state: "detached" });
+  await page.locator('[data-fy="a"]').waitFor({ state: "detached" });
   assert.deepEqual(acted, ["a"]);
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "Do it leaves the page to show the new session");
-  assert.equal(await page.locator("#forYouOpen").isHidden(), true, "empty list hides the drawer entry");
+  assert.equal(await page.locator("#forYouDot").isHidden(), true, "no dot when nothing is pending");
+  await page.locator("#forYouOpen").click();
+  await page.getByText("All clear").waitFor();
+  assert.ok(await page.getByText("2 handled").isVisible(), "today's handled items stay visible");
   assert.deepEqual(errors, []);
 });

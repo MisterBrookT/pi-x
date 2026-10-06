@@ -125,7 +125,8 @@ export function parseInbox(text: string): Item[] {
 		if (!line.trim()) continue;
 		try { const it = JSON.parse(line); if (it?.id) byId.set(it.id, { ...byId.get(it.id), ...it }); } catch { /* skip */ }
 	}
-	return [...byId.values()];
+	// A status line whose item was lost (cut file, bad line) is not an item.
+	return [...byId.values()].filter(i => i.title !== undefined);
 }
 
 /** Pending items, newest first: what every view (Mac pill, iPhone, hub API) shows. */
@@ -134,7 +135,7 @@ export function pendingItems(text: string): Item[] {
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ id: i.id, title: i.title, why: i.why, source: i.source, at: i.at });
+export const publicItem = (i: Item & { at_status?: string }) => ({ id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "" });
 
 export function actPrompt(it: Item): string {
 	return `A proactive alert from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:

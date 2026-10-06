@@ -14,8 +14,8 @@ import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
-import { paths as proactivePaths, publicItem } from "./proactive.ts";
-import { actItem, dismissItem, readPending } from "./proactive-store.ts";
+import { paths as proactivePaths } from "./proactive.ts";
+import { actItem, dismissItem, forYouView } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -215,11 +215,11 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // "For you": the same proactive list the Mac pill shows. Phones get it as an event, and a push
   // when a new item appears (title only, like session pushes).
   const proactiveFile = proactivePaths(options.proactiveDir).inbox;
-  const forYou = () => readPending(options.proactiveDir).map(publicItem);
-  let knownItems = new Set(forYou().map(i => i.id));
+  const forYou = () => forYouView(options.proactiveDir);
+  let knownItems = new Set(forYou().pending.map(i => i.id));
   const onProactive = () => {
-    const list = forYou();
-    publish("foryou", list);
+    const view = forYou(), list = view.pending;
+    publish("foryou", view);
     for (const it of list) if (!knownItems.has(it.id) && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
   };

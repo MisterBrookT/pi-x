@@ -79,3 +79,8 @@ test("judgePrompt shows how brook reacted, so the judge can learn", () => {
 	assert.match(p, /dismissed: Lunch poll/);
 	assert.match(p, /"memory": \{"add"/);
 });
+
+test("parseInbox: a status line without its item is ignored, not a broken item", () => {
+	const items = parseInbox(JSON.stringify({ id: "x", status: "dismissed" }) + "\n" + JSON.stringify({ id: "y", title: "T", sourceKey: "feishu:c", status: "pending" }));
+	assert.deepEqual(items.map(i => i.id), ["y"]);
+});
