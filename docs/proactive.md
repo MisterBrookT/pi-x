@@ -72,12 +72,12 @@ Every item answers three questions and offers two buttons:
 
 ## The daemon
 
-A launchd service with no window. Every 2 minutes, for each source:
+A launchd service with no window. Every 10 minutes, for each source:
 
 ```mermaid
 flowchart TB
   R[Read new messages] --> N{Anything new?}
-  N -- no --> W[Wait 2 min, no cost]
+  N -- no --> W[Wait 10 min, no cost]
   N -- yes --> J["Judge<br/>gpt-6-luna"]
   J --> L[(List: 0 to 3 items,<br/>close resolved ones)]
   J --> M[(memory.md)]

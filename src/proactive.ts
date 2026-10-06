@@ -18,7 +18,7 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 /** One watched channel. `kind` picks the adapter in proactive-sources.ts; extra keys are adapter-specific. */
 export interface Source { kind: string; id: string; name: string; project?: string; [key: string]: unknown }
 export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; maxPerHour: number }
-export const defaultConfig: Config = { me: "", sources: [], intervalSec: 120, model: "openai-codex/gpt-6-luna", maxPerHour: 4 };
+export const defaultConfig: Config = { me: "", sources: [], intervalSec: 600, model: "openai-codex/gpt-6-luna", maxPerHour: 4 };
 
 export interface Msg { id: string; time: string; sender: string; text: string }
 /** Memory edits proposed by the judge: lines to add, and existing lines (exact text) to remove. */
