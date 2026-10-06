@@ -13,7 +13,8 @@ test("file-based reload replaces the old input-pause handler and preserves the g
 	// Use the production source through Pi's real file loader, not a retained
 	// factory import. Absolute dependencies let the fixture live outside the repo.
 	const current = (await readFile(new URL("../extensions/goal.ts", import.meta.url), "utf8"))
-		.replaceAll('"../src/', `"${fileURLToPath(new URL("../src/", import.meta.url))}`);
+		.replaceAll('"../src/', `"${fileURLToPath(new URL("../src/", import.meta.url))}`)
+		.replaceAll('"./', `"${fileURLToPath(new URL("../extensions/", import.meta.url))}`);
 	const anchor = '\tpi.on("agent_start",';
 	assert.ok(current.includes(anchor));
 	const legacy = current.replace(anchor, '\tpi.on("input", (event, ctx) => { if (event.source !== "extension") pause("User input; use /goal resume when ready.", ctx); });\n' + anchor);
