@@ -331,3 +331,18 @@ test("footer status names shells and agents together, with the control command",
 	assert.equal(statusText(2, 1), "2 jobs + 1 agent running · /jobs");
 	assert.equal(statusText(0, 3), "3 agents running · /jobs");
 });
+
+test("completion wakes when a different goal became active while the job ran", { timeout: 15000 }, async (t) => {
+	const goal = { current: { id: "goal-1", active: true } };
+	const h = harness(t, "tui", undefined, goal);
+	const g = await gate(t);
+	const requested = g.request();
+	await h.call({ action: "start", command: g.command, reminder: "off" });
+	const response = await requested;
+	goal.current = { id: "goal-2", active: true }; // goal-1 paused, user started goal-2 for the same work
+	const wake = h.wake();
+	response.end("done");
+	await wake;
+	assert.equal(h.messages.at(-1).options.triggerTurn, true);
+	assert.match(h.messages.at(-1).message.content, /Continue the existing task/);
+});
