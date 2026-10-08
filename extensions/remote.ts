@@ -18,6 +18,7 @@ import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
 import remend from "remend";
 import { prepareRemotePairing, prepareRelayPairing } from "../src/remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "../src/remote-mac.ts";
+import { bypassProxyForLoopback } from "../src/remote-loopback.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "../src/remote-relay-agent.ts";
 
 const messageLimit = 200;
@@ -40,6 +41,7 @@ const reloadResume: Map<string, { relay: boolean }> = ((globalThis as any).__pix
 const nextSession = "__next";
 
 export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions = {}) {
+  bypassProxyForLoopback();
   const port = options.port ?? Number(process.env.PIX_REMOTE_PORT || remoteDefaultPort);
   const base = `http://${remoteHost}:${port}`;
   let publicOrigin = "";
