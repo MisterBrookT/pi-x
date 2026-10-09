@@ -86,7 +86,7 @@ test("persists state changes without adding ephemeral reminders to each model re
   assert.equal(h.event("context", { messages: original }), undefined);
   const saved = h.reminders();
   assert.equal(saved.length, 3);
-  assert.equal(saved.at(-1).content, "[CURRENT TODO STATE]\nThis update supersedes earlier todo-state reminders.\n[done] #1 Inspect backend\n[pending] #2 Run checks (depends on #1)");
+  assert.equal(saved.at(-1).content, "[CURRENT TODO STATE]\n[done] #1 Inspect backend\n[pending] #2 Run checks (depends on #1)");
   assert.equal(saved.at(-1).display, false);
   await h.call({ action: "list" });
   assert.equal(h.reminders().length, 3, "unchanged state adds nothing");

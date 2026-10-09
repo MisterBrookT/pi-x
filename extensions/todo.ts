@@ -108,7 +108,7 @@ export default function (pi: ExtensionAPI) {
     if (!hasTodoHistory) return;
     const content = !enabled ? "Todo tracking is off. Earlier todo-state reminders are no longer current."
       : state.items.length ? formatPlan(state.items) : "No todos. The previous plan has been cleared.";
-    reminder.publish(`[CURRENT TODO STATE]\nThis update supersedes earlier todo-state reminders.\n${content}`, beforeNextResponse);
+    reminder.publish(`[CURRENT TODO STATE]\n${content}`, beforeNextResponse);
   };
   const restore = (ctx: ExtensionContext) => {
     state = { items: [], nextId: 1 };
