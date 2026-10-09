@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerGoal, { GOAL_REPLACE_TIMEOUT_MS } from "../extensions/goal.ts";
-import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../extensions/question.ts";
+import registerGoal from "../extensions/goal.ts";
 import { BACKGROUND_STATE_QUERY, backgroundState } from "../src/background-state.ts";
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, goalInstructions, parseGoal } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
@@ -222,7 +221,7 @@ test("explicit pause, abort, and unrecovered model errors stop the loop without 
 		assert.equal(backgroundState(h.pi).goal.active, false);
 		const result = await h.emit("context", { messages: [{ role: "custom", customType: "pix-goal-wake", content: "stale", details: { goalId: h.state().id } }] });
 		assert.equal(result, undefined, "old wakes stay in history to preserve the prefix");
-		assert.match(h.reminders.at(-1).message.content, /paused.*earlier instructions.*no longer active/is);
+		assert.match(h.reminders.at(-1).message.content, /paused.*resume it with goal status=active/is);
 	}
 	const h = harness();
 	await h.command("Goal.");
@@ -370,79 +369,12 @@ test("a user pause while subagent status is pending prevents a late continuation
 	assert.equal(h.state().status, "paused");
 });
 
-test("starting a goal over a paused or blocked one asks the user and replaces only on confirmation", async () => {
-	const h = harness();
-	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
-	await start("Old M1 goal.");
-	const old = h.state();
-	await assert.rejects(start("While active."), /active; it was not replaced/);
-	assert.equal(h.confirms.length, 0, "an active goal is never offered for replacement");
-	await h.command("pause");
-	h.confirmNext(false);
-	await assert.rejects(start("Declined."), /paused; it was not replaced/);
-	assert.equal(h.confirms.length, 1);
-	assert.match(h.confirms[0].title, /Replace paused goal/);
-	assert.match(h.confirms[0].message, /Old M1 goal[\s\S]*Declined/);
-	assert.equal(h.state().id, old.id);
-	h.confirmNext(true);
-	await start("Overnight goal.");
-	assert.notEqual(h.state().id, old.id);
-	assert.equal(h.state().status, "active");
-	assert.equal(h.state().objective, "Overnight goal.");
-	await h.finish("blocked", "Need credentials.");
-	await start("After blocked.");
-	assert.equal(h.state().objective, "After blocked.");
-	const headless = harness();
-	headless.ctx.hasUI = false;
-	await headless.tool.execute("s", { status: "active", objective: "A." }, undefined, undefined, headless.ctx);
-	await headless.command("pause");
-	await assert.rejects(headless.tool.execute("s", { status: "active", objective: "B." }, undefined, undefined, headless.ctx), /paused; it was not replaced/);
-	assert.equal(headless.confirms.length, 0);
-});
-
-test("the replace prompt reaches Pix Remote as a question, and a phone answer decides it", async () => {
-	const h = harness();
-	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
-	const opened = [];
-	const closed = [];
-	h.pi.events.on(QUESTION_OPEN, (q) => opened.push(q));
-	h.pi.events.on(QUESTION_CLOSE, (q) => closed.push(q));
-	await start("Old M1 goal.");
-	const old = h.state();
-	await h.command("pause");
-	h.confirmNext("wait");
-	const declined = start("Declined on phone.");
-	await new Promise((r) => setImmediate(r));
-	assert.equal(opened.length, 1);
-	assert.match(opened[0].question, /Replace paused goal[\s\S]*Old M1 goal[\s\S]*Declined on phone/);
-	assert.deepEqual(opened[0].options.map((o) => o.label), ["Replace it", "Keep old goal"]);
-	assert.equal(h.confirms.at(-1).opts.timeout, GOAL_REPLACE_TIMEOUT_MS, "the terminal dialog cannot hang forever");
-	h.pi.events.emit(QUESTION_ANSWER, { id: opened[0].id, answer: "Keep old goal" });
-	await assert.rejects(declined, /paused; it was not replaced/);
-	assert.equal(h.state().id, old.id);
-	assert.deepEqual(closed.map((q) => q.id), [opened[0].id], "the phone question closes");
-	const accepted = start("Accepted on phone.");
-	await new Promise((r) => setImmediate(r));
-	h.pi.events.emit(QUESTION_ANSWER, { id: opened[1].id, answer: "Replace it" });
-	await accepted;
-	assert.equal(h.state().objective, "Accepted on phone.");
-	assert.equal(closed.length, 2);
-});
-
-test("an unanswered replace prompt times out and keeps the old goal", async () => {
-	const h = harness();
-	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
-	await start("Old.");
-	await h.command("pause");
-	h.ctx.ui.confirm = (title, message, opts) => new Promise((resolve) => setTimeout(() => resolve(false), opts.timeout === GOAL_REPLACE_TIMEOUT_MS ? 1 : 1e9));
-	await assert.rejects(start("New."), /paused; it was not replaced/);
-	assert.equal(h.state().objective, "Old.");
-});
-
-test("the agent may start a goal in the current turn but never replaces or resumes an unfinished goal", async () => {
+test("the agent decides: it resumes a paused or blocked goal, and a new objective replaces the current one", async () => {
 	const h = harness();
 	assert.equal(h.tool.exposure, "deferred", "native tool_search discovers it");
 	const start = (objective) => h.tool.execute("start", validateToolArguments(h.tool, { type: "toolCall", id: "start", name: "goal", arguments: { status: "active", objective } }), undefined, undefined, h.ctx);
+	const resume = (id) => h.tool.execute("r", { status: "active", ...(id ? { id } : {}) }, undefined, undefined, h.ctx);
+	await assert.rejects(resume(), /No matching goal/);
 	h.setIdle(false);
 	const result = await start("Substantial task with acceptance criteria.");
 	assert.equal(h.state().status, "active");
@@ -450,20 +382,25 @@ test("the agent may start a goal in the current turn but never replaces or resum
 	assert.equal(h.reminders.at(-1).options.deliverAs, "steer");
 	assert.match(result.content[0].text, /started/);
 	const first = h.state();
-	await assert.rejects(start("Replacement."), /active; it was not replaced/);
 	await h.command("pause");
-	await assert.rejects(start("Replacement."), /paused; it was not replaced or resumed/);
-	assert.equal(h.state().status, "paused");
-	h.setIdle(true);
-	await h.command("resume");
-	await h.finish("blocked", "Need credentials.");
-	await assert.rejects(start("Replacement."), /blocked/);
+	assert.match(h.reminders.at(-1).message.content, /resume it with goal status=active id=/);
+	await assert.rejects(resume("other-id"), /No matching goal/);
+	await resume(first.id);
+	assert.equal(h.state().status, "active");
 	assert.equal(h.state().id, first.id);
-	await h.command("resume");
-	await h.finish("completed");
-	await start("Next goal after completion.");
+	await h.finish("blocked", "Need credentials.");
+	await resume();
+	assert.equal(h.state().id, first.id);
+	assert.equal(h.state().status, "active");
+	const replaced = await start("Replacement.");
+	assert.match(replaced.content[0].text, /replaces active goal/);
 	assert.notEqual(h.state().id, first.id);
-	await assert.rejects(h.tool.execute("x", { status: "active" }, undefined, undefined, h.ctx), /objective is required/);
+	assert.equal(h.state().objective, "Replacement.");
+	assert.equal(h.confirms.length, 0, "the user is never asked");
+	await h.finish("completed");
+	await assert.rejects(resume(), /No matching goal/);
+	await start("Next goal after completion.");
+	assert.equal(h.state().status, "active");
 	for (const mode of ["print", "json"]) {
 		const other = harness();
 		other.ctx.mode = mode;
@@ -488,7 +425,7 @@ test("finishing every todo triggers verification rather than completion", async 
 	assert.match(text, /requirement by requirement/);
 	assert.match(text, /add or reopen todos and continue\. Only after every criterion is verified, call goal with status=completed/);
 	assert.match(text, /try safe alternatives[^.]*; do not repeatedly ask for authorization/);
-	assert.match(h.tool.description, /without extra opt-in, for substantial verifiable multi-step tasks/);
+	assert.match(h.tool.description, /substantial verifiable multi-step work.*Decide these yourself/);
 	assert.match(h.tool.description, /not quick answers or discussion/);
 	await h.emit("agent_settled");
 	assert.equal(h.state().status, "active", "only the goal tool completes a goal");

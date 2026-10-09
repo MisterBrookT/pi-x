@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
+import registerTodo, { TODO_STALE_CALLS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
 
 const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;
@@ -527,4 +527,22 @@ test("a planned agent is carried through plan output, ready set, and restore", a
   const restored = createTodoHarness(manager);
   restored.event("session_start");
   assert.equal((await restored.call({ action: "list" })).details.items[0].agent, "scout");
+});
+
+test("an open plan left unchanged for many tool calls is re-shown every 20 tool calls until it changes", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "add", text: "Open step" });
+  const base = h.reminders().length;
+  for (let i = 0; i < TODO_STALE_CALLS - 1; i++) h.event("tool_execution_end", { toolName: "bash" });
+  assert.equal(h.reminders().length, base);
+  h.event("tool_execution_end", { toolName: "bash" });
+  assert.equal(h.reminders().length, base + 1);
+  assert.match(h.reminders().at(-1).content, /Unchanged for 20 tool calls[\s\S]*Open step/);
+  for (let i = 0; i < TODO_STALE_CALLS; i++) h.event("tool_execution_end", { toolName: "bash" });
+  assert.equal(h.reminders().length, base + 2, "a still-stale plan is re-shown again");
+  assert.match(h.reminders().at(-1).content, /Unchanged for 40 tool calls/);
+  await h.call({ action: "set", id: "1", status: "done" });
+  const done = h.reminders().length;
+  for (let i = 0; i < TODO_STALE_CALLS * 2; i++) h.event("tool_execution_end", { toolName: "bash" });
+  assert.equal(h.reminders().length, done, "a finished plan is not nagged");
 });

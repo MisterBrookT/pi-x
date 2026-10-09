@@ -6,13 +6,9 @@ import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../src/background-
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "../src/goal-state.ts";
 import { hasPendingGoalWork } from "../src/goal-work.ts";
 import { createStateReminder } from "../src/state-reminder.ts";
-import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
 import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION, withSpecialistExposure } from "../src/tool-discovery.ts";
 
 const WAKE = "pix-goal-wake";
-export const GOAL_REPLACE_TIMEOUT_MS = 10 * 60_000;
-const REPLACE = "Replace it";
-const KEEP = "Keep old goal";
 const commands = ["status", "pause", "stop", "resume", "clear"];
 
 export default function goalExtension(pi: ExtensionAPI) {
@@ -25,7 +21,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 	const publishState = (beforeNextResponse = false) => {
 		if (!hasGoalHistory) return;
 		const content = goal?.status === "active" ? goalInstructions(goal)
-			: goal ? `Goal ${goal.id} is ${goal.status}. ${goal.reason}\nEarlier instructions to continue this goal are no longer active. Only an explicit /goal resume or a new /goal can activate goal mode.`
+			: goal ? `Goal ${goal.id} is ${goal.status}. ${goal.reason}\nObjective: ${goal.objective}\nIf this work should continue, resume it with goal status=active id=${goal.id}; to change scope, start a new objective (it replaces this one). Otherwise leave it.`
 			: "Goal mode is off. Earlier goal instructions are no longer active. Only an explicit /goal can activate goal mode.";
 		reminder.publish(`[CURRENT GOAL STATE]\nThis update supersedes earlier goal-state reminders.\n${content}`, beforeNextResponse);
 	};
@@ -203,43 +199,9 @@ export default function goalExtension(pi: ExtensionAPI) {
 	});
 
 
-	// Asks in the terminal and on Pix Remote at once (the phone cannot see ctx.ui dialogs);
-	// the first answer wins, and no answer within the timeout keeps the old goal.
-	async function askReplace(old: GoalState, objective: string, ctx: ExtensionContext, signal?: AbortSignal): Promise<boolean> {
-		const id = `goal-replace-${randomUUID()}`;
-		const title = `Replace ${old.status} goal?`;
-		const body = `Current: ${old.objective.slice(0, 300)}\n\nNew: ${objective.slice(0, 300)}`;
-		const dismiss = new AbortController();
-		const onAbort = () => dismiss.abort();
-		signal?.addEventListener("abort", onAbort, { once: true });
-		let offAnswer = () => {};
-		try {
-			const phone = new Promise<boolean>((resolve) => {
-				offAnswer = pi.events.on(QUESTION_ANSWER, (data: unknown) => {
-					const a = data as { id?: string; answer?: string };
-					if (a?.id !== id || typeof a.answer !== "string") return;
-					const text = a.answer.trim().toLowerCase();
-					resolve(text === REPLACE.toLowerCase() || /^(y|yes|replace|ok|go|1)\b/.test(text));
-				});
-			});
-			pi.events.emit(QUESTION_OPEN, { id, question: `${title}\n\n${body}`, options: [
-				{ label: REPLACE, description: "Discard the old goal and start the new one." },
-				{ label: KEEP, description: "The agent is told the goal was not replaced." },
-			] });
-			const terminal = ctx.ui.confirm(title, body, { signal: dismiss.signal, timeout: GOAL_REPLACE_TIMEOUT_MS }).catch(() => false);
-			const ok = await Promise.race([phone, terminal]);
-			return ok === true;
-		} finally {
-			dismiss.abort();
-			offAnswer();
-			signal?.removeEventListener("abort", onAbort);
-			pi.events.emit(QUESTION_CLOSE, { id });
-		}
-	}
-
 	pi.registerTool(withSpecialistExposure({
 		name: "goal", label: "Goal",
-		description: "Start or finish a session goal. active+objective starts one now, without extra opt-in, for substantial verifiable multi-step tasks the user requests (not quick answers or discussion); replaces a paused/blocked goal only if the user confirms; never an active one. completed/blocked need the exact id and evidence (checks run, or what is missing).",
+		description: "Manage the session goal. status=active with an objective starts a goal for substantial verifiable multi-step work (not quick answers or discussion), or replaces the current one when scope changes; status=active without an objective resumes a paused or blocked goal. completed/blocked need the exact id and evidence (checks run, or what is missing). Decide these yourself.",
 		parameters: Type.Object({
 			status: StringEnum(["active", "completed", "blocked"] as const),
 			objective: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_OBJECTIVE, pattern: "\\S", description: "Full scope and acceptance criteria" })),
@@ -250,25 +212,19 @@ export default function goalExtension(pi: ExtensionAPI) {
 			signal?.throwIfAborted();
 			if (params.status === "active") {
 				const objective = params.objective?.trim();
-				if (!objective) throw new Error("An objective is required to start a goal.");
 				if (closed || (ctx.mode !== "tui" && ctx.mode !== "rpc")) throw new Error("Goal mode requires a persistent TUI or RPC session.");
 				if (!goalAllowed()) throw new Error("The goal tool is disabled by the user. Only the user may enable it through /tool.");
-				// A paused or blocked goal may be replaced only with the user's explicit confirmation.
-				let replaced = false;
-				if (goal && (goal.status === "paused" || goal.status === "blocked") && ctx.hasUI) {
-					const old = goal;
-					const ok = await askReplace(old, objective, ctx, signal);
-					signal?.throwIfAborted();
-					replaced = ok && !closed && goal === old;
-				}
-				if (goal && goal.status !== "completed" && !replaced) {
-					throw new Error(`Goal ${goal.id} is ${goal.status}; it was not replaced or resumed. Continue it, or ask the user to use /goal resume or /goal clear.`);
-				}
-				// Already inside a run: the steered reminder reaches the next request and
-				// agent_settled continues as usual, so no wake is sent.
 				modelFailed = false;
+				if (!objective) {  // resume the current goal
+					if (!goal || goal.status === "completed" || (params.id && params.id !== goal.id)) throw new Error("No matching goal to resume; pass an objective to start one.");
+					if (goal.status !== "active") save({ ...goal, status: "active", continuations: 0, reason: "" }, ctx, true);
+					return { content: [{ type: "text", text: `Goal ${goal.id} resumed. Continue working toward it now.` }], details: { goal: { ...goal } } };
+				}
+				// A new objective starts a goal or replaces the current one (the old one stays in session history).
+				const old = goal && goal.status !== "completed" ? goal : null;
 				save({ version: 1, id: randomUUID(), objective, status: "active", continuations: 0, reason: "" }, ctx, true);
-				return { content: [{ type: "text", text: `Goal ${goal!.id} started. Continue working toward it now.` }], details: { goal: { ...goal! } } };
+				const note = old ? ` It replaces ${old.status} goal ${old.id}.` : "";
+				return { content: [{ type: "text", text: `Goal ${goal!.id} started.${note} Continue working toward it now.` }], details: { goal: { ...goal! } } };
 			}
 			const current = goal;
 			if (closed || !current || current.status !== "active" || current.id !== params.id) throw new Error("No matching active goal.");

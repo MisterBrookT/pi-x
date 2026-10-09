@@ -95,12 +95,16 @@ const Params = Type.Object({
   })),
 });
 
+export const TODO_STALE_CALLS = 20;
+
 export default function (pi: ExtensionAPI) {
   let state: State = { items: [], nextId: 1 };
   let enabled = true;
   let hasTodoHistory = false;
   const reminder = createStateReminder(pi, "pix-todo-state");
+  let idleCalls = 0;  // tool calls since the plan last changed
   const publishState = (beforeNextResponse = false) => {
+    idleCalls = 0;
     if (!hasTodoHistory) return;
     const content = !enabled ? "Todo tracking is off. Earlier todo-state reminders are no longer current."
       : state.items.length ? formatPlan(state.items) : "No todos. The previous plan has been cleared.";
@@ -151,6 +155,13 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
   pi.on("session_tree", (_e, ctx) => restore(ctx));
+  // A plan the agent stopped updating goes stale silently; re-show it once in a while.
+  pi.on("tool_execution_end", (e) => {
+    if (e.toolName === "todo" || !enabled || !state.items.some(i => i.status !== "done")) return;
+    if (++idleCalls % TODO_STALE_CALLS) return;
+    // The count keeps each reminder distinct, so the reminder's dedup never swallows a repeat.
+    reminder.publish(`[CURRENT TODO STATE]\nUnchanged for ${idleCalls} tool calls. Update it if it no longer matches your work.\n${formatPlan(state.items)}`, true);
+  });
   pi.on("session_compact", (_event, ctx) => {
     reminder.restore(ctx);
     publishState(true);
