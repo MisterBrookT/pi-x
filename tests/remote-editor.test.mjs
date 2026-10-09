@@ -277,3 +277,30 @@ test("in Files, arrows move through file rows only, also after cancelling New", 
   await page.keyboard.press("ArrowUp");
   assert.equal(await page.evaluate(() => document.activeElement.classList.contains("file-row")), true, "arrows stay on file rows, not breadcrumbs or New");
 });
+
+test("↓ scrolls about half a screen, so a page takes two presses, not ten", async t => {
+  const { page } = await setup(t);
+  await page.locator("#input").focus();
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Meta+ArrowUp"); await settle(page);
+  await page.keyboard.press("ArrowDown"); await settle(page);
+  const { top, h } = await page.evaluate(() => ({ top: document.getElementById("chat").scrollTop, h: document.getElementById("chat").clientHeight }));
+  assert.ok(top >= h * 0.4, `one ↓ moved ${top}px of a ${h}px screen`);
+});
+
+test("in Sessions, arrows move between sessions only, not their … buttons", async t => {
+  const { page } = await setup(t);
+  for (const id of ["s2", "s3"]) await fetch(page.url().split("#")[0] + "agent/" + id, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name: "Other " + id, cwd: "/tmp", busy: false, messages: [] }) });
+  await page.getByRole("button", { name: "Sessions" }).click();
+  await page.getByText("Other s3").waitFor();
+  await page.waitForFunction(() => document.activeElement?.dataset?.id);
+  const ids = [];
+  for (let i = 0; i < 2; i++) { await page.keyboard.press("ArrowDown"); ids.push(await page.evaluate(() => document.activeElement.dataset.id || document.activeElement.className)); }
+  assert.ok(ids.every(x => /^s\d$/.test(x)), `focus visited ${ids.join(", ")}`);
+});
+
+test("a failed tool is not shown in red", async t => {
+  const { page } = await setup(t);
+  const html = await page.content();
+  assert.doesNotMatch(html, /#d8433e/i, "no red for failed tools");
+});
