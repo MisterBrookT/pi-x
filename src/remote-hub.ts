@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { imageRef, maxImageBase64, type RemoteMedia, type RemoteMessage } from "./remote-state.ts";
 import { validSubscription, type PushSender } from "./remote-push.ts";
 import { remoteServiceWorker } from "./remote-sw.ts";
-import { launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
+import { launchableFolder, listFolders, pastSessions, resumableSession, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
@@ -130,7 +130,7 @@ export interface RemoteHub {
 export interface RemoteHubOptions {
   token: string; port?: number; host?: string; push?: PushSender;
   /** Start a new Pi process with remote on in this already validated folder. */
-  launch?: (dir: string) => Promise<void>;
+  launch?: (dir: string, session?: string) => Promise<void>;
   home?: string; sessionsDir?: string; memoryRoot?: string;
   /** Milliseconds since the Mac keyboard or mouse was last used; injectable for tests. */
   macIdleMs?: () => number;
@@ -311,6 +311,15 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (!dir) return send(res, 400, { error: "choose a folder in your home directory" });
         try { await options.launch(dir); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
         return send(res, 202, { started: true, path: dir });
+      }
+      // Reopen a saved session, like `pi -r` on the Mac. Live sessions are already in the list.
+      if (req.method === "GET" && path === "/api/past") return send(res, 200, await pastSessions(options.sessionsDir, new Set(sessions.keys())));
+      if (req.method === "POST" && path === "/api/resume") {
+        if (!options.launch) return send(res, 404, { error: "starting sessions is unavailable" });
+        const target = await resumableSession((await body(req))?.path, options.sessionsDir);
+        if (!target) return send(res, 400, { error: "choose a saved session" });
+        try { await options.launch(target.cwd, target.file); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
+        return send(res, 202, { started: true, path: target.cwd });
       }
       if (req.method === "GET" && path === "/api/memory") return send(res, 200, await listMemory(options.memoryRoot));
       if (req.method === "GET" && path === "/api/memory/file") {

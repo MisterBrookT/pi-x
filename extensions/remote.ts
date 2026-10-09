@@ -29,6 +29,19 @@ export function shouldShowRemotePairing(action: string, paired: boolean) {
   return !paired || action === "pair" || action === "reset" || action === "tailnet pair";
 }
 
+/**
+ * Which network an interactive session turns remote on with at startup, or undefined to stay off.
+ * PIX_REMOTE_AUTOSTART=relay|tailnet (set by the phone's New session) always wins; =0 disables auto-on.
+ * Otherwise only an interactive, non-subagent Pi turns on, using whatever was paired: relay first, then tailnet.
+ */
+export function remoteAutostartMode(input: { env: Record<string, string | undefined>; mode: string; relay: boolean; tailnet: boolean }): "relay" | "tailnet" | undefined {
+  const flag = input.env.PIX_REMOTE_AUTOSTART;
+  if (flag === "relay" || flag === "tailnet") return flag === "relay" && !input.relay ? "tailnet" : flag;
+  if (flag === "0" || flag === "off") return undefined;
+  if (input.mode !== "tui" || input.env.PI_SUBAGENT_CHILD === "1" || Number(input.env.PI_SUBAGENT_DEPTH || 0) > 0) return undefined;
+  return input.relay ? "relay" : input.tailnet ? "tailnet" : undefined;
+}
+
 export interface RemoteOptions {
   port?: number; tokenPath?: string; relayUrl?: string; relayKeyPath?: string;
   /** Test seams for the phone's New session and Delete actions. */
@@ -141,7 +154,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       if (error instanceof Error && /Pix Remote|another service/.test(error.message)) throw error;
     }
     // A phone-started Pi uses the same network mode as the session hosting the hub.
-    const launch = async (dir: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty }); };
+    const launch = async (dir: string, session?: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty, session }); };
     try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay(wait);
@@ -346,17 +359,23 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   // /reload replaces this extension instance; remember "remote on" so the new instance resumes it.
   // Quitting or switching sessions still turns remote off.
   pi.on("session_start", async (event, next) => {
-    // A Pi started from the phone's New session turns remote on by itself.
-    const autostart = process.env.PIX_REMOTE_AUTOSTART;
-    if (event.reason === "startup" && autostart && !connected) {
+    // Every interactive Pi turns remote on by itself when a device is paired (see remoteAutostartMode).
+    // It never blocks startup: an unreachable hub or relay only logs, and the session keeps working.
+    if (event.reason === "startup" && !connected) {
+      const explicit = process.env.PIX_REMOTE_AUTOSTART;
       delete process.env.PIX_REMOTE_AUTOSTART;
-      try {
+      const start = async () => {
         publicOrigin = options.relayUrl ?? await readRelayOrigin();
-        await connect(next, autostart !== "tailnet" && !!publicOrigin);
-      } catch (error) {
+        const mode = remoteAutostartMode({ env: { ...process.env, PIX_REMOTE_AUTOSTART: explicit }, mode: next.mode, relay: !!publicOrigin && (!!explicit || existsSync(options.relayKeyPath ?? relayKeyPath)), tailnet: existsSync(options.tokenPath ?? remoteTokenPath) });
+        if (mode) await connect(next, mode === "relay");
+      };
+      const failed = async (error: unknown) => {
         await disconnect();
-        next.ui.notify(`Remote control could not start: ${error instanceof Error ? error.message : String(error)}`, "warning");
-      }
+        if (explicit) next.ui.notify(`Remote control could not start: ${error instanceof Error ? error.message : String(error)}`, "warning");
+        else logRelay(`auto-on failed: ${error instanceof Error ? error.message : String(error)}`);
+      };
+      if (explicit) { try { await start(); } catch (error) { await failed(error); } }
+      else void start().catch(failed);
       return;
     }
     const key = event.reason === "new" ? nextSession : next.sessionManager.getSessionId();

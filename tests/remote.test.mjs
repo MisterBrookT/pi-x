@@ -577,3 +577,18 @@ test("/rc with a slow relay warns but keeps remote on", async (t) => {
 	assert.ok(!notes.some(([l]) => l === "error"), `no error: ${JSON.stringify(notes)}`);
 	await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
 });
+
+test("interactive Pi turns remote on with whatever is paired; other modes and subagents stay off", async () => {
+  const { remoteAutostartMode: m } = await import("../extensions/remote.ts");
+  const both = { relay: true, tailnet: true };
+  assert.equal(m({ env: {}, mode: "tui", ...both }), "relay");
+  assert.equal(m({ env: {}, mode: "tui", relay: false, tailnet: true }), "tailnet");
+  assert.equal(m({ env: {}, mode: "tui", relay: false, tailnet: false }), undefined, "nothing paired");
+  for (const mode of ["print", "json", "rpc"]) assert.equal(m({ env: {}, mode, ...both }), undefined, mode);
+  assert.equal(m({ env: { PI_SUBAGENT_CHILD: "1" }, mode: "tui", ...both }), undefined);
+  assert.equal(m({ env: { PI_SUBAGENT_DEPTH: "1" }, mode: "tui", ...both }), undefined);
+  assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "0" }, mode: "tui", ...both }), undefined);
+  assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "tailnet" }, mode: "tui", ...both }), "tailnet");
+  assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "relay" }, mode: "rpc", relay: true, tailnet: false }), "relay", "phone-launched Pi keeps explicit mode");
+  assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "relay" }, mode: "tui", relay: false, tailnet: false }), "tailnet");
+});

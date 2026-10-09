@@ -79,12 +79,12 @@ export interface Launch { command: string; args: string[] }
 export const ottyAppCli = "/Applications/Otty.app/Contents/MacOS/otty-cli";
 
 /** Extra Pi arguments for a launch: a fixed session to create or resume, its name, and a first prompt. */
-export interface PiArgs { prompt?: string; sessionId?: string; name?: string; model?: string; focus?: boolean }
+export interface PiArgs { session?: string; prompt?: string; sessionId?: string; name?: string; model?: string; focus?: boolean }
 
 /** The terminal command that starts Pi in `dir` with remote control already on. */
 export function launchCommand(dir: string, mode: RemoteMode, otty: boolean | string, pi_: string | PiArgs = {}, window?: string): Launch {
   const a: PiArgs = typeof pi_ === "string" ? { prompt: pi_ } : pi_;
-  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi${a.sessionId ? ` --session-id ${shellQuote(a.sessionId)}` : ""}${a.name ? ` --name ${shellQuote(a.name)}` : ""}${a.model ? ` --model ${shellQuote(a.model)}` : ""}${a.prompt ? ` ${shellQuote(a.prompt)}` : ""}`;
+  const pi = `env PIX_REMOTE_AUTOSTART=${mode} pi${a.session ? ` --session ${shellQuote(a.session)}` : ""}${a.sessionId ? ` --session-id ${shellQuote(a.sessionId)}` : ""}${a.name ? ` --name ${shellQuote(a.name)}` : ""}${a.model ? ` --model ${shellQuote(a.model)}` : ""}${a.prompt ? ` ${shellQuote(a.prompt)}` : ""}`;
   return otty
     // Always a tab in an existing Otty window; never a second Otty process.
     ? { command: typeof otty === "string" ? otty : "otty", args: ["tab", "new", ...(window ? ["--window", window] : []), "--cwd", dir, "--command", pi, ...(a.focus ? [] : ["--no-focus"])] }
@@ -127,12 +127,12 @@ export async function focusOttyTab(name: string, cli = onPath("otty") ? "otty" :
 }
 const defaultRun = (cmd: string, args: string[]) => new Promise<string>((ok, bad) => execFile(cmd, args, { timeout: 3000 }, (e, out) => (e ? bad(e) : ok(String(out)))));
 
-export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; prompt?: string; sessionId?: string; name?: string; model?: string; focus?: boolean; window?: (cli: string) => Promise<string | undefined> } = {}): Promise<Launch> {
+export async function launchPi(dir: string, mode: RemoteMode, options: { spawn?: Spawner; hasOtty?: boolean; session?: string; prompt?: string; sessionId?: string; name?: string; model?: string; focus?: boolean; window?: (cli: string) => Promise<string | undefined> } = {}): Promise<Launch> {
   // Tests force the choice with hasOtty. Otherwise: Otty only if a window is already open (adds a tab), else tmux.
   const cli = options.hasOtty === false ? false : options.hasOtty === true ? "otty" : onPath("otty") ? "otty" : existsSync(ottyAppCli) ? ottyAppCli : false;
   const win = cli && (options.hasOtty === undefined || options.window) ? await (options.window ?? ottyWindow)(cli) : undefined;
   const useOtty = cli && (win !== undefined || options.hasOtty === true && !options.window) ? cli : false;
-  const launch = launchCommand(dir, mode, useOtty, { prompt: options.prompt, sessionId: options.sessionId, name: options.name, model: options.model, focus: options.focus }, win);
+  const launch = launchCommand(dir, mode, useOtty, { session: options.session, prompt: options.prompt, sessionId: options.sessionId, name: options.name, model: options.model, focus: options.focus }, win);
   await (options.spawn ?? detachedSpawn)(launch.command, launch.args);
   return launch;
 }
@@ -149,6 +149,65 @@ export async function deletableSessionFile(file: unknown, id: string, sessionsDi
     if (!rel[1].endsWith(`_${id}.jsonl`) && rel[1] !== `${id}.jsonl`) return undefined;
     if (!(await stat(real)).isFile()) return undefined;
     return real;
+  } catch { return undefined; }
+}
+
+/** A saved session the phone may reopen, like an entry in `pi -r`. */
+export interface PastSession { path: string; id: string; cwd: string; name?: string; firstMessage: string; modified: number }
+
+async function readPastSession(file: string, modified: number): Promise<PastSession | undefined> {
+  try {
+    const lines = (await readFile(file, "utf8")).split("\n");
+    const header = JSON.parse(lines[0]);
+    if (header?.type !== "session" || typeof header.id !== "string") return undefined;
+    let name: string | undefined, firstMessage = "";
+    for (const line of lines.slice(1)) {
+      if (!line.includes('"session_info"') && (firstMessage || !line.includes('"user"'))) continue;
+      let entry: any; try { entry = JSON.parse(line); } catch { continue; }
+      if (entry.type === "session_info") name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : undefined;
+      else if (!firstMessage && entry.type === "message" && entry.message?.role === "user") {
+        const c = entry.message.content;
+        firstMessage = (typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p?.type === "text").map((p: any) => p.text).join(" ") : "").replace(/\s+/g, " ").trim().slice(0, 200);
+      }
+    }
+    if (!name && !firstMessage) return undefined; // pi -r also skips sessions with no messages
+    return { path: file, id: header.id, cwd: typeof header.cwd === "string" ? header.cwd : "", name, firstMessage, modified };
+  } catch { return undefined; }
+}
+
+/** Saved sessions newest first (by file time, as `pi -r` orders them), minus the ids in `exclude`. */
+export async function pastSessions(sessionsDir = remoteSessionsDir, exclude: ReadonlySet<string> = new Set(), limit = 50): Promise<PastSession[]> {
+  let dirs: string[];
+  try { dirs = await readdir(sessionsDir); } catch { return []; }
+  const files: { file: string; at: number }[] = [];
+  for (const dir of dirs) {
+    if (dir.startsWith(".")) continue;
+    let names: string[];
+    try { names = (await readdir(join(sessionsDir, dir))).filter(f => f.endsWith(".jsonl")); } catch { continue; }
+    for (const name of names) { try { files.push({ file: join(sessionsDir, dir, name), at: (await stat(join(sessionsDir, dir, name))).mtimeMs }); } catch {} }
+  }
+  files.sort((a, b) => b.at - a.at);
+  const out: PastSession[] = [];
+  for (const { file, at } of files) {
+    if (out.length >= limit) break;
+    const info = await readPastSession(file, at);
+    if (info && !exclude.has(info.id)) out.push(info);
+  }
+  return out;
+}
+
+/** The phone may reopen only a regular .jsonl directly inside a sessions subfolder, with an existing cwd. */
+export async function resumableSession(file: unknown, sessionsDir = remoteSessionsDir): Promise<{ file: string; cwd: string } | undefined> {
+  if (typeof file !== "string" || !file.endsWith(".jsonl") || file.includes("\0")) return undefined;
+  try {
+    const root = await realpath(sessionsDir);
+    if ((await lstat(file)).isSymbolicLink()) return undefined;
+    const real = await realpath(file);
+    const rel = relative(root, real).split(sep);
+    if (rel.length !== 2 || rel[0] === ".." || rel[0].startsWith(".") || !(await stat(real)).isFile()) return undefined;
+    const info = await readPastSession(real, 0);
+    if (!info?.cwd || !(await stat(info.cwd)).isDirectory()) return undefined;
+    return { file: real, cwd: info.cwd };
   } catch { return undefined; }
 }
 

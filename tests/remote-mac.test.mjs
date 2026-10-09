@@ -188,3 +188,50 @@ test("focusOttyTab finds the tab by title and focuses it", async () => {
   assert.equal(calls[1], "tab focus t2");
   assert.equal(await focusOttyTab("nope", "otty", run), false);
 });
+
+test("Resume lists saved sessions newest first like pi -r, skipping live and empty ones", async t => {
+  const { pastSessions } = await import("../src/remote-mac.ts");
+  const { utimes } = await import("node:fs/promises");
+  const f = await fixture(t);
+  const dir = join(f.sessions, "--code--");
+  const write = async (name, lines, at) => { const p = join(dir, name); await writeFile(p, lines.map(l => JSON.stringify(l)).join("\n") + "\n"); await utimes(p, at, at); return p; };
+  const cwd = join(f.home, "code");
+  const user = text => ({ type: "message", message: { role: "user", content: [{ type: "text", text }] } });
+  const older = await write("1_old.jsonl", [{ type: "session", id: "old", cwd }, user("fix the   build")], 1000);
+  const named = await write("2_named.jsonl", [{ type: "session", id: "named", cwd }, user("hi"), { type: "session_info", name: "Release" }], 2000);
+  await write("3_live.jsonl", [{ type: "session", id: "live", cwd }, user("live one")], 3000);
+  await mkdir(join(dir, "subagent-artifacts"), { recursive: true });
+  const list = await pastSessions(f.sessions, new Set(["live"]));
+  assert.deepEqual(list.map(s => [s.id, s.name, s.firstMessage, s.cwd, s.path]), [["named", "Release", "hi", cwd, named], ["old", undefined, "fix the build", cwd, older]], "abc has no messages and live is connected");
+});
+
+test("Resume accepts only a real session file under the sessions folder", async t => {
+  const { resumableSession } = await import("../src/remote-mac.ts");
+  const f = await fixture(t);
+  const file = join(f.sessions, "--code--", "2026-01-01_abc.jsonl");
+  await writeFile(file, JSON.stringify({ type: "session", id: "abc", cwd: join(f.home, "code") }) + "\n" + JSON.stringify({ type: "message", message: { role: "user", content: "x" } }) + "\n");
+  assert.deepEqual(await resumableSession(file, f.sessions), { file, cwd: join(f.home, "code") });
+  assert.deepEqual(await resumableSession(join(f.sessions, "--code--", "..", "--code--", "2026-01-01_abc.jsonl"), f.sessions), { file, cwd: join(f.home, "code") });
+  await writeFile(join(f.dir, "out.jsonl"), await readFile(file, "utf8"));
+  await symlink(join(f.dir, "out.jsonl"), join(f.sessions, "--code--", "link.jsonl"));
+  for (const bad of [join(f.dir, "out.jsonl"), join(f.sessions, "--code--", "link.jsonl"), join(f.sessions, "--code--", "..", "..", "out.jsonl"), join(f.home, "notes.txt"), "relative.jsonl", 42, join(f.sessions, "--code--", "missing.jsonl")])
+    assert.equal(await resumableSession(bad, f.sessions), undefined, String(bad));
+});
+
+test("Resume reopens the file with pi --session in its folder through the New session launcher", async t => {
+  assert.deepEqual(launchCommand("/w", "relay", false, { session: "/s/a b.jsonl" }), { command: "tmux", args: ["new-session", "-d", "-c", "/w", "env PIX_REMOTE_AUTOSTART=relay pi --session '/s/a b.jsonl'"] });
+  const f = await fixture(t);
+  const file = join(f.sessions, "--code--", "2026-01-01_abc.jsonl");
+  await writeFile(file, JSON.stringify({ type: "session", id: "abc", cwd: join(f.home, "code") }) + "\n" + JSON.stringify({ type: "message", message: { role: "user", content: "x" } }) + "\n");
+  const launched = [];
+  const hub = await startRemoteHub({ token, port: 0, sessionsDir: f.sessions, home: f.home, launch: async (dir, session) => { launched.push([dir, session]); } });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const past = await (await fetch(base + "/api/past", { headers: auth })).json();
+  assert.deepEqual(past.map(p => p.id), ["abc"]);
+  assert.equal((await fetch(base + "/api/resume", { method: "POST", headers: auth, body: JSON.stringify({ path: join(f.dir, "x.jsonl") }) })).status, 400);
+  assert.equal((await fetch(base + "/api/resume", { method: "POST", headers: auth, body: JSON.stringify({ path: file }) })).status, 202);
+  assert.deepEqual(launched, [[join(f.home, "code"), file]]);
+  assert.ok(relayAllowed("/api/past", "GET") && relayAllowed("/api/resume", "POST"));
+  assert.match(remoteAppHtml, /id="resumeSession"/);
+});

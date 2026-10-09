@@ -43,7 +43,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
 
 export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image)$/.test(path)
   || method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later)$/.test(path)
-  || method === "GET" && (path === "/api/folders" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && path === "/api/launch"; };
+  || method === "GET" && (path === "/api/folders" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume"); };
 
 export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
   const { origin, secret, localBase, localToken } = options;
