@@ -2,7 +2,7 @@
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { actPrompt, parseInbox, paths, pendingItems, publicItem, type Item } from "./proactive.ts";
+import { actPrompt, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
 
@@ -11,32 +11,62 @@ export function readPending(dir?: string): Item[] {
 	return existsSync(inbox) ? pendingItems(readFileSync(inbox, "utf8")) : [];
 }
 
-/** What the phone's For you page shows: pending items, what was handled in the last day, and how many sources are watched. */
+const readAll = (dir?: string): Item[] => { const { inbox } = paths(dir); return existsSync(inbox) ? parseInbox(readFileSync(inbox, "utf8")) : []; };
+
+/** Every open loop, needs-you first then newest: what "@" in Pi offers. */
+export function readOpen(dir?: string, now = Date.now()): Item[] {
+	const all = readAll(dir).filter(isOpen).reverse();
+	return [...all.filter(i => needsYou(i, now)), ...all.filter(i => !needsYou(i, now))];
+}
+
+/**
+ * What the phone's For you page shows: loops that need brook now; loops Pi is on; loops parked for
+ * later or waiting on others (with when they come back); what closed in the last day; how many sources are watched.
+ */
 export function forYouView(dir?: string, now = Date.now()) {
 	const P = paths(dir);
-	const all = existsSync(P.inbox) ? parseInbox(readFileSync(P.inbox, "utf8")) : [];
-	const handled = all.filter(i => i.status !== "pending" && now - Date.parse((i as any).at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
+	const all = readAll(dir);
+	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
+	const handled = all.filter(i => !isOpen(i) && now - Date.parse(i.at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
+	const parked = all.filter(i => isOpen(i) && !needsYou(i, now));
 	let watching = 0;
 	try { watching = JSON.parse(readFileSync(P.config, "utf8")).sources?.length ?? 0; } catch {}
-	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
-	return { pending: all.filter(i => i.status === "pending").sort(newest).map(publicItem), handled: handled.map(publicItem), watching };
+	return {
+		pending: all.filter(i => needsYou(i, now)).sort(newest).map(publicItem),
+		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
+		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
+		handled: handled.map(publicItem),
+		watching,
+	};
 }
 
-function mark(id: string, status: Item["status"], dir?: string) {
-	appendFileSync(paths(dir).inbox, JSON.stringify({ id, status, at_status: new Date().toISOString() }) + "\n");
-}
+const write = (dir: string | undefined, line: Record<string, unknown>) => appendFileSync(paths(dir).inbox, JSON.stringify({ ...line, at_status: new Date().toISOString() }) + "\n");
 
+/** ✕: drop a loop for good. Works on any open loop (the phone may show parked ones). */
 export function dismissItem(id: string, dir?: string): boolean {
-	if (!readPending(dir).some(i => i.id === id)) return false;
-	mark(id, "dismissed", dir);
+	if (!readAll(dir).some(i => i.id === id && isOpen(i))) return false;
+	write(dir, { id, status: "dismissed" });
 	return true;
 }
 
-/** Hand a pending item to an existing session (e.g. "@"-mentioned in Pi): mark it done there. */
+/** Later: hide a loop until the day before it is due, or tomorrow morning. */
+export function laterItem(id: string, dir?: string, now = Date.now()): boolean {
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	if (!it) return false;
+	const morning = new Date(now + 86_400_000); morning.setHours(9, 0, 0, 0);
+	const due = it.due ? wakeTime(it.due, now, 1) : morning.toISOString();
+	write(dir, { id, status: it.status === "onit" ? "onit" : "later", wakeAt: due });
+	return true;
+}
+
+/**
+ * A Pi session takes a loop ("@" in Pi, or Do it): the loop is "on it", not done. It closes when
+ * the chat shows it is finished (the judge closes it) or brook drops it.
+ */
 export function takeItem(id: string, session: string, dir?: string): Item | undefined {
-	const it = readPending(dir).find(i => i.id === id);
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
 	if (!it) return undefined;
-	appendFileSync(paths(dir).inbox, JSON.stringify({ id, status: "done", session, at_status: new Date().toISOString() }) + "\n");
+	write(dir, { id, status: "onit", session, wakeAt: null });
 	return it;
 }
 
@@ -51,9 +81,8 @@ export const forYouFolder = (home = homedir()) => home;
  * into it via `send`; otherwise a new tab starts it (same fixed session id, so history continues).
  */
 export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean } = {}): Promise<Item | undefined> {
-	const it = readPending(options.dir).find(i => i.id === id);
+	const it = takeItem(id, forYouSession.id, options.dir);
 	if (!it) return undefined;
-	appendFileSync(paths(options.dir).inbox, JSON.stringify({ id, status: "done", session: forYouSession.id, at_status: new Date().toISOString() }) + "\n");
 	const prompt = actPrompt(it);
 	if (options.send?.(forYouSession.id, prompt)) {
 		if (options.focus) await (options.focusTab ?? focusOttyTab)(forYouSession.name);

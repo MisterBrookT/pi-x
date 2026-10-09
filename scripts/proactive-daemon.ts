@@ -2,17 +2,18 @@
 // Proactive daemon: receive (any source adapter) -> judge (one model call) -> the one list.
 // Views (Mac pill, Pix Remote "For you") read the list; this process never shows UI itself.
 // Usage: node scripts/proactive-daemon.ts [--once] [--dry-run]
-//        node scripts/proactive-daemon.ts act <id>      mark done, start a Pi session on the next step
-//        node scripts/proactive-daemon.ts dismiss <id>  mark dismissed
+//        node scripts/proactive-daemon.ts act <id>      mark "on it", start a Pi session on the next step
+//        node scripts/proactive-daemon.ts later <id>    hide until near its due date (or tomorrow)
+//        node scripts/proactive-daemon.ts dismiss <id>  drop for good
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, type Config, type Item } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, dismissItem } from "../src/proactive-store.ts";
+import { actItem, dismissItem, laterItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -54,11 +55,12 @@ async function tick(cfg: Config) {
 				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
-			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], cfg.me, items.filter(i => i.status === "pending" && i.sourceKey === key).length);
+			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], cfg.me, items.filter(i => isOpen(i) && i.sourceKey === key).length);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (last) state[key] = last; continue; }
-			const pending = items.filter(i => i.status === "pending").slice(-10);
-			const feedback = items.filter(i => i.status !== "pending").slice(-10);
+			// All open loops from every source, so a reply here can move a loop and duplicates merge.
+			const pending = items.filter(isOpen).slice(-20);
+			const feedback = items.filter(i => !isOpen(i)).slice(-10);
 			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
 			const raw = await ask(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
 			const v = parseVerdict(raw);
@@ -75,14 +77,18 @@ async function tick(cfg: Config) {
 			if (!v) { log(`${src.name}: ${fresh.length} new -> bad verdict: ${raw.slice(0, 120)}`); continue; }
 			const open = new Set(pending.map(p => p.id));
 			const close = v.close.filter(id => open.has(id));
-			log(`${src.name}: ${fresh.length} new -> ${v.alerts.length ? v.alerts.map(a => `ALERT ${a.title}`).join("; ") : "nothing"}${close.length ? `, resolved ${close.join(",")}` : ""}`);
+			const update = v.update.filter(u => open.has(u.id) && !close.includes(u.id));
+			log(`${src.name}: ${fresh.length} new -> ${v.alerts.length ? v.alerts.map(a => `ALERT ${a.title}`).join("; ") : "nothing"}${update.length ? `, updated ${update.map(u => `${u.id}${u.state ? `→${u.state}` : ""}`).join(",")}` : ""}${close.length ? `, resolved ${close.join(",")}` : ""}`);
 			if (dry) continue;
-			const stamp = new Date().toISOString();
+			const now = Date.now(), stamp = new Date(now).toISOString();
 			for (const id of close) appendFileSync(P.inbox, JSON.stringify({ id, status: "resolved", at_status: stamp }) + "\n");
+			for (const u of update) appendFileSync(P.inbox, JSON.stringify(updateLine(pending.find(p => p.id === u.id)!, u, now)) + "\n");
 			const listed = [...items];
-			for (const a of v.alerts) {
+			for (const { state, ...a } of v.alerts) {
 				// Over the hourly limit an alert still enters the list, just without a push (quiet).
-				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project, howToRead: adapter.howToRead(src, a.refs), status: "pending", ...(underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
+				// A new loop that is already parked (e.g. waiting on someone) is quiet and comes back later.
+				const parked = state === "waiting" || state === "later";
+				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
 				listed.push(it);
 				appendFileSync(P.inbox, JSON.stringify(it) + "\n");
 			}
@@ -101,12 +107,12 @@ async function hubAct(id: string, focus: boolean): Promise<boolean | undefined> 
 }
 
 const [verb, itemId] = process.argv.slice(2);
-if (verb === "act" || verb === "dismiss") {
+if (verb === "act" || verb === "dismiss" || verb === "later") {
 	const focus = process.argv.includes("--focus");
 	// Prefer the hub: it can hand the task to a live For you session. Without a hub, act directly.
 	const viaHub = verb === "act" ? await hubAct(itemId, focus) : undefined;
-	const ok = viaHub ?? (verb === "act" ? !!(await actItem(itemId, { focus })) : dismissItem(itemId));
-	if (!ok) { console.error(`no pending alert ${itemId}`); process.exit(1); }
+	const ok = viaHub ?? (verb === "act" ? !!(await actItem(itemId, { focus })) : verb === "later" ? laterItem(itemId) : dismissItem(itemId));
+	if (!ok) { console.error(`no open loop ${itemId}`); process.exit(1); }
 	process.exit(0);
 }
 

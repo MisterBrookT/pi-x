@@ -1,0 +1,93 @@
+// Open loops: a reply moves a loop instead of leaving it stale; parked loops come back on time;
+// Later / ✕ / "on it" from every view.
+import assert from "node:assert/strict";
+import test from "node:test";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../src/proactive.ts";
+import { dismissItem, forYouView, laterItem, readOpen, readPending, takeItem } from "../src/proactive-store.ts";
+import { relayAllowed } from "../src/remote-relay-agent.ts";
+
+const DAY = 86_400_000;
+const now = Date.parse("2026-10-09T10:00:00Z");
+const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "A", refs: [], source: "王梓萱", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
+const inbox = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-loops-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + "\n"); return d; };
+
+test("regression: brook's reply moves the loop to 'later' with a due date; it leaves 'needs you' and comes back before it is due", () => {
+	// Before: the judge could only add or close, so "ok, I'll test it by next week" left "reply to her" pending.
+	const v = parseVerdict(JSON.stringify({ alerts: [], update: [{ id: "65b5", state: "later", title: "Test Databento for 王梓萱", due: "2026-10-16", button: "Start test" }], close: [] }));
+	assert.deepEqual(v.update, [{ id: "65b5", state: "later", title: "Test Databento for 王梓萱", due: "2026-10-16", button: "Start test" }]);
+	const it = loop("65b5");
+	const text = JSON.stringify(it) + "\n" + JSON.stringify(updateLine(it, v.update[0], now)) + "\n";
+	assert.deepEqual(pendingItems(text, now), [], "not in needs-you after he replied");
+	const [moved] = parseInbox(text);
+	assert.equal(moved.status, "later"); assert.equal(moved.title, "Test Databento for 王梓萱"); assert.equal(moved.button, "Start test");
+	const wake = Date.parse(moved.wakeAt);
+	assert.ok(wake > now && wake < Date.parse("2026-10-16"), "wakes before the due date");
+	assert.equal(pendingItems(text, Date.parse("2026-10-15T12:00:00Z")).length, 1, "back in needs-you the day before");
+});
+
+test("update 'needs' brings a parked loop back now; a loop Pi is on stays on it", () => {
+	const parked = loop("p", { status: "waiting", wakeAt: "2026-10-20T00:00:00Z" });
+	const back = updateLine(parked, { id: "p", state: "needs" }, now);
+	assert.equal(back.status, "pending"); assert.equal(back.wakeAt, null);
+	const onit = updateLine(loop("o", { status: "onit" }), { id: "o", state: "later", due: "2026-10-16" }, now);
+	assert.equal(onit.status, undefined, "keeps onit"); assert.ok(onit.wakeAt);
+	const [it] = parseInbox(JSON.stringify(parked) + "\n" + JSON.stringify(back));
+	assert.ok(needsYou(it, now));
+});
+
+test("wakeTime: morning before due, half-way when close, fallback days without a due", () => {
+	assert.equal(new Date(wakeTime("2026-10-16", now, 7)).getDate(), 15);
+	assert.ok(Date.parse(wakeTime("2026-10-09T20:00:00Z", now, 7)) < Date.parse("2026-10-09T20:00:00Z"));
+	assert.equal(Date.parse(wakeTime(undefined, now, 3)), now + 3 * DAY);
+	assert.equal(Date.parse(wakeTime("2026-10-01", now, 3)), now + 3 * DAY, "past due: fallback");
+});
+
+test("parseVerdict: 'no follow-up' alerts are dropped; fields are cleaned", () => {
+	const v = parseVerdict(JSON.stringify({ alerts: [
+		{ title: "欧阳宗谦补充交易期望值公式", action: "无需跟进，除非你想继续讨论策略评估。" },
+		{ title: "FYI", action: "No follow-up needed" },
+		{ title: "Real", action: "Draft reply", button: "  Draft reply ", due: "next week", state: "bogus" },
+	], update: [{ title: "no id" }, { id: "x", state: "waiting", due: "2026-10-16" }] }));
+	assert.deepEqual(v.alerts.map(a => a.title), ["Real"]);
+	assert.equal(v.alerts[0].button, "Draft reply"); assert.equal(v.alerts[0].due, undefined); assert.equal(v.alerts[0].state, undefined);
+	assert.deepEqual(v.update, [{ id: "x", state: "waiting", due: "2026-10-16" }]);
+	assert.deepEqual(parseVerdict('{"alerts":[]}').update, []);
+});
+
+test("judgePrompt shows open loops from every source with their state, so duplicates merge", () => {
+	const p = judgePrompt({ me: "brook", memory: "", source: { kind: "feishu", id: "t", name: "任务助手" }, context: [], fresh: [], now: "n",
+		pending: [loop("65b5", { title: "Test Databento", status: "later", due: "2026-10-16" }), loop("ab", { status: "onit" })] });
+	assert.match(p, /id=65b5: Test Databento \[later, due 2026-10-16\] \(from 王梓萱\)/);
+	assert.match(p, /id=ab: Loop ab \[Pi is on it\]/);
+	assert.match(p, /same thing as an open loop is the same loop: update it/);
+	assert.match(p, /"update": \[/);
+	assert.match(p, /"button"/);
+});
+
+test("store: Later parks a loop, ✕ drops it, @ takes it 'on it'; the view splits needs-you / on it / later", () => {
+	const dir = inbox(loop("a"), loop("b"), loop("c"), loop("d", { due: "2026-10-16" }));
+	assert.equal(laterItem("a", dir, now), true);
+	assert.equal(laterItem("d", dir, now), true);
+	assert.equal(dismissItem("b", dir), true);
+	assert.ok(takeItem("c", "sess-9", dir));
+	assert.deepEqual(readPending(dir), []);
+	const v = forYouView(dir, now);
+	assert.deepEqual(v.pending, []);
+	assert.deepEqual(v.onit.map(i => [i.id, i.session]), [["c", "sess-9"]]);
+	assert.deepEqual(v.later.map(i => i.id).sort(), ["a", "d"]);
+	assert.deepEqual(v.handled.map(i => i.id), ["b"]);
+	const [d] = v.later.filter(i => i.id === "d");
+	assert.equal(new Date(d.wakeAt).getDate(), 15, "Later on a loop with a due date: back the day before");
+	assert.deepEqual(readOpen(dir, now).map(i => i.id).sort(), ["a", "c", "d"], "@ offers every open loop");
+	assert.equal(forYouView(dir, now + 2 * DAY).pending.map(i => i.id).includes("a"), true, "Later without due: back next morning");
+	assert.equal(dismissItem("b", dir), false, "closed stays closed");
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "c", status: "resolved" }) + "\n");
+	assert.equal(takeItem("c", "s", dir), undefined);
+});
+
+test("relay allows Later from the phone", () => {
+	assert.ok(relayAllowed("/api/foryou/abc_1/later", "POST"));
+});

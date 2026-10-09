@@ -15,7 +15,7 @@ import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, 
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
-import { actItem, dismissItem, forYouView } from "./proactive-store.ts";
+import { actItem, dismissItem, forYouView, laterItem } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -224,6 +224,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     knownItems = new Set(list.map(i => i.id));
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);
+  // Parked loops come back by time, not by a file change: re-check every minute.
+  const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
+  wake.unref();
   const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
   const drop = (id: string) => {
     const session = sessions.get(id);
@@ -277,11 +280,11 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
-      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss)$/);
+      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later)$/);
       if (req.method === "POST" && forYouMatch) {
         const input = await body(req).catch(() => ({})) as any;
         const [, id, verb] = forYouMatch;
-        if (verb === "dismiss") { const ok = dismissItem(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
+        if (verb === "dismiss" || verb === "later") { const ok = (verb === "later" ? laterItem : dismissItem)(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
         try {
           // Live For you session: queue the task into it, like a phone prompt. Otherwise actItem opens a tab.
           const sendLive = (sid: string, text: string) => {
@@ -481,6 +484,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     close: () => new Promise<void>((resolve) => {
       clearInterval(sweep);
       unwatchFile(proactiveFile, onProactive);
+      clearInterval(wake);
       for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);
       for (const phone of phones) phone.end();

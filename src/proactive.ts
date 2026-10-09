@@ -23,12 +23,35 @@ export const defaultConfig: Config = { me: "", sources: [], intervalSec: 600, mo
 export interface Msg { id: string; time: string; sender: string; text: string }
 /** Memory edits proposed by the judge: lines to add, and existing lines (exact text) to remove. */
 export interface MemoryEdit { add: string[]; remove: string[] }
-/** One thing worth telling the user about. */
-export interface Alert { title: string; why: string; action: string; refs: string[] }
-/** The judge's answer for one batch: zero or more alerts, pending items now resolved, and memory edits. */
-export interface Verdict { alerts: Alert[]; close: string[]; memory: MemoryEdit }
-/** An alert in the list. `quiet` = kept but not pushed (over the hourly limit). `session` = the Pi session working on it. */
-export interface Item extends Alert { id: string; at: string; source: string; sourceKey: string; project?: string; howToRead: string; status: "pending" | "done" | "dismissed" | "resolved"; quiet?: boolean; session?: string }
+/**
+ * One open loop: something unfinished between brook and someone else. `button` names the prepared
+ * next step ("Draft reply"); `due` is a date when something is owed.
+ */
+export interface Alert { title: string; why: string; action: string; refs: string[]; button?: string; due?: string }
+/** Where a loop stands, as the judge sees it. needs = needs brook now; waiting = others owe him; later = he owes it, not yet due. */
+export type LoopState = "needs" | "waiting" | "later";
+/** A change to an existing loop (any source), e.g. after brook replied or a duplicate showed up elsewhere. */
+export interface LoopUpdate extends Partial<Omit<Alert, "refs">> { id: string; state?: LoopState }
+/** The judge's answer for one batch: new loops, updated loops, finished loops, and memory edits. */
+export interface Verdict { alerts: (Alert & { state?: LoopState })[]; update: LoopUpdate[]; close: string[]; memory: MemoryEdit }
+/**
+ * Status: pending = needs brook now; onit = a Pi session took it; later/waiting = hidden until `wakeAt`;
+ * done/dismissed/resolved = closed. `quiet` = kept but not pushed. `session` = the Pi session on it.
+ */
+export type Status = "pending" | "onit" | "later" | "waiting" | "done" | "dismissed" | "resolved";
+export interface Item extends Alert { id: string; at: string; source: string; sourceKey: string; project?: string; howToRead: string; status: Status; quiet?: boolean; session?: string; wakeAt?: string; at_status?: string }
+
+export const isOpen = (i: Pick<Item, "status">) => i.status === "pending" || i.status === "onit" || i.status === "later" || i.status === "waiting";
+/** Shown as "needs you": pending, or a parked loop whose time has come. */
+export const needsYou = (i: Pick<Item, "status" | "wakeAt">, now = Date.now()) => i.status === "pending" || (isOpen(i) && !!i.wakeAt && Date.parse(i.wakeAt) <= now);
+const DAY = 86_400_000;
+/** When a parked loop comes back: the morning of the day before it is due, else after `fallbackDays`. */
+export function wakeTime(due: string | undefined, now: number, fallbackDays: number): string {
+	const d = due ? Date.parse(due) : NaN;
+	if (!Number.isNaN(d) && d - DAY > now) { const w = new Date(d - DAY); w.setHours(9, 0, 0, 0); return w.toISOString(); }
+	if (!Number.isNaN(d) && d > now) return new Date(now + Math.min(DAY, (d - now) / 2)).toISOString();
+	return new Date(now + fallbackDays * DAY).toISOString();
+}
 
 export const sourceKey = (s: Source) => `${s.kind}:${s.id}`;
 
@@ -44,23 +67,26 @@ export function newSince(msgs: Msg[], lastId?: string): Msg[] {
  * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
  * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.
  */
-export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, pendingHere: number): { fresh: Msg[]; context: Msg[]; judge: boolean } {
+export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number): { fresh: Msg[]; context: Msg[]; judge: boolean } {
 	const fresh = newSince(msgs, lastId);
 	const context = msgs.slice(0, msgs.length - fresh.length).slice(-15);
 	const fromOthers = fresh.some(m => m.sender.trim() !== me);
-	return { fresh, context, judge: fromOthers || (fresh.length > 0 && pendingHere > 0) };
+	return { fresh, context, judge: fromOthers || (fresh.length > 0 && openHere > 0) };
 }
+
+const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}`;
 
 export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string }): string {
 	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${o.me && m.sender.trim() === o.me ? " (me)" : ""}: ${m.text}`;
-	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and decide whether to interrupt ${o.me}.
-Stay quiet by default. Interrupt only when it clearly matters to ${o.me}:
+	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and keep track of his open loops:
+things still unfinished between ${o.me} and someone else. He should only see what needs him now.
+A loop is worth tracking when:
 - someone asks ${o.me} something, @mentions him, or waits on him
 - something he asked for is delivered, or a blocker/decision/deadline appears
 - it changes what he should do next in his project (see memory)
 - he promised something and it is still open
-Do NOT interrupt for chit-chat, his own messages, or things already in the pending list.
-Messages marked (me) are ${o.me}'s own. If he already replied to, answered, or took on a pending alert, close it.
+Never track chit-chat, FYI, or anything that needs nothing from him. If your suggested action would be "no follow-up", do not create it.
+Messages marked (me) are ${o.me}'s own.
 
 Now: ${o.now}
 Source: ${o.source.name} [${o.source.kind}]${o.source.project ? ` (project: ${o.source.project})` : ""}
@@ -68,11 +94,11 @@ Source: ${o.source.name} [${o.source.kind}]${o.source.project ? ` (project: ${o.
 ## Memory
 ${o.memory || "(empty)"}
 
-## Pending alerts (already shown, do not repeat; close them if the new messages resolve them)
-${o.pending.map(p => `- id=${p.id}: ${p.title}`).join("\n") || "(none)"}
+## Open loops (all sources; already known, never create a duplicate)
+${o.pending.map(loopLine).join("\n") || "(none)"}
 
-## How ${o.me} reacted to recent alerts
-${(o.feedback ?? []).map(f => `- ${f.status === "done" ? "acted on" : "dismissed"}: ${f.title}`).join("\n") || "(none yet)"}
+## How ${o.me} reacted to recent loops
+${(o.feedback ?? []).map(f => `- ${f.status === "done" || f.status === "onit" ? "acted on" : f.status === "resolved" ? "resolved" : "dismissed"}: ${f.title}`).join("\n") || "(none yet)"}
 
 ## Earlier messages (context only)
 ${o.context.map(fmt).join("\n") || "(none)"}
@@ -80,16 +106,25 @@ ${o.context.map(fmt).join("\n") || "(none)"}
 ## New messages
 ${o.fresh.map(fmt).join("\n")}
 
-You also keep the memory up to date. Memory is short bullet lines about ${o.me}'s work:
-open promises he made, things he is waiting for, decisions, deadlines, and what he cares about or ignores.
-- add a line when something new and lasting appears (e.g. "- Promised: send benchkit API to the group (2026-10-05)")
-- remove a line (copy its exact text) when it is resolved or no longer true
-- learn from his reactions: if he keeps dismissing a kind of alert, add a line saying he does not care about it
-Keep lines short and factual. Most of the time, change nothing.
+Decide, in this order:
+1. Do the new messages move an existing loop (from any source)? Then put it in "update", never a new alert.
+   Example: someone asked ${o.me} to test X; he replied "ok, by next week" -> update that loop:
+   {"id": "...", "state": "later", "title": "Test X for Y", "due": "2026-10-16", "action": "...", "button": "Start test"}.
+   A task card or mail about the same thing as an open loop is the same loop: update it.
+   state: "needs" = needs him now; "waiting" = he is waiting on someone else; "later" = he owes it, not due yet.
+2. Is a loop finished (done, answered, cancelled, no longer needed)? Put its id in "close".
+3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
 
-Reply with JSON only, no prose. "alerts" is usually empty; use one alert per separate thing, never more than 3.
-"close" lists pending alert ids that the new messages resolved (done, cancelled, no longer needed).
-{"alerts": [{"title": "<=60 chars, what happened", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "refs": ["message ids"]}], "close": ["pending id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
+You also keep the memory: short bullet lines of lasting facts about ${o.me}'s world: people and their roles,
+projects, decisions, and what he cares about or ignores. Open loops (promises, waiting, deadlines) live in the loop list, not memory.
+- add a line when a new lasting fact appears; remove a line (copy its exact text) when it is no longer true
+- learn from his reactions: if he keeps dismissing a kind of loop, add a line saying he does not care about it
+Most of the time, change nothing.
+
+"button" is 1-3 words naming the step an agent can prepare (e.g. "Draft reply", "Start test", "Check backtest").
+"due" is YYYY-MM-DD when there is a deadline, else omit.
+Reply with JSON only, no prose:
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "Draft reply", "state": "needs", "due": "YYYY-MM-DD", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD"}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -101,8 +136,15 @@ export function parseVerdict(raw: string): Verdict | null {
 		// Older one-alert shape: {"notify": true, "title": ...}
 		const list = Array.isArray(v.alerts) ? v.alerts : typeof v.notify === "boolean" ? (v.notify ? [v] : []) : null;
 		if (!list) return null;
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim()).slice(0, 3).map((a: any) => ({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [] }));
-		return { alerts, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) } };
+		const str = (x: unknown, n: number) => (typeof x === "string" && x.trim() ? x.trim().slice(0, n) : undefined);
+		const state = (x: unknown): LoopState | undefined => (x === "needs" || x === "waiting" || x === "later" ? x : undefined);
+		const due = (x: unknown) => { const d = str(x, 10); return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined; };
+		const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined)) as T;
+		// "No follow-up" is not a loop: drop it (the judge sometimes says so in the action).
+		const noop = (a: any) => /无需跟进|no (follow[- ]?up|action)( needed)?|nothing to do/i.test(String(a.action ?? ""));
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state) }));
+		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due) }));
+		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) } };
 	} catch { return null; }
 }
 
@@ -150,20 +192,34 @@ export function parseInbox(text: string): Item[] {
 	return [...byId.values()].filter(i => i.title !== undefined);
 }
 
-/** Pending items, newest first: what every view (Mac pill, iPhone, hub API) shows. */
-export function pendingItems(text: string): Item[] {
-	return parseInbox(text).filter(i => i.status === "pending").reverse();
+/** Loops that need brook now, newest first: what every view (Mac pill, iPhone, hub API) shows. */
+export function pendingItems(text: string, now = Date.now()): Item[] {
+	return parseInbox(text).filter(i => needsYou(i, now)).reverse();
+}
+
+/** Status line for a judge's update: parked states get a wake time; "needs" brings it back now. */
+export function updateLine(it: Item, u: LoopUpdate, now = Date.now()): Record<string, unknown> {
+	const { id, state, ...fields } = u;
+	const line: Record<string, unknown> = { id, ...fields, at_status: new Date(now).toISOString() };
+	const due = u.due ?? it.due;
+	if (state === "needs") Object.assign(line, { status: "pending", wakeAt: null });
+	else if (state === "waiting" || state === "later") {
+		// A loop a Pi session already took stays "on it"; it just gets the new due time.
+		if (it.status !== "onit") line.status = state;
+		line.wakeAt = wakeTime(due, now, state === "waiting" ? 3 : 7);
+	} else if (u.due && it.status !== "pending") line.wakeAt = wakeTime(due, now, 3);
+	return line;
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item & { at_status?: string }) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "" });
+export const publicItem = (i: Item) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "" });
 
 export function actPrompt(it: Item): string {
-	return `A proactive alert from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
+	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive alert from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
 
 **${it.title}**
 Why: ${it.why}
-Suggested next step: ${it.action}
+Suggested next step: ${it.action}${it.due ? `\nDue: ${it.due}` : ""}
 Original items: ${it.howToRead}
 
 Read the referenced items and any project files you need, then prepare this next step.

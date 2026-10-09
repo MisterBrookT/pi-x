@@ -32,8 +32,9 @@ test("store: one list, Not now and Do it both remove the item; Do it starts Pi i
   assert.equal(calls[0][2].sessionId, "pix-foryou", "all Do it items go to one For you session");
   assert.equal(calls[0][2].model, "openai-codex/gpt-6-luna");
   assert.match(calls[0][2].prompt, /Title a[\s\S]*do not send without my confirmation/);
-  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"a","status":"done","session":"pix-foryou"/, "item remembers its session");
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"a","status":"onit","session":"pix-foryou"/, "item remembers its session");
   assert.deepEqual(readPending(dir), []);
+  assert.equal(dismissItem("a", dir), true, "a loop Pi is on can still be dropped");
   assert.equal(await actItem("a", { dir, launch: async () => assert.fail("must not launch twice") }), undefined);
   // Live For you session: the task is queued into it, no new tab.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { project })) + "\n");
@@ -89,6 +90,17 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
   assert.ok(await page.getByText("Draft a reply").first().isVisible(), "card shows what Pi will do");
 
+  // The main button names the prepared step; Later parks the loop where the phone can still see it.
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20" })) + "\n");
+  const main = page.locator('[data-fy="c"] [data-fy-act="act"]');
+  await main.waitFor({ timeout: 8000 });
+  assert.equal((await main.textContent()).trim(), "Start test");
+  assert.equal((await page.locator('[data-fy="a"] [data-fy-act="act"]').textContent()).trim(), "Do it", "no label: Do it");
+  await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
+  await page.locator('[data-fy="c"]').waitFor({ state: "detached" });
+  await page.getByText("You owe it · due").waitFor({ timeout: 8000 });
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
+
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
   await page.locator('[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
@@ -101,6 +113,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator("#forYouOpen").click();
   await page.getByText("All clear").waitFor();
   assert.ok(await page.getByText("2 handled").isVisible(), "today's handled items stay visible");
+  assert.ok(await page.getByText("Title c").isVisible(), "parked loops stay visible under Later");
   assert.deepEqual(errors, []);
 });
 

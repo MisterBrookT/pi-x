@@ -1,6 +1,6 @@
 // Always-on desktop pill for the pix proactive loop.
 // Collapsed: a small floating capsule with a bell and pending count.
-// Click: expands to the list; each item has Do it (starts a Pi session) and Not now.
+// Click: expands to what needs you; each loop has its named step (starts a Pi session), Later, and ✕ (drop).
 // The iPhone shows the same list in Pix Remote ("For you").
 // Reads ~/.pix/proactive/inbox.jsonl; all state changes go through proactive-daemon.ts.
 // Build: swiftc -O scripts/proactive-pill.swift -o ~/.pix/proactive/pill
@@ -12,7 +12,7 @@ let dir = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DIR"] ?? "\(home)/.
 let inbox = "\(dir)/inbox.jsonl"
 let daemon = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DAEMON"] ?? "\(home)/workspace/tools/pix/scripts/proactive-daemon.ts"
 
-struct Alert: Identifiable { let id, title, why, source, at: String }
+struct Alert: Identifiable { let id, title, why, source, at, button, due: String }
 
 func loadPending() -> [Alert] {
     guard let text = try? String(contentsOfFile: inbox, encoding: .utf8) else { return [] }
@@ -24,9 +24,20 @@ func loadPending() -> [Alert] {
     }
     return order.compactMap { id in
         let o = merged[id]!
-        guard (o["status"] as? String) == "pending" else { return nil }
-        return Alert(id: id, title: o["title"] as? String ?? "", why: o["why"] as? String ?? "", source: o["source"] as? String ?? "", at: o["at"] as? String ?? "")
+        // Same rule as src/proactive.ts needsYou: pending, or an open loop whose wake time has come.
+        let status = o["status"] as? String ?? ""
+        let open = ["pending", "onit", "later", "waiting"].contains(status)
+        let woke = (o["wakeAt"] as? String).flatMap { ISO8601DateFormatter.lenient($0) }.map { $0 <= Date() } ?? false
+        guard status == "pending" || (open && woke) else { return nil }
+        return Alert(id: id, title: o["title"] as? String ?? "", why: o["why"] as? String ?? "", source: o["source"] as? String ?? "", at: o["at"] as? String ?? "", button: o["button"] as? String ?? "", due: o["due"] as? String ?? "")
     }.reversed()
+}
+
+extension ISO8601DateFormatter {
+    static func lenient(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+    }
 }
 
 func sh(_ args: [String]) {
@@ -40,13 +51,14 @@ final class Model: ObservableObject {
     @Published var open = false
     var timer: Timer?
     init() { refresh(); timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() } }
-    func refresh() { let a = loadPending(); if a.map(\.id) != alerts.map(\.id) { alerts = a; if a.isEmpty { open = false } } }
+    func refresh() { let a = loadPending(); let key = { (x: [Alert]) in x.map { "\($0.id)|\($0.title)|\($0.button)|\($0.due)" } }; if key(a) != key(alerts) { alerts = a; if a.isEmpty { open = false } } }
     func act(_ a: Alert) {
         // Same path as the phone: the daemon's `act` verb starts a normal Pi session with remote on.
         sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "act", a.id, "--focus"])
         refresh()
     }
     func dismiss(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "dismiss", a.id]); refresh() }
+    func later(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "later", a.id]); refresh() }
 }
 
 struct Pill: View {
@@ -60,10 +72,11 @@ struct Pill: View {
                             Text(a.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
                             Text(a.why).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(3)
                             HStack {
-                                Text(a.source).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
+                                Text(a.due.isEmpty ? a.source : "\(a.source) · due \(a.due)").font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
                                 Spacer()
-                                Button("Not now") { m.dismiss(a) }.buttonStyle(.borderless).font(.system(size: 12))
-                                Button("Do it") { m.act(a) }.buttonStyle(.borderedProminent).controlSize(.small)
+                                Button("Later") { m.later(a) }.buttonStyle(.borderless).font(.system(size: 12))
+                                Button { m.dismiss(a) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).font(.system(size: 11)).help("Drop")
+                                Button(a.button.isEmpty ? "Do it" : a.button) { m.act(a) }.buttonStyle(.borderedProminent).controlSize(.small)
                             }
                         }
                         if a.id != m.alerts.last?.id { Divider() }

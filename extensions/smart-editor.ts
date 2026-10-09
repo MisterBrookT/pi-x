@@ -15,7 +15,7 @@ import {
 } from "../src/smart-editor.ts";
 import { WordCompletion } from "../src/word-completion.ts";
 import { expandForYou, withForYou } from "../src/foryou-mention.ts";
-import { readPending } from "../src/proactive-store.ts";
+import { readOpen } from "../src/proactive-store.ts";
 import registerAiCompletion, { type CompletionService } from "./ai-completion.ts";
 import registerHistoryCompletion from "./history-completion.ts";
 
@@ -73,7 +73,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
-		ctx.ui.addAutocompleteProvider?.((current) => withForYou(current, () => readPending()));
+		ctx.ui.addAutocompleteProvider?.((current) => withForYou(current, () => readOpen()));
 
 		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 			class SmartEditor extends CustomEditor {
