@@ -169,3 +169,5 @@ swiftc -O scripts/proactive-pill.swift -o ~/.pix/proactive/pill
 ```
 
 Keep the daemon and the pill running with launchd. The first poll of a new source only remembers where it is, so old history does not flood you.
+
+launchd does not inherit your shell's proxy variables. If model calls need a proxy, set `https_proxy`/`http_proxy`/`no_proxy` in the daemon plist's `EnvironmentVariables`; otherwise every judge call logs `error pi exited 1` (`pi` prints `fetch failed`).
