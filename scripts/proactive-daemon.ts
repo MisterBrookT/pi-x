@@ -55,8 +55,8 @@ async function tick(cfg: Config) {
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], cfg.me, items.filter(i => i.status === "pending" && i.sourceKey === key).length);
-			if (last) state[key] = last;
-			if (!judge) continue;
+			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
+			if (!judge) { if (last) state[key] = last; continue; }
 			const pending = items.filter(i => i.status === "pending").slice(-10);
 			const feedback = items.filter(i => i.status !== "pending").slice(-10);
 			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
@@ -71,6 +71,7 @@ async function tick(cfg: Config) {
 					log(`memory: +${r.added.length} -${r.removed.length}`);
 				}
 			}
+			if (last) state[key] = last;
 			if (!v) { log(`${src.name}: ${fresh.length} new -> bad verdict: ${raw.slice(0, 120)}`); continue; }
 			const open = new Set(pending.map(p => p.id));
 			const close = v.close.filter(id => open.has(id));
