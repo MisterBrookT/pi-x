@@ -227,6 +227,17 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // Parked loops come back by time, not by a file change: re-check every minute.
   const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
   wake.unref();
+  const sessionPatch = (old: Registered | undefined, next: Registered) => {
+    if (!old) return undefined;
+    const { messages: a, ...oldMeta } = publicSession(old), { messages: b, ...meta } = publicSession(next);
+    let keep = 0;
+    while (keep < a.length && keep < b.length && JSON.stringify(a[keep]) === JSON.stringify(b[keep])) keep++;
+    // The window slid (old messages dropped off the front): send everything.
+    if (keep === 0 && a.length && b.length && a[0].id !== b[0].id) return undefined;
+    const same = (x: any, y: any) => JSON.stringify({ ...x, updatedAt: 0 }) === JSON.stringify({ ...y, updatedAt: 0 });
+    if (keep === a.length && keep === b.length && same(oldMeta, meta)) return null;
+    return { ...meta, keep, base: a.length, tail: b.slice(keep) };
+  };
   const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt });
   const drop = (id: string) => {
     const session = sessions.get(id);
@@ -449,8 +460,12 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           };
           sessions.set(id, next);
           notifyChanges(old, next);
-          publish("session", publicSession(next));
-          publish("sessions", summary());
+          // Phones get only what changed: messages after the first difference, plus the small fields.
+          // A heartbeat with nothing new sends nothing, so the phone never re-draws for no reason.
+          const patch = sessionPatch(old, next);
+          if (patch === undefined) publish("session", publicSession(next));
+          else if (patch) publish("sessionPatch", patch);
+          if (!old || patch !== null) publish("sessions", summary());
           return send(res, 200, { ok: true });
         }
         if (req.method === "DELETE" && !agentMatch[2]) { drop(id); return send(res, 200, { ok: true }); }

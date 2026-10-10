@@ -304,3 +304,24 @@ test("a failed tool is not shown in red", async t => {
   const html = await page.content();
   assert.doesNotMatch(html, /#d8433e/i, "no red for failed tools");
 });
+
+test("smooth updates: a heartbeat with nothing new re-draws nothing; a new message keeps the old ones in place", async t => {
+  const { page } = await setup(t);
+  const base = page.url().split("#")[0], auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const messages = Array.from({ length: 40 }, (_, i) => ({ id: "m" + i, role: i % 2 ? "assistant" : "user", text: `Message ${i + 1} ` + "words ".repeat(30) }));
+  const put = list => fetch(`${base}agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "Writing", cwd: "/tmp", busy: false, messages: list }) });
+  await put(messages); await page.getByText("Message 40").waitFor(); await page.waitForTimeout(300);
+  await page.evaluate(() => { window.firstNode = document.querySelector('#messages [data-key]'); });
+  await put(messages); await page.waitForTimeout(300);
+  await put([...messages, { id: "m40", role: "assistant", text: "Fresh reply" }]);
+  await page.getByText("Fresh reply").waitFor();
+  assert.equal(await page.evaluate(() => window.firstNode === document.querySelector('#messages [data-key]')), true, "the first message is the same DOM node, not re-created");
+});
+
+test("reopening the page shows the last conversation at once, before the Mac answers", async t => {
+  const { page } = await setup(t);
+  await page.waitForTimeout(1300); // cache is saved after a short pause
+  await page.route("**/api/**", route => new Promise(() => {})); // the Mac is slow or reconnecting
+  await page.reload();
+  await page.getByText("Message 40").waitFor({ timeout: 2000 });
+});

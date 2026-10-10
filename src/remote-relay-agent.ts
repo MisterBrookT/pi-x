@@ -86,7 +86,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         let end: number;
         while ((end = buffer.indexOf("\n\n")) >= 0) {
           const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-          const type = block.match(/^event: (sessions|session|stream|foryou)$/m)?.[1];
+          const type = block.match(/^event: (sessions|session|sessionPatch|stream|foryou)$/m)?.[1];
           const data = block.match(/^data: (.+)$/m)?.[1];
           if (type && data) { try { send({ kind: "event", event: type, data: JSON.parse(data) }); } catch {} }
         }

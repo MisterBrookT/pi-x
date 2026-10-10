@@ -38,7 +38,7 @@ export interface AutoReloadOptions {
 /** Call tick() on each heartbeat and after the agent settles; it reloads at most once, when the change is stable and Pi is idle. */
 export function createAutoReload(options: AutoReloadOptions) {
   const checkMs = options.checkMs ?? 30_000;
-  const stableMs = options.stableMs ?? 10_000;
+  const stableMs = options.stableMs ?? 120_000;
   const loaded = options.version();
   let lastCheck = -Infinity;
   let candidate: string | undefined;
