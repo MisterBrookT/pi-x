@@ -100,8 +100,7 @@ test("routing: the main button goes to the coordinator; the loops tool can send 
 	assert.deepEqual(routeFor(it, live, "s1", undefined, home), { session: "s1", name: "newsdecision", cwd: "/Users/b/work/nd", coordinator: false });
 	assert.deepEqual(routeFor(it, live, "new", undefined, home), { session: "loop-a", name: "Loop a", cwd: "/Users/b/work/nd", coordinator: false });
 	assert.equal(routeFor(it, live, "new", "~/other", home).cwd, "/Users/b/other");
-	// Regression: "new" with no project used to fall back into the coordinator, so it queued behind other taps.
-	assert.deepEqual(routeFor(loop("x"), live, "new", undefined, home), { session: "loop-x", name: "Loop x", cwd: home, coordinator: false }, "new with no folder: its own session at home");
+	assert.equal(routeFor(loop("x"), live, "new", undefined, home).coordinator, true, "new with no folder stays with the coordinator");
 	const owned = loop("b", { status: "onit", session: "my-sess", sessionCwd: "/Users/b/x" });
 	assert.equal(routeFor(owned, [], "my-sess", undefined, home).cwd, "/Users/b/x", "a closed session is resumed in its folder");
 
@@ -109,7 +108,7 @@ test("routing: the main button goes to the coordinator; the loops tool can send 
 	const launched = [];
 	await actItem("e", { dir, launch: async (...a) => { launched.push(a); }, mode: "relay" });
 	assert.equal(launched[0][2].sessionId, "pix-foryou"); assert.equal(launched[0][2].model, "openai-codex/gpt-6.1-sol");
-	assert.match(launched[0][2].prompt, /brook tapped "Start test" on loop e[\s\S]*Only dispatch[\s\S]*loops tool/);
+	assert.match(launched[0][2].prompt, /brook tapped "Start test" on loop e[\s\S]*Decide where this is best done[\s\S]*loops tool/);
 	const sent = [];
 	await actItem("e", { dir, into: "new", send: (s, t) => (sent.push([s, t]), false), launch: async (...a) => { launched.push(a); } });
 	assert.equal(launched[1][0], "/tmp"); assert.equal(launched[1][2].sessionId, "loop-e"); assert.equal(launched[1][2].model, undefined);
@@ -208,10 +207,4 @@ test("work sessions are told how to move a loop on (next) or leave a note", asyn
 	const p = actPrompt(loop("z"), "/tmp/x");
 	assert.match(p, /PIX_PROACTIVE_DIR=\/tmp\/x node .*proactive-daemon\.ts note z "/);
 	assert.match(p, /proactive-daemon\.ts next z "<1-3 word outcome button/);
-});
-
-test("coordinator only dispatches, so taps never queue behind loop work", async () => {
-	const { coordinatorTask, coordinatorContext } = await import("../src/proactive-store.ts");
-	assert.match(coordinatorTask(loop("q")), /Only dispatch[\s\S]*do not read the originals or do the work here[\s\S]*loops tool/);
-	assert.match(coordinatorContext(inbox(loop("q")), [], new Date()), /never do loop work here/);
 });

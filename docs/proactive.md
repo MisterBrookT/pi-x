@@ -137,11 +137,12 @@ Quiet rows (Pi is on it, later) show, on hover in the pill or always on the phon
 
 ## The coordinator
 
-Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6.1-sol`). It is the coordinator: it decides where each loop is best done, then hands it off in seconds. It never does loop work itself, so taps never queue behind each other and many loops run in parallel, one session each. There are no routing rules.
+Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6.1-sol`). It is the coordinator: it decides how each loop is best done. There are no routing rules.
 
 ```mermaid
 flowchart LR
   T[Main button<br/>phone or pill] --> C["For you<br/>(coordinator)"]
+  C -- small: does it here --> C
   C -- "loops handoff" --> W1[A session already open<br/>or already on this loop]
   C -- "loops handoff new" --> W2[New session<br/>in the project folder]
   W1 & W2 -- "note" --> L[(Loop brief)]
