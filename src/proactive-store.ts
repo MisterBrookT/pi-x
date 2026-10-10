@@ -124,7 +124,7 @@ export function noteItem(id: string, text: string, dir?: string): boolean {
 	return true;
 }
 
-/** The coordinator: one Pi session that sees every loop, does small ones itself, and hands big ones to work sessions. */
+/** The coordinator: one Pi session that sees every loop and dispatches each tap to a work session; it does no loop work itself, so taps never queue behind one another. */
 export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6.1-sol" };
 
 /** Where the coordinator runs: home, so it can reach every project by path. */
@@ -143,10 +143,8 @@ const shortName = (it: Item) => (it.title.length > 28 ? `${it.title.slice(0, 27)
 export function routeFor(it: Item, live: LiveSession[], into?: string, cwd?: string, home = homedir()) {
 	const here = { session: forYouSession.id, name: forYouSession.name, cwd: forYouFolder(home), coordinator: true };
 	if (!into || into === forYouSession.id) return here;
-	if (into === "new") {
-		const dir = cwd ?? it.project;
-		return dir ? { session: `loop-${it.id}`, name: shortName(it), cwd: expandHome(dir, home), coordinator: false } : here;
-	}
+	// A new session goes in the loop's project, or home when it has none (never back into the coordinator).
+	if (into === "new") return { session: `loop-${it.id}`, name: shortName(it), cwd: expandHome(cwd ?? it.project ?? home, home), coordinator: false };
 	const s = live.find(x => x.id === into);
 	return { session: into, name: s?.name ?? shortName(it), cwd: s?.cwd ?? (cwd ? expandHome(cwd, home) : it.session === into && it.sessionCwd ? it.sessionCwd : it.project ? expandHome(it.project, home) : forYouFolder(home)), coordinator: false };
 }
@@ -177,7 +175,7 @@ export const coordinatorTask = (it: Item, dir?: string) => `brook tapped "${it.b
 
 ${actPrompt({ ...it, session: undefined }, paths(dir).dir)}
 
-Decide where this is best done: here, in a session already open or already on this loop, or a new session in the project. Use the loops tool to hand it off.`;
+Only dispatch, within a few seconds: do not read the originals or do the work here, or the next tap waits behind you. Hand it off with the loops tool: to the session already on this loop, a session already open in the project, or "new" (in the project folder, or home if there is none). Then reply in one line.`;
 
 /**
  * What the coordinator ("For you" session) knows at the start of each turn, rebuilt from files,
@@ -196,7 +194,8 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 	].filter(Boolean).join("\n");
 	return `## Proactive coordinator
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
-use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
+use the loops tool to act on loops. Where each one is done is your call, but you dispatch and never do loop work here:
+one tap is one quick handoff, so many loops run in parallel. Nothing outbound without his confirmation.
 Only change a loop (drop, later, handoff) when brook asks or a loop was just tapped; a question is not a request to act.
 
 ### Memory
