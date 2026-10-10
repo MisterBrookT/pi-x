@@ -129,11 +129,12 @@ projects, decisions, and what he cares about or ignores. Open loops (promises, w
 - learn from his reactions: if he keeps dismissing a kind of loop, add a line saying he does not care about it
 Most of the time, change nothing.
 
-"button" is 1-3 words naming the step an agent can prepare (e.g. "Draft reply", "Start test", "Check backtest").
+"button" is 1-3 words: the outcome ${o.me} wants, as a verb, in the language of the loop. Name the result, not the preparation;
+never start with "Draft" or "Prepare". Good: "Reply to 杨奕辉", "Send wallet address", "Start Databento test", "Check backtest", "Ask 黄恩浩".
 "due" is YYYY-MM-DD when there is a deadline, else omit.
 "project" is the folder of the project this loop belongs to, taken from memory (e.g. "~/workspace/minara/newsdecision"); omit if none is clear.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "Draft reply", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -231,7 +232,7 @@ export function addNote(old: string | undefined, text: string, now = new Date())
 }
 
 /** The task a session gets for a loop: the loop, its brief so far, and how to leave progress behind. */
-export function actPrompt(it: Item): string {
+export function actPrompt(it: Item, dir = PROACTIVE_DIR): string {
 	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive loop from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
 
 **${it.title}**
@@ -242,5 +243,5 @@ ${it.note ? `\nProgress so far (the loop's brief):\n${it.note}\n` : ""}
 Read the referenced items and any project files you need, then prepare this next step.
 Draft anything outbound and show it to me first; do not send without my confirmation.
 When you stop, leave one short line of progress on the loop, so whoever picks it up next knows where it stands:
-node ${daemonScript} note ${it.id} "<what is done, what is next>"`;
+${dir === join(homedir(), ".pix", "proactive") ? "" : `PIX_PROACTIVE_DIR=${dir} `}node ${daemonScript} note ${it.id} "<what is done, what is next>"`;
 }

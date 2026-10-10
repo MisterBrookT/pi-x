@@ -116,7 +116,8 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 	if (!before) return undefined;
 	const route = routeFor(before, options.live ?? [], options.into, options.cwd, options.home);
 	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
-	const prompt = route.coordinator ? coordinatorTask(before) : actPrompt(it);
+	// "Picked up again" only when this same session already had the loop.
+	const prompt = route.coordinator ? coordinatorTask(before, options.dir) : actPrompt(before.session === route.session ? it : { ...it, session: undefined }, paths(options.dir).dir);
 	if (options.send?.(route.session, prompt)) {
 		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
 		return it;
@@ -127,9 +128,9 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 }
 
 /** What the coordinator gets when brook taps a loop: the loop, and the choice is its own. */
-export const coordinatorTask = (it: Item) => `brook tapped "${it.button || "Do it"}" on loop ${it.id}.
+export const coordinatorTask = (it: Item, dir?: string) => `brook tapped "${it.button || "Do it"}" on loop ${it.id}.
 
-${actPrompt({ ...it, session: undefined })}
+${actPrompt({ ...it, session: undefined }, paths(dir).dir)}
 
 Decide where this is best done: here, in a session already open or already on this loop, or a new session in the project. Use the loops tool to hand it off.`;
 

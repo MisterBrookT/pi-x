@@ -27,8 +27,9 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 	try {
 		const token = readFileSync(remoteTokenPath, "utf8").trim();
 		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/foryou/${encodeURIComponent(id)}/act`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ into, ...(cwd ? { cwd } : {}) }), signal: AbortSignal.timeout(5000) });
-		return res.ok;
+		if (res.ok) return true;
 	} catch { /* no hub */ }
+	// No hub, or the hub keeps another list (tests, PIX_PROACTIVE_DIR): act directly.
 	return !!(await actItem(id, { into, cwd }));
 }
 

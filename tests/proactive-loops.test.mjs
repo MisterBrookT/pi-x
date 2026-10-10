@@ -151,3 +151,14 @@ test("judge: a loop can carry a project folder; bad paths are dropped; the judge
 	assert.match(p, /progress: - d: two/);
 	assert.match(p, /"project" is the folder/);
 });
+
+test("regression: a first handoff does not claim the loop was 'picked up again'", async () => {
+	const { actItem } = await import("../src/proactive-store.ts");
+	const dir = inbox(loop("f", { project: "/tmp" }));
+	const prompts = [];
+	await actItem("f", { dir, into: "new", launch: async (_d, _m, o) => { prompts.push(o.prompt); } });
+	await actItem("f", { dir, into: "loop-f", launch: async (_d, _m, o) => { prompts.push(o.prompt); } });
+	assert.doesNotMatch(prompts[0], /Picked up again/);
+	assert.match(prompts[1], /Picked up again; earlier work is in Pi session loop-f/);
+	assert.match(prompts[0], new RegExp(`PIX_PROACTIVE_DIR=${dir} node .*note f "`), "a non-default list travels with the note command");
+});
