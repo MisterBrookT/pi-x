@@ -56,14 +56,14 @@ async function tick(cfg: Config) {
 				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
-			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], cfg.me, items.filter(i => isOpen(i) && i.sourceKey === key).length);
+			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (last) state[key] = last; continue; }
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.
 			const pending = items.filter(isOpen).slice(-20);
 			const feedback = items.filter(i => !isOpen(i)).slice(-10);
 			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
-			const raw = await ask(judgePrompt({ me: cfg.me, memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
+			const raw = await ask(judgePrompt({ me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
 			const v = parseVerdict(raw);
 			if (v && (v.memory.add.length || v.memory.remove.length) && !dry) {
 				const r = applyMemory(memory, v.memory);
