@@ -82,30 +82,35 @@ func quietLabel(_ q: Alert) -> String {
     return q.status == "waiting" ? (back.isEmpty ? "waiting" : "waiting · \(back)") : back
 }
 
-/// One quiet loop: a single grey line; hovering expands it to the full title and why.
+/// One quiet loop on one line. Hover swaps its label for Done / Open|Now on the same line (the height must
+/// not change on hover: the panel grows upward, so a taller row slides out from under the mouse and flickers).
+/// Click the row to show the full title and why.
 struct QuietRow: View {
     let q: Alert
     let m: Model
     @State var hover = false
+    @State var expanded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: q.status == "onit" ? "play.circle" : "clock").font(.system(size: 10)).padding(.top, 2)
-                Text(q.title).font(.system(size: 11)).lineLimit(hover ? nil : 1).fixedSize(horizontal: false, vertical: hover)
+                Text(q.title).font(.system(size: 11)).lineLimit(expanded ? nil : 1).fixedSize(horizontal: false, vertical: expanded)
                 Spacer(minLength: 4)
-                Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1)
+                ZStack(alignment: .trailing) {
+                    Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1).opacity(hover ? 0 : 1)
+                    HStack(spacing: 10) {
+                        Button { m.done(q) } label: { Image(systemName: "checkmark") }.help("Done: I handled it")
+                        if q.status == "onit" { Button("Open") { m.show(q) } } else { Button("Now") { m.now(q) } }
+                    }.buttonStyle(.borderless).font(.system(size: 11)).opacity(hover ? 1 : 0).allowsHitTesting(hover)
+                }
             }
-            if hover {
-                if !q.why.isEmpty { Text(q.why).font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.leading, 16) }
-                HStack(spacing: 10) {
-                    Spacer()
-                    Button { m.done(q) } label: { Label("Done", systemImage: "checkmark") }
-                    if q.status == "onit" { Button("Open") { m.show(q) } } else { Button("Now") { m.now(q) } }
-                }.buttonStyle(.borderless).font(.system(size: 11))
+            if expanded && !q.why.isEmpty {
+                Text(q.why).font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.leading, 16)
             }
         }
         .foregroundStyle(.secondary).contentShape(Rectangle())
         .onHover { h in hover = h }
+        .onTapGesture { expanded.toggle() }
     }
 }
 
