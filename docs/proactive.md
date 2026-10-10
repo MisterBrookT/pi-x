@@ -124,7 +124,7 @@ Over `maxPerHour`, new items still enter the list, marked quiet: no push, never 
 
 ## The coordinator
 
-Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6-luna`). It is the coordinator: it decides how each loop is best done. There are no routing rules.
+Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6.1-sol`). It is the coordinator: it decides how each loop is best done. There are no routing rules.
 
 ```mermaid
 flowchart LR

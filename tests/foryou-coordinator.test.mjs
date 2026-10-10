@@ -51,3 +51,12 @@ test("coordinator: loops tool and context only in the For you session", async ()
 	const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
 	assert.equal(it.status, "dismissed"); assert.match(it.note, /signed up/);
 });
+
+test("regression: coordinator context says a question is not a request to change loops", async () => {
+	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const dir = mkdtempSync(tmpdir() + "/fy-");
+	writeFileSync(dir + "/inbox.jsonl", "");
+	assert.match(coordinatorContext(dir, [], new Date()), /a question is not a request to act/);
+});

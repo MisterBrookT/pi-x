@@ -107,7 +107,7 @@ test("routing: the main button goes to the coordinator; the loops tool can send 
 	const dir = inbox(loop("e", { project: "/tmp", button: "Start test" }));
 	const launched = [];
 	await actItem("e", { dir, launch: async (...a) => { launched.push(a); }, mode: "relay" });
-	assert.equal(launched[0][2].sessionId, "pix-foryou"); assert.equal(launched[0][2].model, "openai-codex/gpt-6-luna");
+	assert.equal(launched[0][2].sessionId, "pix-foryou"); assert.equal(launched[0][2].model, "openai-codex/gpt-6.1-sol");
 	assert.match(launched[0][2].prompt, /brook tapped "Start test" on loop e[\s\S]*Decide where this is best done[\s\S]*loops tool/);
 	const sent = [];
 	await actItem("e", { dir, into: "new", send: (s, t) => (sent.push([s, t]), false), launch: async (...a) => { launched.push(a); } });

@@ -30,7 +30,7 @@ test("store: ✕ and the main button both leave needs-you; a loop without a proj
   assert.equal(it.id, "a");
   assert.equal(calls[0][1], "relay");
   assert.equal(calls[0][2].sessionId, "pix-foryou", "no project: the coordinator takes it");
-  assert.equal(calls[0][2].model, "openai-codex/gpt-6-luna");
+  assert.equal(calls[0][2].model, "openai-codex/gpt-6.1-sol");
   assert.match(calls[0][2].prompt, /Title a[\s\S]*do not send without my confirmation/);
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"a","status":"onit","session":"pix-foryou"/, "item remembers its session");
   assert.deepEqual(readPending(dir), []);

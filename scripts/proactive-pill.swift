@@ -78,6 +78,27 @@ func quietLabel(_ q: Alert) -> String {
     return q.status == "waiting" ? (back.isEmpty ? "waiting" : "waiting · \(back)") : back
 }
 
+/// One quiet loop: a single grey line; hovering expands it to the full title and why.
+struct QuietRow: View {
+    let q: Alert
+    @State var hover = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: q.status == "onit" ? "play.circle" : "clock").font(.system(size: 10)).padding(.top, 2)
+                Text(q.title).font(.system(size: 11)).lineLimit(hover ? nil : 1).fixedSize(horizontal: false, vertical: hover)
+                Spacer(minLength: 4)
+                Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1)
+            }
+            if hover && !q.why.isEmpty {
+                Text(q.why).font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.leading, 16)
+            }
+        }
+        .foregroundStyle(.secondary).contentShape(Rectangle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
+    }
+}
+
 struct Pill: View {
     @ObservedObject var m: Model
     var body: some View {
@@ -101,14 +122,7 @@ struct Pill: View {
                     }
                     if !m.quiet.isEmpty {
                         if !m.alerts.isEmpty { Divider() }
-                        ForEach(m.quiet) { q in
-                            HStack(spacing: 6) {
-                                Image(systemName: q.status == "onit" ? "play.circle" : "clock").font(.system(size: 10))
-                                Text(q.title).font(.system(size: 11)).lineLimit(1)
-                                Spacer(minLength: 4)
-                                Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1)
-                            }.foregroundStyle(.secondary).help(q.why)
-                        }
+                        ForEach(m.quiet) { q in QuietRow(q: q) }
                     }
                 }
                 .padding(12).frame(width: 320)

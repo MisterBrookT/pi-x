@@ -80,7 +80,7 @@ export function noteItem(id: string, text: string, dir?: string): boolean {
 }
 
 /** The coordinator: one Pi session that sees every loop, does small ones itself, and hands big ones to work sessions. */
-export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6-luna" };
+export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6.1-sol" };
 
 /** Where the coordinator runs: home, so it can reach every project by path. */
 export const forYouFolder = (home = homedir()) => home;
@@ -152,6 +152,7 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 	return `## Proactive coordinator
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
 use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
+Only change a loop (drop, later, handoff) when brook asks or a loop was just tapped; a question is not a request to act.
 
 ### Memory
 ${memory}
