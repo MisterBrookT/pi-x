@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Msg, Source } from "./proactive.ts";
+import { fetchGmailImap } from "./imap.ts";
 
 const run = promisify(execFile);
 
@@ -134,18 +135,27 @@ async function gmailToken(): Promise<string> {
 	return r.access_token;
 }
 
-/** Gmail inbox (read-only). Options: query (default: recent primary/updates inbox mail). */
+/** App password from macOS Keychain (service pix-gmail). Never expires like OAuth testing tokens do. */
+async function keychainPassword(account: string): Promise<string | undefined> {
+	try { return (await run("security", ["find-generic-password", "-s", "pix-gmail", "-a", account, "-w"], { timeout: 10_000 })).stdout.trim(); } catch { return undefined; }
+}
+
+/** Gmail inbox, read-only. Prefers IMAP + app password (Keychain); falls back to the Gmail MCP OAuth token.
+ * Options: account (Gmail address), query (Gmail search; default: recent inbox, no promotions/social). */
 const gmail: Adapter = {
 	async fetch(src) {
+		const q = String(src.query ?? "in:inbox newer_than:3d -category:promotions -category:social");
+		const account = String(src.account ?? "yinghaotang2001@gmail.com");
+		const pass = await keychainPassword(account);
+		if (pass) return fetchGmailImap({ user: account, pass, query: q, max: 20, proxy: proxy || undefined });
 		const token = await gmailToken();
 		const auth = ["-H", `Authorization: Bearer ${token}`];
-		const q = String(src.query ?? "in:inbox newer_than:3d -category:promotions -category:social");
 		const base = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
 		const list = await curl([...auth, `${base}?maxResults=20&q=${encodeURIComponent(q)}`]);
 		const full = await Promise.all((list.messages ?? []).map((m: any) => curl([...auth, `${base}/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`])));
 		return parseGmail(full);
 	},
-	howToRead: (_src, refs) => `Gmail message ids: ${refs.join(", ") || "n/a"}. Read with the gmail MCP tool read_email (load via tool_search "gmail").`,
+	howToRead: (src, refs) => `Gmail ${String(src.account ?? "yinghaotang2001@gmail.com")}, item ids ${refs.join(", ") || "n/a"} (IMAP UIDs in INBOX if numeric, else Gmail API ids). Easiest: search with the gmail MCP tool search_emails using the subject, then read_email.`,
 };
 
 export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command };
