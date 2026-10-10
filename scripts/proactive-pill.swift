@@ -95,7 +95,7 @@ struct QuietRow: View {
             }
         }
         .foregroundStyle(.secondary).contentShape(Rectangle())
-        .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
+        .onHover { h in hover = h }
     }
 }
 
@@ -151,21 +151,28 @@ final class App: NSObject, NSApplicationDelegate {
     let model = Model()
     func applicationDidFinishLaunching(_: Notification) {
         let host = NSHostingView(rootView: Pill(m: model))
+        // The panel follows the view's size itself (below); SwiftUI must not also resize the window,
+        // or the two fight inside one layout pass and AppKit aborts ("too many Update Constraints passes").
+        host.sizingOptions = [.intrinsicContentSize]
         panel = Panel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentView = host; panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.level = .floating; panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let place = { [weak self] in
             guard let self, let s = NSScreen.main else { return }
-            let size = host.fittingSize; let f = s.visibleFrame
+            let size = host.intrinsicContentSize; let f = s.visibleFrame
             // Anchor bottom-right; grow upward when expanded.
             let x = UserDefaults.standard.object(forKey: "pillRight") as? CGFloat ?? (f.maxX - 24)
             let y = UserDefaults.standard.object(forKey: "pillBottom") as? CGFloat ?? (f.minY + 24)
             self.panel.setFrame(NSRect(x: x - size.width, y: y, width: size.width, height: size.height), display: true)
         }
         place()
-        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: host, queue: .main) { _ in place() }
-        host.postsFrameChangedNotifications = true
+        // Follow the content's size from a timer, outside any layout pass, only when it really changed.
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let want = host.intrinsicContentSize
+            if abs(want.width - self.panel.frame.width) > 0.5 || abs(want.height - self.panel.frame.height) > 0.5 { place() }
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
             guard let f = self?.panel.frame else { return }
             UserDefaults.standard.set(f.maxX, forKey: "pillRight"); UserDefaults.standard.set(f.minY, forKey: "pillBottom")
