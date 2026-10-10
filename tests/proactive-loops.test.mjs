@@ -162,3 +162,49 @@ test("regression: a first handoff does not claim the loop was 'picked up again'"
 	assert.match(prompts[1], /Picked up again; earlier work is in Pi session loop-f/);
 	assert.match(prompts[0], new RegExp(`PIX_PROACTIVE_DIR=${dir} node .*note f "`), "a non-default list travels with the note command");
 });
+
+test("next: a finished step moves the loop on with the next button and brings it back to brook", async () => {
+	const { nextItem } = await import("../src/proactive-store.ts");
+	const dir = inbox(loop("db", { status: "onit", session: "loop-db", button: "Start Databento test", note: "- 2026-10-09: signed up" }));
+	assert.equal(nextItem("db", { button: "Send results to Amber", action: "Send Amber the test results", note: "Test done: latency 40ms" }, dir), true);
+	const [it] = readOpen(dir);
+	assert.equal(it.status, "pending"); assert.equal(it.button, "Send results to Amber"); assert.equal(it.action, "Send Amber the test results");
+	assert.match(it.note, /signed up\n- \d{4}-\d\d-\d\d: Test done: latency 40ms$/, "progress is kept");
+	assert.equal(it.session, "loop-db", "the same session can pick it up again");
+	assert.equal(needsYou(it, Date.now()), true);
+	assert.equal(nextItem("db", { button: "", action: "x" }, dir), false, "needs a button");
+	assert.equal(nextItem("nope", { button: "b", action: "x" }, dir), false);
+});
+
+test("done is not dismissed; now brings a parked loop back", async () => {
+	const { doneItem, nowItem } = await import("../src/proactive-store.ts");
+	const dir = inbox(loop("a"), loop("p", { status: "later", wakeAt: "2099-01-01T00:00:00Z" }));
+	assert.equal(doneItem("a", dir), true);
+	assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "a").status, "done");
+	assert.equal(doneItem("a", dir), false, "already closed");
+	assert.equal(nowItem("p", dir), true);
+	assert.deepEqual(readOpen(dir).filter(i => needsYou(i, Date.now())).map(i => i.id), ["p"]);
+	// The judge learns "done" as acted on, not as unwanted.
+	const p = judgePrompt({ me: "me", memory: "", now: "", source: { kind: "feishu", id: "x", name: "x" }, pending: [], context: [], fresh: [], feedback: [{ status: "done", title: "T" }] });
+	assert.match(p, /acted on: T/);
+});
+
+test("open: focuses the tab of the session on a loop, else resumes that session", async () => {
+	const { openItem } = await import("../src/proactive-store.ts");
+	const dir = inbox(loop("o", { status: "onit", session: "loop-o", sessionCwd: "/tmp/nd", title: "Test Databento" }), loop("f", { status: "onit", session: "pix-foryou" }), loop("n"));
+	const focused = [], launched = [];
+	assert.equal(await openItem("o", { dir, focusTab: async n => (focused.push(n), true), launch: async (...a) => launched.push(a) }), true);
+	assert.deepEqual(focused, ["Test Databento"]); assert.equal(launched.length, 0);
+	assert.equal(await openItem("o", { dir, mode: "relay", focusTab: async () => false, launch: async (...a) => launched.push(a) }), true);
+	assert.equal(launched[0][0], "/tmp/nd"); assert.equal(launched[0][2].sessionId, "loop-o"); assert.equal(launched[0][2].prompt, undefined, "no new task");
+	await openItem("f", { dir, mode: "relay", home: "/h", focusTab: async () => false, launch: async (...a) => launched.push(a) });
+	assert.equal(launched[1][0], "/h"); assert.equal(launched[1][2].name, "For you"); assert.equal(launched[1][2].model, "openai-codex/gpt-6.1-sol");
+	assert.equal(await openItem("n", { dir }), false, "no session yet");
+});
+
+test("work sessions are told how to move a loop on (next) or leave a note", async () => {
+	const { actPrompt } = await import("../src/proactive.ts");
+	const p = actPrompt(loop("z"), "/tmp/x");
+	assert.match(p, /PIX_PROACTIVE_DIR=\/tmp\/x node .*proactive-daemon\.ts note z "/);
+	assert.match(p, /proactive-daemon\.ts next z "<1-3 word outcome button/);
+});

@@ -60,3 +60,16 @@ test("regression: coordinator context says a question is not a request to change
 	writeFileSync(dir + "/inbox.jsonl", "");
 	assert.match(coordinatorContext(dir, [], new Date()), /a question is not a request to act/);
 });
+
+test("coordinator tool: next moves a loop on, done closes it as handled", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "pix-coord-"));
+	writeFileSync(join(dir, "inbox.jsonl"), ["a", "b"].map(id => JSON.stringify({ id, at: "2026-10-09T00:00:00Z", title: id, why: "w", action: "x", refs: [], source: "s", sourceKey: "f:a", howToRead: "", status: "onit" })).join("\n") + "\n");
+	const pi = fakePi();
+	register(pi, { dir, sessions: async () => [] });
+	const tool = pi.tools.get("loops");
+	const out = await tool.execute("1", { action: "next", id: "a", button: "Send results to Amber", step: "Send Amber the results", text: "test done" });
+	assert.match(out.content[0].text, /Moved a on/);
+	await tool.execute("2", { action: "done", id: "b" });
+	const items = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
+	assert.deepEqual(items.map(i => [i.id, i.status, i.button]), [["a", "pending", "Send results to Amber"], ["b", "done", undefined]]);
+});

@@ -8,6 +8,7 @@ import { chromium, devices } from "playwright";
 import { startRemoteHub } from "../src/remote-hub.ts";
 import { actItem, dismissItem, readPending } from "../src/proactive-store.ts";
 import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { parseInbox } from "../src/proactive.ts";
 
 const token = "foryou-token-1234567890";
 const item = (id, extra = {}) => ({ id, at: new Date().toISOString(), source: "Group", sourceKey: "feishu:c", title: `Title ${id}`, why: `Why ${id}`, action: "Draft a reply", refs: [], howToRead: "lark-cli ...", status: "pending", ...extra });
@@ -97,16 +98,16 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal((await main.textContent()).trim(), "Start test");
   assert.equal((await page.locator('[data-fy="a"] [data-fy-act="act"]').textContent()).trim(), "Do it", "no label: Do it");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
-  await page.locator('[data-fy="c"]').waitFor({ state: "detached" });
+  await page.locator('.fy[data-fy="c"]').waitFor({ state: "detached" });
   await page.getByText("You owe it · due").waitFor({ timeout: 8000 });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
 
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
-  await page.locator('[data-fy="b"]').waitFor({ state: "detached" });
+  await page.locator('.fy[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
   await page.locator('[data-fy="a"] [data-fy-act="act"]').click();
-  await page.locator('[data-fy="a"]').waitFor({ state: "detached" });
+  await page.locator('.fy[data-fy="a"]').waitFor({ state: "detached" });
   assert.deepEqual(acted, ["a"]);
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "Do it leaves the page to show the new session");
   assert.equal(await page.locator("#forYouDot").isHidden(), true, "no dot when nothing is pending");
@@ -114,6 +115,21 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("All clear").waitFor();
   assert.ok(await page.getByText("2 handled").isVisible(), "today's handled items stay visible");
   assert.ok(await page.getByText("Title c").isVisible(), "parked loops stay visible under Later");
+
+  // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
+  await page.locator('.fy[data-fy="d"] [data-fy-act="done"]').click();
+  await page.locator('.fy[data-fy="d"]').waitFor({ state: "detached" });
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
+
+  // Quiet rows act too: Now brings a parked loop back; ✓ Done closes one.
+  await page.locator('.fy-q[data-fy="c"] [data-fy-act="now"]').click();
+  await page.locator('.fy[data-fy="c"] [data-fy-act="act"]').waitFor({ timeout: 8000 });
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"pending","wakeAt":null/);
+  await page.locator('.fy[data-fy="c"] [data-fy-act="later"]').click();
+  await page.locator('.fy-q[data-fy="c"] [data-fy-act="done"]').click();
+  await page.getByText("Done by you").waitFor({ timeout: 8000 });
+  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "c").status, "done");
   assert.deepEqual(errors, []);
 });
 

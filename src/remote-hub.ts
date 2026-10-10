@@ -15,7 +15,7 @@ import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, 
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
-import { actItem, dismissItem, forYouView, laterItem } from "./proactive-store.ts";
+import { actItem, dismissItem, doneItem, forYouView, laterItem, nowItem } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -292,11 +292,11 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
-      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later)$/);
+      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
       if (req.method === "POST" && forYouMatch) {
         const input = await body(req).catch(() => ({})) as any;
         const [, id, verb] = forYouMatch;
-        if (verb === "dismiss" || verb === "later") { const ok = (verb === "later" ? laterItem : dismissItem)(id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
+        if (verb !== "act") { const ok = ({ later: laterItem, dismiss: dismissItem, done: doneItem, now: nowItem } as const)[verb as "later"](id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
         try {
           // Live For you session: queue the task into it, like a phone prompt. Otherwise actItem opens a tab.
           const sendLive = (sid: string, text: string) => {

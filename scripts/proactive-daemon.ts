@@ -5,6 +5,10 @@
 //        node scripts/proactive-daemon.ts act <id>      mark "on it", start a Pi session on the next step
 //        node scripts/proactive-daemon.ts later <id>    hide until near its due date (or tomorrow)
 //        node scripts/proactive-daemon.ts note <id> "<progress>"  add a line to the loop's brief
+//        node scripts/proactive-daemon.ts next <id> "<button>" "<next step>" ["<what is done>"]  step done; next one is brook's
+//        node scripts/proactive-daemon.ts done <id>     brook handled it himself
+//        node scripts/proactive-daemon.ts now <id>      bring a parked loop back now
+//        node scripts/proactive-daemon.ts open <id>     show the session that is on it
 //        node scripts/proactive-daemon.ts dismiss <id>  drop for good
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -14,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, dismissItem, laterItem, noteItem } from "../src/proactive-store.ts";
+import { actItem, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -111,6 +115,19 @@ const [verb, itemId] = process.argv.slice(2);
 if (verb === "note") {
 	const ok = noteItem(itemId, process.argv.slice(4).join(" "));
 	if (!ok) { console.error(`no loop ${itemId} (or empty note)`); process.exit(1); }
+	process.exit(0);
+}
+if (verb === "next") {
+	const [button = "", action = "", note] = process.argv.slice(4);
+	if (!nextItem(itemId, { button, action, note })) { console.error(`no open loop ${itemId} (or empty button/step)`); process.exit(1); }
+	process.exit(0);
+}
+if (verb === "done" || verb === "now") {
+	if (!(verb === "done" ? doneItem : nowItem)(itemId)) { console.error(`no open loop ${itemId}`); process.exit(1); }
+	process.exit(0);
+}
+if (verb === "open") {
+	if (!(await openItem(itemId))) { console.error(`no session for loop ${itemId}`); process.exit(1); }
 	process.exit(0);
 }
 if (verb === "act" || verb === "dismiss" || verb === "later") {

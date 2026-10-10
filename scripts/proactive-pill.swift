@@ -69,6 +69,10 @@ final class Model: ObservableObject {
     }
     func dismiss(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "dismiss", a.id]); refresh() }
     func later(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "later", a.id]); refresh() }
+    /// ✓: brook handled it himself. Now: bring a quiet loop back. Open: show the session that is on it.
+    func done(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "done", a.id]); refresh() }
+    func now(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "now", a.id]); refresh() }
+    func show(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "open", a.id]) }
 }
 
 /// "Pi is on it", "back Oct 15", "waiting": what a quiet loop is doing.
@@ -81,6 +85,7 @@ func quietLabel(_ q: Alert) -> String {
 /// One quiet loop: a single grey line; hovering expands it to the full title and why.
 struct QuietRow: View {
     let q: Alert
+    let m: Model
     @State var hover = false
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -90,8 +95,13 @@ struct QuietRow: View {
                 Spacer(minLength: 4)
                 Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1)
             }
-            if hover && !q.why.isEmpty {
-                Text(q.why).font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.leading, 16)
+            if hover {
+                if !q.why.isEmpty { Text(q.why).font(.system(size: 10)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true).padding(.leading, 16) }
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button { m.done(q) } label: { Label("Done", systemImage: "checkmark") }
+                    if q.status == "onit" { Button("Open") { m.show(q) } } else { Button("Now") { m.now(q) } }
+                }.buttonStyle(.borderless).font(.system(size: 11))
             }
         }
         .foregroundStyle(.secondary).contentShape(Rectangle())
@@ -114,7 +124,8 @@ struct Pill: View {
                                 Text(a.due.isEmpty ? a.source : "\(a.source) · due \(a.due)").font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1)
                                 Spacer()
                                 Button("Later") { m.later(a) }.buttonStyle(.borderless).font(.system(size: 12))
-                                Button { m.dismiss(a) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).font(.system(size: 11)).help("Drop")
+                                Button { m.done(a) } label: { Image(systemName: "checkmark") }.buttonStyle(.borderless).font(.system(size: 11)).help("Done: I handled it")
+                                Button { m.dismiss(a) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).font(.system(size: 11)).help("Drop: not worth tracking")
                                 Button(a.button.isEmpty ? "Do it" : a.button) { m.act(a) }.buttonStyle(.borderedProminent).controlSize(.small)
                             }
                         }
@@ -122,7 +133,7 @@ struct Pill: View {
                     }
                     if !m.quiet.isEmpty {
                         if !m.alerts.isEmpty { Divider() }
-                        ForEach(m.quiet) { q in QuietRow(q: q) }
+                        ForEach(m.quiet) { q in QuietRow(q: q, m: m) }
                     }
                 }
                 .padding(12).frame(width: 320)

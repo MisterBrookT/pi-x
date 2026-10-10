@@ -122,6 +122,19 @@ Your own messages count too, marked `(me)`: when you reply in a chat that has an
 
 Over `maxPerHour`, new items still enter the list, marked quiet: no push, never dropped.
 
+## Moving a loop on
+
+A loop's main button is always the next real step, and it changes as the work moves:
+
+| Who | How | Example |
+|---|---|---|
+| Work session | `proactive-daemon.ts next <id> "<button>" "<step>" ["<done>"]` when its step is finished | Test done -> **Send results to Amber**, back in "needs you" |
+| Coordinator | `loops` tool, action `next` | same |
+| Judge | an `update` with the next `button`/`action` when the chat shows progress | "测完了，晚点发你" -> **Send results** |
+
+Buttons on a card: main button, Later, **✓ Done** (brook handled it himself; the judge reads it as "acted on"), ✕ (not worth tracking).
+Quiet rows (Pi is on it, later) show, on hover in the pill or always on the phone: **✓ Done**, and **Open** (focus or resume the session on it) or **Now** (bring it back to "needs you").
+
 ## The coordinator
 
 Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6.1-sol`). It is the coordinator: it decides how each loop is best done. There are no routing rules.

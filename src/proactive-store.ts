@@ -50,6 +50,51 @@ export function dismissItem(id: string, dir?: string): boolean {
 	return true;
 }
 
+/** ✓ Done: brook handled it himself (unlike ✕, this is not "not worth tracking"). */
+export function doneItem(id: string, dir?: string): boolean {
+	if (!readAll(dir).some(i => i.id === id && isOpen(i))) return false;
+	write(dir, { id, status: "done" });
+	return true;
+}
+
+/** Now: bring a parked or "on it" loop back to "needs you" at once. */
+export function nowItem(id: string, dir?: string): boolean {
+	if (!readAll(dir).some(i => i.id === id && isOpen(i))) return false;
+	write(dir, { id, status: "pending", wakeAt: null });
+	return true;
+}
+
+/**
+ * A step is finished and the next one is brook's: the loop moves forward with a new button and action
+ * (e.g. after the Databento test, "Send results to Amber") and comes back to "needs you".
+ */
+export function nextItem(id: string, step: { button: string; action: string; note?: string }, dir?: string): boolean {
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	const button = step.button.replace(/\s+/g, " ").trim().slice(0, 40), action = step.action.replace(/\s+/g, " ").trim().slice(0, 200);
+	if (!it || !button || !action) return false;
+	write(dir, { id, status: "pending", wakeAt: null, button, action, note: addNote(it.note, step.note?.trim() || `Step done; next: ${action}`) });
+	return true;
+}
+
+/** The Otty tab name a loop's session runs under (what launchPi named it). */
+export const sessionTabName = (it: Item) => (it.session === forYouSession.id ? forYouSession.name : shortName(it));
+
+/**
+ * Open: show the session working on a loop. Focus its tab if one is open, else resume it in a new tab.
+ * Changes nothing on the loop. False when no session has the loop.
+ */
+export async function openItem(id: string, options: { dir?: string; focusTab?: (name: string) => Promise<boolean>; launch?: typeof launchPi; mode?: RemoteMode; home?: string } = {}): Promise<boolean> {
+	const it = readAll(options.dir).find(i => i.id === id && isOpen(i));
+	if (!it?.session) return false;
+	const name = sessionTabName(it);
+	if (await (options.focusTab ?? focusOttyTab)(name)) return true;
+	const coordinator = it.session === forYouSession.id;
+	const cwd = coordinator ? forYouFolder(options.home) : it.sessionCwd ?? (it.project ? expandHome(it.project, options.home) : forYouFolder(options.home));
+	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
+	await (options.launch ?? launchPi)(cwd, mode, { sessionId: it.session, name, model: coordinator ? forYouSession.model : undefined, focus: true });
+	return true;
+}
+
 /** Later: hide a loop until the day before it is due, or tomorrow morning. */
 export function laterItem(id: string, dir?: string, now = Date.now()): boolean {
 	const it = readAll(dir).find(i => i.id === id && isOpen(i));

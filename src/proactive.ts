@@ -119,6 +119,9 @@ Decide, in this order:
    Example: someone asked ${o.me} to test X; he replied "ok, by next week" -> update that loop:
    {"id": "...", "state": "later", "title": "Test X for Y", "due": "2026-10-16", "action": "...", "button": "Start test"}.
    A task card or mail about the same thing as an open loop is the same loop: update it.
+   When a step is finished and the loop moves on, give the next step's "button" and "action"
+   (e.g. the test is done -> "button": "Send results to Amber", "state": "needs").
+   If ${o.me} already did it himself, close it.
    state: "needs" = needs him now; "waiting" = he is waiting on someone else; "later" = he owes it, not due yet.
 2. Is a loop finished (done, answered, cancelled, no longer needed)? Put its id in "close".
 3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
@@ -233,6 +236,7 @@ export function addNote(old: string | undefined, text: string, now = new Date())
 
 /** The task a session gets for a loop: the loop, its brief so far, and how to leave progress behind. */
 export function actPrompt(it: Item, dir = PROACTIVE_DIR): string {
+	const cli = `${dir === join(homedir(), ".pix", "proactive") ? "" : `PIX_PROACTIVE_DIR=${dir} `}node ${daemonScript}`;
 	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive loop from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
 
 **${it.title}**
@@ -242,6 +246,8 @@ Original items: ${it.howToRead}
 ${it.note ? `\nProgress so far (the loop's brief):\n${it.note}\n` : ""}
 Read the referenced items and any project files you need, then prepare this next step.
 Draft anything outbound and show it to me first; do not send without my confirmation.
-When you stop, leave one short line of progress on the loop, so whoever picks it up next knows where it stands:
-${dir === join(homedir(), ".pix", "proactive") ? "" : `PIX_PROACTIVE_DIR=${dir} `}node ${daemonScript} note ${it.id} "<what is done, what is next>"`;
+When you stop, record where the loop stands, so whoever picks it up next knows (one of these):
+- still in progress: ${cli} note ${it.id} "<what is done, what is next>"
+- this step is finished and the next step is brook's (e.g. after a test, sending the results):
+  ${cli} next ${it.id} "<1-3 word outcome button, e.g. Send results to Amber>" "<the next step>" "<what is done>"`;
 }
