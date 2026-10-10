@@ -24,3 +24,9 @@ test("parseFetch + toMsg: literal bodies become messages with sender name and su
 	const m = toMsg(r.uid, r.raw, r.date);
 	assert.deepEqual(m, { id: "42", time: "2026-10-10T09:07:27.000Z", sender: "HR Office", text: "Subject: Form due Friday\nPlease fill the form." });
 });
+
+test("regression: non-ASCII Gmail queries are sent as UTF-8 literals, ASCII stays quoted", async () => {
+	const { imapString } = await import("../src/imap.ts");
+	assert.equal(imapString('in:inbox "x"'), '"in:inbox \\"x\\""');
+	assert.equal(imapString("填写 form"), `{${Buffer.byteLength("填写 form")}+}\r\n填写 form`);
+});

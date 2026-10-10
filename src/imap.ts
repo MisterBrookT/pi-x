@@ -82,6 +82,11 @@ async function open(host: string, port: number, proxy?: string): Promise<TLSSock
 	return tlsConnect({ socket: raw, servername: host });
 }
 
+/** IMAP string: quoted when ASCII, else a non-synchronizing UTF-8 literal (LITERAL-), so Chinese queries work. */
+export function imapString(s: string): string {
+	return /^[\x20-\x7e]*$/.test(s) ? `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : `{${Buffer.byteLength(s)}+}\r\n${s}`;
+}
+
 export interface ImapOpts { user: string; pass: string; query: string; max?: number; proxy?: string; mailbox?: string; host?: string; timeoutMs?: number }
 
 /** Recent messages matching a Gmail search query, oldest first. Read-only. */
@@ -99,7 +104,7 @@ export async function fetchGmailImap(o: ImapOpts): Promise<Msg[]> {
 	});
 	const cmd = async (c: string) => {
 		const tag = `A${++n}`;
-		sock.write(`${tag} ${c}\r\n`);
+		sock.write(Buffer.from(`${tag} ${c}\r\n`, "utf8"));
 		const r = await wait(new RegExp(`(^|\\r\\n)${tag} (OK|NO|BAD)[^\\r\\n]*\\r\\n`));
 		const status = r.toString("latin1").match(new RegExp(`${tag} (OK|NO|BAD)([^\\r\\n]*)`))!;
 		if (status[1] !== "OK") throw new Error(`imap ${c.split(" ")[0]}: ${status[2].trim()}`);
@@ -107,10 +112,10 @@ export async function fetchGmailImap(o: ImapOpts): Promise<Msg[]> {
 	};
 	try {
 		await wait(/^\* OK[^\r\n]*\r\n/);
-		const q = (s: string) => `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+		const q = imapString;
 		await cmd(`LOGIN ${q(o.user)} ${q(o.pass)}`);
 		await cmd(`EXAMINE ${q(o.mailbox ?? "INBOX")}`);
-		const search = (await cmd(`UID SEARCH X-GM-RAW ${q(o.query)}`)).toString("latin1").match(/\* SEARCH([^\r\n]*)/)?.[1].trim();
+		const search = (await cmd(`UID SEARCH CHARSET UTF-8 X-GM-RAW ${q(o.query)}`)).toString("latin1").match(/\* SEARCH([^\r\n]*)/)?.[1].trim();
 		const uids = (search ? search.split(/\s+/) : []).slice(-(o.max ?? 20));
 		if (!uids.length) return [];
 		const res = await cmd(`UID FETCH ${uids.join(",")} (UID INTERNALDATE BODY.PEEK[]<0.20000>)`);
