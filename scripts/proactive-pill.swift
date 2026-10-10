@@ -12,9 +12,10 @@ let dir = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DIR"] ?? "\(home)/.
 let inbox = "\(dir)/inbox.jsonl"
 let daemon = ProcessInfo.processInfo.environment["PIX_PROACTIVE_DAEMON"] ?? "\(home)/workspace/tools/pix/scripts/proactive-daemon.ts"
 
-struct Alert: Identifiable { let id, title, why, source, at, button, due: String }
+struct Alert: Identifiable { let id, title, why, source, at, button, due, status, wakeAt: String }
 
-func loadPending() -> [Alert] {
+/// Every open loop, newest first. `needsYou` splits them into the actionable list and the quiet rest.
+func loadOpen() -> [Alert] {
     guard let text = try? String(contentsOfFile: inbox, encoding: .utf8) else { return [] }
     var merged: [String: [String: Any]] = [:]; var order: [String] = []
     for line in text.split(separator: "\n") {
@@ -28,8 +29,8 @@ func loadPending() -> [Alert] {
         let status = o["status"] as? String ?? ""
         let open = ["pending", "onit", "later", "waiting"].contains(status)
         let woke = (o["wakeAt"] as? String).flatMap { ISO8601DateFormatter.lenient($0) }.map { $0 <= Date() } ?? false
-        guard status == "pending" || (open && woke) else { return nil }
-        return Alert(id: id, title: o["title"] as? String ?? "", why: o["why"] as? String ?? "", source: o["source"] as? String ?? "", at: o["at"] as? String ?? "", button: o["button"] as? String ?? "", due: o["due"] as? String ?? "")
+        guard open else { return nil }
+        return Alert(id: id, title: o["title"] as? String ?? "", why: o["why"] as? String ?? "", source: o["source"] as? String ?? "", at: o["at"] as? String ?? "", button: o["button"] as? String ?? "", due: o["due"] as? String ?? "", status: status == "pending" || woke ? "pending" : status, wakeAt: o["wakeAt"] as? String ?? "")
     }.reversed()
 }
 
@@ -48,10 +49,19 @@ func sh(_ args: [String]) {
 
 final class Model: ObservableObject {
     @Published var alerts: [Alert] = []
+    /// Open loops that do not need brook now (Pi is on it, later, waiting): shown small, below.
+    @Published var quiet: [Alert] = []
     @Published var open = false
     var timer: Timer?
     init() { refresh(); timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() } }
-    func refresh() { let a = loadPending(); let key = { (x: [Alert]) in x.map { "\($0.id)|\($0.title)|\($0.button)|\($0.due)" } }; if key(a) != key(alerts) { alerts = a; if a.isEmpty { open = false } } }
+    func refresh() {
+        let all = loadOpen()
+        let a = all.filter { $0.status == "pending" }, q = all.filter { $0.status != "pending" }
+        let key = { (x: [Alert]) in x.map { "\($0.id)|\($0.title)|\($0.button)|\($0.due)|\($0.status)" } }
+        if key(a) != key(alerts) { alerts = a }
+        if key(q) != key(quiet) { quiet = q }
+        if a.isEmpty && q.isEmpty { open = false }
+    }
     func act(_ a: Alert) {
         // Same path as the phone: the daemon's `act` verb starts a normal Pi session with remote on.
         sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "act", a.id, "--focus"])
@@ -61,12 +71,20 @@ final class Model: ObservableObject {
     func later(_ a: Alert) { sh(["env", "PIX_PROACTIVE_DIR=\(dir)", "node", daemon, "later", a.id]); refresh() }
 }
 
+/// "Pi is on it", "back Oct 15", "waiting": what a quiet loop is doing.
+func quietLabel(_ q: Alert) -> String {
+    if q.status == "onit" { return "Pi is on it" }
+    let back = ISO8601DateFormatter.lenient(q.wakeAt).map { d -> String in let f = DateFormatter(); f.dateFormat = "MMM d"; return "back \(f.string(from: d))" } ?? ""
+    return q.status == "waiting" ? (back.isEmpty ? "waiting" : "waiting · \(back)") : back
+}
+
 struct Pill: View {
     @ObservedObject var m: Model
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
-            if m.open && !m.alerts.isEmpty {
+            if m.open && !(m.alerts.isEmpty && m.quiet.isEmpty) {
                 VStack(alignment: .leading, spacing: 10) {
+                    if m.alerts.isEmpty { Text("Nothing needs you").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary) }
                     ForEach(m.alerts) { a in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(a.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
@@ -81,11 +99,22 @@ struct Pill: View {
                         }
                         if a.id != m.alerts.last?.id { Divider() }
                     }
+                    if !m.quiet.isEmpty {
+                        if !m.alerts.isEmpty { Divider() }
+                        ForEach(m.quiet) { q in
+                            HStack(spacing: 6) {
+                                Image(systemName: q.status == "onit" ? "play.circle" : "clock").font(.system(size: 10))
+                                Text(q.title).font(.system(size: 11)).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text(quietLabel(q)).font(.system(size: 10)).lineLimit(1)
+                            }.foregroundStyle(.secondary).help(q.why)
+                        }
+                    }
                 }
                 .padding(12).frame(width: 320)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             }
-            Button { if !m.alerts.isEmpty { m.open.toggle() } } label: {
+            Button { if !(m.alerts.isEmpty && m.quiet.isEmpty) { m.open.toggle() } } label: {
                 HStack(spacing: 6) {
                     Image(systemName: m.alerts.isEmpty ? "bell" : "bell.badge.fill")
                         .symbolRenderingMode(.palette).foregroundStyle(m.alerts.isEmpty ? .secondary : Color.orange, .primary)

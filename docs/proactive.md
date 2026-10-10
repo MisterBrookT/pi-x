@@ -55,7 +55,7 @@ flowchart TB
 | Sources | `src/proactive-sources.ts` | One adapter per channel |
 | Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act`, `later`, `dismiss`, `note` verbs |
 | Coordinator | `extensions/foryou.ts` | In the For you session only: the map of open loops and the `loops` tool |
-| Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the count; click to see items |
+| Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the needs-you count; click to see those, plus quiet lines for loops Pi is on or that come back later |
 | List + Do it | `src/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
 | iPhone view | Pix Remote "For you" page (opened from the menu, or by tapping the push) | Same list, same buttons, a push for each new item |
 
