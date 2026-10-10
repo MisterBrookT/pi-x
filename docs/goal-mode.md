@@ -53,9 +53,9 @@ opt-in, for substantial verifiable multi-step tasks you request, but not for qui
 - The goal starts **inside the current tool turn**: the goal reminder is steered
   into the next request, and no extra wake message or turn is sent. The usual
   `agent_settled` continuation applies afterward.
-- It never replaces an active, paused, or blocked goal, and never resumes one;
-  only `/goal resume`, `/goal clear`, or a new `/goal` can. Starting is allowed only with no
-  goal or a completed one.
+- It manages the goal itself: `status: "active"` without an objective resumes a
+  paused or blocked goal; with a new objective it replaces the current one (the old
+  one stays in session history). See [goal-todo-background.md](goal-todo-background.md).
 - It requires a persistent TUI or RPC session, and an explicit `/tool goal off`
   blocks discovery, the start, and every other goal call.
 

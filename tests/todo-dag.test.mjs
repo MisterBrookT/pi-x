@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import { SessionManager, Theme } from "@earendil-works/pi-coding-agent";
+import { SessionManager, Theme, createEventBus } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import registerTodo, { TODO_STALE_CALLS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
 
@@ -17,7 +17,9 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
     { accent: "#00ffff", text: "#ffffff", muted: "#888888", success: "#00ff00", error: "#ff0000", toolTitle: "#00ffff", thinkingXhigh: "#ffffff" },
     { selectedBg: "#000000" }, "truecolor",
   );
+  const events = createEventBus();
   const pi = {
+    events,
     on(event, handler) { handlers.set(event, handler); },
     registerTool(value) { tool = value; },
     registerCommand(name, value) { assert.equal(name, "todo"); command = value; },
@@ -46,7 +48,7 @@ const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
     return result;
   };
   return {
-    call, tool, theme, sessionManager, notifications,
+    call, tool, theme, sessionManager, notifications, events,
     event: (name, payload = {}) => handlers.get(name)?.(payload, ctx),
     reminders: () => sessionManager.getBranch().filter(entry => entry.type === "custom_message" && entry.customType === "pix-todo-state"),
     command: (args) => command.handler(args, ctx),
@@ -545,4 +547,19 @@ test("an open plan left unchanged for many tool calls is re-shown every 20 tool 
   const done = h.reminders().length;
   for (let i = 0; i < TODO_STALE_CALLS * 2; i++) h.event("tool_execution_end", { toolName: "bash" });
   assert.equal(h.reminders().length, done, "a finished plan is not nagged");
+});
+
+test("a step linked to a background job is flagged for update when that job ends", async () => {
+  const h = createTodoHarness();
+  await h.call({ action: "replace", items: [{ text: "run eval", job: "3" }, { text: "write report" }] });
+  assert.match(h.reminders().at(-1).content, /#1 run eval \(waits on job 3\)/);
+  const base = h.reminders().length;
+  h.events.emit("pix:background-job-end", { id: "9", state: "completed" });
+  assert.equal(h.reminders().length, base, "an unrelated job changes nothing");
+  h.events.emit("pix:background-job-end", { id: "3", state: "failed" });
+  assert.match(h.reminders().at(-1).content, /Job 3 failed: update #1\./);
+  await h.call({ action: "set", updates: [{ id: "1", status: "done", job: "" }] });
+  assert.doesNotMatch(h.reminders().at(-1).content, /waits on job/);
+  await h.call({ action: "set", id: "2", status: "active", job: "4" });
+  assert.match(h.reminders().at(-1).content, /#2 write report \(waits on job 4\)/);
 });

@@ -4,13 +4,14 @@ import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { renderTodoGraph } from "../src/todo-graph.ts";
 import { Type } from "typebox";
 import { createStateReminder } from "../src/state-reminder.ts";
+import { BACKGROUND_JOB_END } from "../src/background-state.ts";
 import { subagentRoles } from "../src/subagent-policy.ts";
 
 type Status = "pending" | "active" | "done";
 /** Who is planned to do an item: the main assistant, or a subagent role. */
 const agents = ["self", ...subagentRoles] as const;
 type Agent = (typeof agents)[number];
-interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; agent?: Agent }
+interface Item { id: string; text: string; status: Status; parentId?: string; dependsOn?: string[]; agent?: Agent; job?: string }
 interface State { items: Item[]; nextId: number }
 interface Details extends State { action: string; error?: string }
 
@@ -62,7 +63,8 @@ const formatItem = (item: Item, items: Item[]): string => {
   const status = item.status === "pending" && unmet.length ? `blocked: ${unmet.map(id => `#${id}`).join(", ")}` : item.status;
   const dependencies = item.dependsOn?.length ? ` (depends on ${item.dependsOn.map(id => `#${id}`).join(", ")})` : "";
   const agent = item.agent && item.agent !== "self" ? ` · ${item.agent}` : "";
-  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${agent}${dependencies}`;
+  const job = item.job ? ` (waits on job ${item.job})` : "";
+  return `${item.parentId ? "  " : ""}[${status}] #${item.id} ${item.text}${agent}${job}${dependencies}`;
 };
 
 const formatPlan = (items: Item[]): string =>
@@ -74,6 +76,7 @@ const itemFields = {
   agent: Type.Optional(StringEnum(agents, { description: "Who is planned to do this item: self (the main assistant, default) or a subagent role. Independent items with the same role can be one subagent start." })),
   parentId: Type.Optional(Type.String({ description: "Top-level parent ID; parents must appear before children" })),
   dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Todo IDs that must be done before this item can start" })),
+  job: Type.Optional(Type.String({ description: "Background job ID this step waits on; its end refreshes the plan. Empty string unlinks." })),
 };
 
 const Params = Type.Object({
@@ -89,6 +92,7 @@ const Params = Type.Object({
   updates: Type.Optional(Type.Array(Type.Object({
     id: Type.String({ description: "Todo ID, such as 1 or 1.2" }),
     status: StringEnum(["pending", "active", "done"] as const),
+    job: itemFields.job,
   }), {
     minItems: 1,
     description: "For set: batch status changes instead of id/status. Unique IDs; all changes apply atomically. Dependencies are checked against the final state, so array order does not matter.",
@@ -155,6 +159,13 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", (_e, ctx) => { enabled = true; restore(ctx); });
   pi.on("session_tree", (_e, ctx) => restore(ctx));
+  // A step waiting on a background job goes stale the moment the job ends.
+  pi.events.on(BACKGROUND_JOB_END, (data: unknown) => {
+    const end = data as { id?: string; state?: string };
+    const waiting = state.items.filter(i => i.job === end?.id && i.status !== "done");
+    if (!enabled || !waiting.length) return;
+    reminder.publish(`[CURRENT TODO STATE]\nJob ${end.id} ${end.state}: update ${waiting.map(i => `#${i.id}`).join(", ")}.\n${formatPlan(state.items)}`, true);
+  });
   // A plan the agent stopped updating goes stale silently; re-show it once in a while.
   pi.on("tool_execution_end", (e) => {
     if (e.toolName === "todo" || !enabled || !state.items.some(i => i.status !== "done")) return;
@@ -217,6 +228,7 @@ export default function (pi: ExtensionAPI) {
             ...(input.parentId ? { parentId: input.parentId } : {}),
             ...(dependsOn.length ? { dependsOn } : {}),
             ...(input.agent && input.agent !== "self" ? { agent: input.agent } : {}),
+            ...(input.job ? { job: input.job } : {}),
           });
         }
         for (const item of next.items) {
@@ -240,7 +252,7 @@ export default function (pi: ExtensionAPI) {
         if (p.updates !== undefined && (p.id !== undefined || p.status !== undefined)) {
           throw new Error("Use either updates or id/status, not both");
         }
-        const updates = p.updates ?? [{ id: p.id, status: p.status }];
+        const updates = p.updates ?? [{ id: p.id, status: p.status, job: p.job }];
         if (!updates.length) throw new Error("updates must not be empty");
         const next = structuredClone(state);
         const seen = new Set<string>();
@@ -250,6 +262,7 @@ export default function (pi: ExtensionAPI) {
           if (seen.has(item.id)) throw new Error(`Duplicate update for #${item.id}`);
           seen.add(item.id);
           item.status = update.status;
+          if (update.job !== undefined) { if (update.job) item.job = update.job; else delete item.job; }
         }
         // Validate the final snapshot, not array order; a batch may finish
         // prerequisites and start dependents, or reset an entire chain together.

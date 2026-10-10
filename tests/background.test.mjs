@@ -337,7 +337,10 @@ test("completion wakes when a different goal became active while the job ran", {
 	const h = harness(t, "tui", undefined, goal);
 	const g = await gate(t);
 	const requested = g.request();
-	await h.call({ action: "start", command: g.command, reminder: "off" });
+	await assert.rejects(h.call({ action: "start", command: g.command, reminder: "off" }), /needs a next look/);
+	const started = await h.call({ action: "start", command: g.command, reminder: "fixed", intervalSeconds: 3600 });
+	assert.match(started.content[0].text, /set that step's job to 1/);
+	assert.match(h.status(), /^1 job running · look \d\d:\d\d · \/jobs$/, "goal jobs show their next look");
 	const response = await requested;
 	goal.current = { id: "goal-2", active: true }; // goal-1 paused, user started goal-2 for the same work
 	const wake = h.wake();

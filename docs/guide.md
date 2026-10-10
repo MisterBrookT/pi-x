@@ -143,8 +143,8 @@ back on.
 
 The agent can also discover the deferred `goal` tool and start a goal inside the current turn, without an extra wake.
 It does so automatically for substantial, verifiable multi-step tasks you request (not quick
-answers or discussion). It never replaces or resumes an unfinished, paused, or blocked
-goal, and `/tool goal off` blocks it. The goal owns the outcome and verification;
+answers or discussion). It can also resume a paused or blocked goal, or replace it when scope changes;
+`/tool goal off` blocks it. See [goal-todo-background.md](goal-todo-background.md). The goal owns the outcome and verification;
 todos track steps. Finishing all todos prompts verification, not completion.
 
 The footer shows `goal on` only while a goal is active, including its waiting

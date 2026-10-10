@@ -1,7 +1,7 @@
 import { createBashToolDefinition, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../src/background-state.ts";
+import { BACKGROUND_JOB_END, BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../src/background-state.ts";
 
 type State = "running" | "completed" | "failed" | "stopped";
 type Reminder = "off" | "fixed" | "exponential";
@@ -23,15 +23,18 @@ interface Job {
 	controller: AbortController;
 	done: Promise<void>;
 	reminderTimer?: ReturnType<typeof setTimeout>;
+	nextLook?: number;
 }
 
 /** Footer text: what is running, and the command that controls it. */
-export function statusText(shells: number, agents: number): string | undefined {
+export function statusText(shells: number, agents: number, nextLook?: number): string | undefined {
 	const parts = [
 		shells ? `${shells} job${shells === 1 ? "" : "s"}` : "",
 		agents ? `${agents} agent${agents === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
-	return parts.length ? `${parts.join(" + ")} running · /jobs` : undefined;
+	if (!parts.length) return undefined;
+	const look = nextLook === undefined ? "" : ` · look ${new Date(nextLook).toTimeString().slice(0, 5)}`;
+	return `${parts.join(" + ")} running${look} · /jobs`;
 }
 
 const MAX_RUNNING = 4;
@@ -51,7 +54,8 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 	const showStatus = (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
 		if (!ctx.hasUI) return;
 		statusCtx = ctx;
-		ctx.ui.setStatus("pix-background", statusText(runningCount(), subagents.size));
+		const looks = [...jobs.values()].filter((job) => job.state === "running" && job.goalId && job.nextLook).map((job) => job.nextLook!);
+		ctx.ui.setStatus("pix-background", statusText(runningCount(), subagents.size, looks.length ? Math.min(...looks) : undefined));
 	};
 
 	pi.events.on("subagent:async-started", (data: unknown) => {
@@ -158,7 +162,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			id: Type.Optional(Type.String({ description: "Job ID; required for stop. Omit for status to list recent jobs (up to 32)." })),
 			timeout: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Command timeout in seconds (optional)." })),
 			reminder: Type.Optional(StringEnum(["off", "fixed", "exponential"] as const, { description: "Health-check wake-up schedule; exponential by default." })),
-			intervalSeconds: Type.Optional(Type.Number({ minimum: 10, maximum: 3600, description: "First health check in seconds (default 60); fixed repeats at this interval, exponential doubles up to at least 8 minutes." })),
+			intervalSeconds: Type.Optional(Type.Number({ minimum: 10, maximum: 21600, description: "First health check in seconds (default 60); fixed repeats at this interval, exponential doubles up to at least 8 minutes. Pick it from when progress is expected; with a goal active it is required (reminder off is refused)." })),
 		}),
 		async execute(callId, params, signal, _onUpdate, ctx) {
 			signal?.throwIfAborted();
@@ -190,6 +194,9 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 				jobs.delete(oldest.id);
 			}
 			const ownerGoal = backgroundState(pi).goal;
+			if (ownerGoal?.active && params.reminder === "off") {
+				throw new Error("A goal is active, so this job needs a next look: set reminder fixed or exponential with intervalSeconds near when you expect progress (its ETA, or soon if unknown).");
+			}
 			const job: Job = {
 				id: String(++nextId), command: params.command, state: "running", output: "",
 				goalId: ownerGoal?.active ? ownerGoal.id : undefined,
@@ -203,6 +210,8 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			const scheduleReminder = () => {
 				const delay = reminderDelaySeconds(reminder, interval, checkpoint);
 				if (delay === undefined || job.state !== "running" || closed) return;
+				job.nextLook = Date.now() + delay * 1000;
+				showStatus(ctx);
 				job.reminderTimer = timers.setTimeout(() => {
 					job.reminderTimer = undefined;
 					if (job.state !== "running" || closed) return;
@@ -239,7 +248,9 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 					if (job.state === "running") job.state = "failed";
 				}
 				timers.clearTimeout(job.reminderTimer);
+				job.nextLook = undefined;
 				showStatus(ctx);
+				pi.events.emit(BACKGROUND_JOB_END, { id: job.id, state: job.state });
 				if (closed || job.state === "stopped") return;
 				const tail = truncateTail(job.output, { maxLines: 40, maxBytes: 4096 });
 				const goal = backgroundState(pi).goal;
@@ -256,7 +267,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			job.done = job.done.catch((error) => {
 				if (!closed && ctx.hasUI) ctx.ui.notify(`Background ${job.id} notification failed: ${String(error)}`, "error");
 			});
-			return result(`${describe(job)}\nCompletion will wake the agent${reminder === "off" ? "" : `; ${reminder} health checks will also wake while it runs`}. Do other work or yield; no polling needed.`, job);
+			return result(`${describe(job)}\nCompletion will wake the agent${reminder === "off" ? "" : `; ${reminder} health checks will also wake while it runs`}. If a todo step waits on it, set that step's job to ${job.id}. Do other work or yield; no polling needed.`, job);
 		},
 	});
 }

@@ -2,6 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Session-local coordination via Pi's shared bus, not extension module globals. */
 export const BACKGROUND_STATE_QUERY = "pix:background-state:query";
+/** Emitted with { id, state } when a background job ends, so todo steps waiting on it can be refreshed. */
+export const BACKGROUND_JOB_END = "pix:background-job-end";
 export interface BackgroundState {
 	running: number;
 	goal?: { id: string; active: boolean };
