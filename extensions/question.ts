@@ -211,8 +211,11 @@ export default function question(pi: ExtensionAPI) {
 						}
 					}
 
+					let cachedWidth = -1;
 					function render(width: number): string[] {
-						if (cachedLines) return cachedLines;
+						// The terminal can shrink while the dialog is open; lines cached at the old width would overflow.
+						if (cachedLines && cachedWidth === width) return cachedLines;
+						cachedWidth = width;
 						cachedLines = renderQuestion({ question: params.question, options: allOptions, selected: optionIndex, editMode, editorLines: editMode ? editor.render(Math.max(1, width - 6)) : [] }, width, theme);
 						return cachedLines;
 					}
