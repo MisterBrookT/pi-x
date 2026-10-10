@@ -3,6 +3,7 @@
 // the one list in proactive-store.ts (shared by the Mac pill and Pix Remote "For you").
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
 export const paths = (dir = PROACTIVE_DIR) => ({
@@ -27,7 +28,7 @@ export interface MemoryEdit { add: string[]; remove: string[] }
  * One open loop: something unfinished between brook and someone else. `button` names the prepared
  * next step ("Draft reply"); `due` is a date when something is owed.
  */
-export interface Alert { title: string; why: string; action: string; refs: string[]; button?: string; due?: string }
+export interface Alert { title: string; why: string; action: string; refs: string[]; button?: string; due?: string; project?: string }
 /** Where a loop stands, as the judge sees it. needs = needs brook now; waiting = others owe him; later = he owes it, not yet due. */
 export type LoopState = "needs" | "waiting" | "later";
 /** A change to an existing loop (any source), e.g. after brook replied or a duplicate showed up elsewhere. */
@@ -39,7 +40,14 @@ export interface Verdict { alerts: (Alert & { state?: LoopState })[]; update: Lo
  * done/dismissed/resolved = closed. `quiet` = kept but not pushed. `session` = the Pi session on it.
  */
 export type Status = "pending" | "onit" | "later" | "waiting" | "done" | "dismissed" | "resolved";
-export interface Item extends Alert { id: string; at: string; source: string; sourceKey: string; project?: string; howToRead: string; status: Status; quiet?: boolean; session?: string; wakeAt?: string; at_status?: string }
+export interface Item extends Alert { id: string; at: string; source: string; sourceKey: string; howToRead: string; status: Status; quiet?: boolean; session?: string; wakeAt?: string; at_status?: string;
+	/** Folder of the session working on it, so a closed session can be resumed there. */
+	sessionCwd?: string;
+	/** The loop's brief: dated progress lines written by whoever worked on it. Survives any chat. */
+	note?: string }
+
+/** The daemon script: work sessions call its `note` verb to leave progress on a loop. */
+export const daemonScript = fileURLToPath(new URL("../scripts/proactive-daemon.ts", import.meta.url));
 
 export const isOpen = (i: Pick<Item, "status">) => i.status === "pending" || i.status === "onit" || i.status === "later" || i.status === "waiting";
 /** Shown as "needs you": pending, or a parked loop whose time has come. */
@@ -74,7 +82,7 @@ export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, o
 	return { fresh, context, judge: fromOthers || (fresh.length > 0 && openHere > 0) };
 }
 
-const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}`;
+const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}${p.project ? ` project=${p.project}` : ""}${p.note ? `\n  progress: ${p.note.split("\n").at(-1)}` : ""}`;
 
 export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string }): string {
 	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${o.me && m.sender.trim() === o.me ? " (me)" : ""}: ${m.text}`;
@@ -123,8 +131,9 @@ Most of the time, change nothing.
 
 "button" is 1-3 words naming the step an agent can prepare (e.g. "Draft reply", "Start test", "Check backtest").
 "due" is YYYY-MM-DD when there is a deadline, else omit.
+"project" is the folder of the project this loop belongs to, taken from memory (e.g. "~/workspace/minara/newsdecision"); omit if none is clear.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "Draft reply", "state": "needs", "due": "YYYY-MM-DD", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD"}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "Draft reply", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -138,12 +147,13 @@ export function parseVerdict(raw: string): Verdict | null {
 		if (!list) return null;
 		const str = (x: unknown, n: number) => (typeof x === "string" && x.trim() ? x.trim().slice(0, n) : undefined);
 		const state = (x: unknown): LoopState | undefined => (x === "needs" || x === "waiting" || x === "later" ? x : undefined);
+		const project = (x: unknown) => { const p = str(x, 300); return p && /^(~\/|\/)/.test(p) ? p : undefined; };
 		const due = (x: unknown) => { const d = str(x, 10); return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined; };
 		const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined)) as T;
 		// "No follow-up" is not a loop: drop it (the judge sometimes says so in the action).
 		const noop = (a: any) => /无需跟进|no (follow[- ]?up|action)( needed)?|nothing to do/i.test(String(a.action ?? ""));
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state) }));
-		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due) }));
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project) }));
+		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project) }));
 		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) } };
 	} catch { return null; }
 }
@@ -212,16 +222,25 @@ export function updateLine(it: Item, u: LoopUpdate, now = Date.now()): Record<st
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "" });
+export const publicItem = (i: Item) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "" });
 
+/** A note line appended to a loop's brief, keeping the brief short (newest lines win). */
+export function addNote(old: string | undefined, text: string, now = new Date()): string {
+	const line = `- ${now.toISOString().slice(0, 10)}: ${text.replace(/\s+/g, " ").trim().slice(0, 300)}`;
+	return [...(old ? old.split("\n") : []), line].slice(-12).join("\n");
+}
+
+/** The task a session gets for a loop: the loop, its brief so far, and how to leave progress behind. */
 export function actPrompt(it: Item): string {
-	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive alert from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
+	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive loop from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:
 
 **${it.title}**
 Why: ${it.why}
 Suggested next step: ${it.action}${it.due ? `\nDue: ${it.due}` : ""}
 Original items: ${it.howToRead}
-
+${it.note ? `\nProgress so far (the loop's brief):\n${it.note}\n` : ""}
 Read the referenced items and any project files you need, then prepare this next step.
-Draft anything outbound and show it to me first; do not send without my confirmation.`;
+Draft anything outbound and show it to me first; do not send without my confirmation.
+When you stop, leave one short line of progress on the loop, so whoever picks it up next knows where it stands:
+node ${daemonScript} note ${it.id} "<what is done, what is next>"`;
 }

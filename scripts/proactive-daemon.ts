@@ -4,6 +4,7 @@
 // Usage: node scripts/proactive-daemon.ts [--once] [--dry-run]
 //        node scripts/proactive-daemon.ts act <id>      mark "on it", start a Pi session on the next step
 //        node scripts/proactive-daemon.ts later <id>    hide until near its due date (or tomorrow)
+//        node scripts/proactive-daemon.ts note <id> "<progress>"  add a line to the loop's brief
 //        node scripts/proactive-daemon.ts dismiss <id>  drop for good
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, dismissItem, laterItem } from "../src/proactive-store.ts";
+import { actItem, dismissItem, laterItem, noteItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -88,7 +89,7 @@ async function tick(cfg: Config) {
 				// Over the hourly limit an alert still enters the list, just without a push (quiet).
 				// A new loop that is already parked (e.g. waiting on someone) is quiet and comes back later.
 				const parked = state === "waiting" || state === "later";
-				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
+				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project ?? a.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
 				listed.push(it);
 				appendFileSync(P.inbox, JSON.stringify(it) + "\n");
 			}
@@ -107,6 +108,11 @@ async function hubAct(id: string, focus: boolean): Promise<boolean | undefined> 
 }
 
 const [verb, itemId] = process.argv.slice(2);
+if (verb === "note") {
+	const ok = noteItem(itemId, process.argv.slice(4).join(" "));
+	if (!ok) { console.error(`no loop ${itemId} (or empty note)`); process.exit(1); }
+	process.exit(0);
+}
 if (verb === "act" || verb === "dismiss" || verb === "later") {
 	const focus = process.argv.includes("--focus");
 	// Prefer the hub: it can hand the task to a live For you session. Without a hub, act directly.

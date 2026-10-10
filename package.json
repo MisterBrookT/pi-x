@@ -84,7 +84,8 @@
       "./extensions/terminal-support.ts",
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
-      "./extensions/tool.ts"
+      "./extensions/tool.ts",
+      "./extensions/foryou.ts"
     ]
   },
   "engines": {

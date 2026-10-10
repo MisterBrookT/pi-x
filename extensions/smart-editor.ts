@@ -194,7 +194,8 @@ export default function smartEditor(pi: ExtensionAPI) {
 
 	pi.on("input", (event, ctx) => {
 		let text = expandSmartMarkers(event.text, images, pastes);
-		try { text = expandForYou(text, ctx?.sessionManager?.getSessionId?.() ?? "pi"); } catch { /* list unreadable: keep text */ }
+		// "@" makes this session the loop's home: later taps on the loop come back here.
+		try { text = expandForYou(text, ctx?.sessionManager?.getSessionId?.() ?? "pi", undefined, ctx?.cwd); } catch { /* list unreadable: keep text */ }
 		if (text !== event.text) return { action: "transform", text };
 		return { action: "continue" };
 	});

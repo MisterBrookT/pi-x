@@ -40,10 +40,10 @@ export function withForYou(current: AutocompleteProvider, pending: () => Item[])
  * Expand every "@foryou:<id>" into the item's task and mark it "on it" by this session, so it
  * leaves "needs you" on the Mac pill and the phone. Unknown or closed ids stay as typed.
  */
-export function expandForYou(text: string, session: string, dir?: string): string {
+export function expandForYou(text: string, session: string, dir?: string, cwd?: string): string {
 	if (!text.includes(TOKEN)) return text;
 	return text.replace(mentionRe, (whole, id: string) => {
-		const it = takeItem(id, session, dir);
+		const it = takeItem(id, session, dir, cwd);
 		return it ? `\n\n${actPrompt(it)}\n\n` : whole;
 	}).trim();
 }

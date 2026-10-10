@@ -142,7 +142,7 @@ export interface RemoteHubOptions {
   onRetire?: () => void;
   /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
   proactiveDir?: string;
-  proactiveAct?: (id: string, focus?: boolean) => Promise<unknown>;
+  proactiveAct?: (id: string, focus?: boolean, into?: string, cwd?: string) => Promise<unknown>;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -215,6 +215,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // "For you": the same proactive list the Mac pill shows. Phones get it as an event, and a push
   // when a new item appears (title only, like session pushes).
   const proactiveFile = proactivePaths(options.proactiveDir).inbox;
+  const liveSessions = () => [...sessions.values()].map(({ id, name, cwd, busy }) => ({ id, name, cwd, busy }));
   const forYou = () => forYouView(options.proactiveDir);
   let knownItems = new Set(forYou().pending.map(i => i.id));
   const onProactive = () => {
@@ -306,9 +307,13 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
             return true;
           };
           const focus = input?.focus === true;
-          const it = await (options.proactiveAct ?? ((x, f) => actItem(x, { dir: options.proactiveDir, send: sendLive, focus: f })))(id, focus);
+          // Phone and pill send nothing: the coordinator gets it. The coordinator's loops tool sends
+          // `into` (a session id or "new") and maybe `cwd` to hand it on.
+          const into = typeof input?.into === "string" && /^[\w.-]{1,80}$/.test(input.into) ? input.into : undefined;
+          const cwd = typeof input?.cwd === "string" && input.cwd.startsWith("/") || typeof input?.cwd === "string" && input.cwd.startsWith("~/") ? input.cwd : undefined;
+          const it = await (options.proactiveAct ?? ((x, f, i, c) => actItem(x, { dir: options.proactiveDir, send: sendLive, focus: f, live: liveSessions(), into: i, cwd: c })))(id, focus, into, cwd);
           onProactive();
-          return it ? send(res, 202, { started: true }) : send(res, 404, { error: "already handled" });
+          return it ? send(res, 202, { started: true, session: typeof (it as any).session === "string" ? (it as any).session : "" }) : send(res, 404, { error: "already handled" });
         } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
       }
       if (req.method === "GET" && path === "/api/folders") {

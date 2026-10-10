@@ -53,7 +53,8 @@ flowchart TB
 |---|---|---|
 | Core | `src/proactive.ts` | Types, judge prompt, verdict, list format, rate limit |
 | Sources | `src/proactive-sources.ts` | One adapter per channel |
-| Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act`, `later`, and `dismiss` verbs |
+| Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act`, `later`, `dismiss`, `note` verbs |
+| Coordinator | `extensions/foryou.ts` | In the For you session only: the map of open loops and the `loops` tool |
 | Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the count; click to see items |
 | List + Do it | `src/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
 | iPhone view | Pix Remote "For you" page (opened from the menu, or by tapping the push) | Same list, same buttons, a push for each new item |
@@ -121,18 +122,42 @@ Your own messages count too, marked `(me)`: when you reply in a chat that has an
 
 Over `maxPerHour`, new items still enter the list, marked quiet: no push, never dropped.
 
-## The main button
+## The coordinator
 
-All main-button taps go to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6-luna`):
+Every main-button tap goes to **one** Pi session, `For you` (session id `pix-foryou`, model `gpt-6-luna`). It is the coordinator: it decides how each loop is best done. There are no routing rules.
 
-- If it is open, the task is queued into it, like a message from the phone.
-- If not, it opens as a **new tab in the open Otty window** (tmux if Otty is not running; never a second Otty app), resuming the same session.
+```mermaid
+flowchart LR
+  T[Main button<br/>phone or pill] --> C["For you<br/>(coordinator)"]
+  C -- small: does it here --> C
+  C -- "loops handoff" --> W1[A session already open<br/>or already on this loop]
+  C -- "loops handoff new" --> W2[New session<br/>in the project folder]
+  W1 & W2 -- "note" --> L[(Loop brief)]
+```
 
-The loop becomes **on it** and records the session, so "Pi is on it" links to exactly that session.
+Each turn it gets a map, rebuilt from files, so its own chat can stay short:
+
+| Context | From |
+|---|---|
+| Memory (projects, folders, people) | `memory.md` |
+| Every open loop: state, due, project, session on it, brief | `inbox.jsonl` |
+| Pi sessions open now, with folders | the Remote hub |
+
+And one tool, `loops`, only in that session:
+
+| Action | Does |
+|---|---|
+| `handoff` | Send a loop to a session id (live: queued there; closed: resumed in its folder), or `new` (a fresh session in `cwd` or the loop's project) |
+| `note` | Add a progress line to the loop's brief |
+| `later` / `drop` | Park or close a loop |
+
+If the coordinator is open, the task is queued into it; if not, it opens as a **new tab in the open Otty window** (tmux if Otty is not running).
+
+**The brief.** Each loop keeps a few dated progress lines (`note`). Whoever works on a loop gets the brief in its task, and is asked to leave a line when it stops (`node scripts/proactive-daemon.ts note <id> "..."`). Chats can be long, cut, or lost; the brief is what carries a loop from one session to the next. The judge sees the latest line too.
 
 ## @ in Pi
 
-In any Pi session, type `@`: open loops appear above the file suggestions (🔔 needs you, ▶ on it, ⏳ later; match by title or id). Pick one to insert `@foryou:<id>`. When you send, it becomes the loop's task, and the loop is **on it** by **this** session, so it leaves "needs you" on the Mac pill and the phone. A loop already on it can be picked up again; the task then names the earlier session. Closed ids stay as typed text.
+In any Pi session, type `@`: open loops appear above the file suggestions (🔔 needs you, ▶ on it, ⏳ later; match by title or id). Pick one to insert `@foryou:<id>`. When you send, it becomes the loop's task (with its brief), and the loop is **on it** by **this** session, which becomes its home: the coordinator sees it and can hand later work back there, so it leaves "needs you" on the Mac pill and the phone. A loop already on it can be picked up again; the task then names the earlier session. Closed ids stay as typed text.
 
 ## Who keeps the memory
 

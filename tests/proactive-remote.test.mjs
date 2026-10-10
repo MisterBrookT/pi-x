@@ -18,10 +18,10 @@ async function folder(t) {
   return dir;
 }
 
-test("store: one list, Not now and Do it both remove the item; Do it starts Pi in the project", async t => {
+test("store: ✕ and the main button both leave needs-you; a loop without a project goes to the coordinator", async t => {
   const dir = await folder(t);
   const project = join(dir, "proj"); mkdirSync(project);
-  writeFileSync(join(dir, "inbox.jsonl"), [item("a", { project }), item("b")].map(x => JSON.stringify(x)).join("\n") + "\n");
+  writeFileSync(join(dir, "inbox.jsonl"), [item("a"), item("b")].map(x => JSON.stringify(x)).join("\n") + "\n");
   assert.deepEqual(readPending(dir).map(i => i.id), ["b", "a"], "newest first");
   assert.equal(dismissItem("b", dir), true);
   assert.equal(dismissItem("b", dir), false, "already handled");
@@ -29,7 +29,7 @@ test("store: one list, Not now and Do it both remove the item; Do it starts Pi i
   const it = await actItem("a", { dir, mode: "relay", launch: async (...args) => { calls.push(args); } });
   assert.equal(it.id, "a");
   assert.equal(calls[0][1], "relay");
-  assert.equal(calls[0][2].sessionId, "pix-foryou", "all Do it items go to one For you session");
+  assert.equal(calls[0][2].sessionId, "pix-foryou", "no project: the coordinator takes it");
   assert.equal(calls[0][2].model, "openai-codex/gpt-6-luna");
   assert.match(calls[0][2].prompt, /Title a[\s\S]*do not send without my confirmation/);
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"a","status":"onit","session":"pix-foryou"/, "item remembers its session");
@@ -37,12 +37,12 @@ test("store: one list, Not now and Do it both remove the item; Do it starts Pi i
   assert.equal(dismissItem("a", dir), true, "a loop Pi is on can still be dropped");
   assert.equal(await actItem("a", { dir, launch: async () => assert.fail("must not launch twice") }), undefined);
   // Live For you session: the task is queued into it, no new tab.
-  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { project })) + "\n");
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c")) + "\n");
   const sent = [];
   await actItem("c", { dir, send: (sid, text) => (sent.push([sid, text]), true), launch: async () => assert.fail("no tab when live"), focusTab: async () => assert.fail("phone tap: no focus") });
   assert.equal(sent[0][0], "pix-foryou");
   // Mac tap with a live session: bring its tab to the front.
-  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d", { project })) + "\n");
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
   const focused = [];
   await actItem("d", { dir, focus: true, send: () => true, focusTab: async name => (focused.push(name), true) });
   assert.deepEqual(focused, ["For you"]);

@@ -2,7 +2,8 @@
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { actPrompt, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
+import { resolve } from "node:path";
+import { actPrompt, addNote, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
 
@@ -63,32 +64,100 @@ export function laterItem(id: string, dir?: string, now = Date.now()): boolean {
  * A Pi session takes a loop ("@" in Pi, or Do it): the loop is "on it", not done. It closes when
  * the chat shows it is finished (the judge closes it) or brook drops it.
  */
-export function takeItem(id: string, session: string, dir?: string): Item | undefined {
+export function takeItem(id: string, session: string, dir?: string, cwd?: string): Item | undefined {
 	const it = readAll(dir).find(i => i.id === id && isOpen(i));
 	if (!it) return undefined;
-	write(dir, { id, status: "onit", session, wakeAt: null });
+	write(dir, { id, status: "onit", session, wakeAt: null, ...(cwd ? { sessionCwd: cwd } : {}) });
 	return it;
 }
 
-/** The one Pi session that works on all "Do it" items, so they never pile up as tabs. */
+/** Leave a progress line on a loop's brief (work sessions and the coordinator call this). */
+export function noteItem(id: string, text: string, dir?: string): boolean {
+	const it = readAll(dir).find(i => i.id === id);
+	if (!it || !text.trim()) return false;
+	write(dir, { id, note: addNote(it.note, text) });
+	return true;
+}
+
+/** The coordinator: one Pi session that sees every loop, does small ones itself, and hands big ones to work sessions. */
 export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6-luna" };
 
-/** Where the For you session runs: home, so it can reach every project by path. */
+/** Where the coordinator runs: home, so it can reach every project by path. */
 export const forYouFolder = (home = homedir()) => home;
 
+/** A Pi session connected to Remote, as the hub knows it. */
+export interface LiveSession { id: string; name: string; cwd: string; busy?: boolean }
+
+export const expandHome = (p: string, home = homedir()) => resolve(p.replace(/^~(?=\/|$)/, home));
+const shortName = (it: Item) => (it.title.length > 28 ? `${it.title.slice(0, 27)}…` : it.title);
+
 /**
- * "Do it": hand the item to the For you session. If it is live (connected to Remote), the task is queued
- * into it via `send`; otherwise a new tab starts it (same fixed session id, so history continues).
+ * Where a loop's work goes. No `into`: the coordinator (it decides). `into` = a session id
+ * (live: queue it there; else resume that id), or "new" (a fresh session in `cwd` or the loop's project).
  */
-export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean } = {}): Promise<Item | undefined> {
-	const it = takeItem(id, forYouSession.id, options.dir);
-	if (!it) return undefined;
-	const prompt = actPrompt(it);
-	if (options.send?.(forYouSession.id, prompt)) {
-		if (options.focus) await (options.focusTab ?? focusOttyTab)(forYouSession.name);
+export function routeFor(it: Item, live: LiveSession[], into?: string, cwd?: string, home = homedir()) {
+	const here = { session: forYouSession.id, name: forYouSession.name, cwd: forYouFolder(home), coordinator: true };
+	if (!into || into === forYouSession.id) return here;
+	if (into === "new") {
+		const dir = cwd ?? it.project;
+		return dir ? { session: `loop-${it.id}`, name: shortName(it), cwd: expandHome(dir, home), coordinator: false } : here;
+	}
+	const s = live.find(x => x.id === into);
+	return { session: into, name: s?.name ?? shortName(it), cwd: s?.cwd ?? (cwd ? expandHome(cwd, home) : it.session === into && it.sessionCwd ? it.sessionCwd : it.project ? expandHome(it.project, home) : forYouFolder(home)), coordinator: false };
+}
+
+/**
+ * Hand a loop to a session. The main button (phone, pill) sends it to the coordinator, which reads the
+ * loop and decides; the coordinator's `loops` tool calls this with `into` to route it elsewhere.
+ * A live session gets the task queued (via `send`); otherwise a tab starts or resumes that session id.
+ */
+export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean; live?: LiveSession[]; into?: string; cwd?: string; home?: string } = {}): Promise<Item | undefined> {
+	const before = readAll(options.dir).find(i => i.id === id && isOpen(i));
+	if (!before) return undefined;
+	const route = routeFor(before, options.live ?? [], options.into, options.cwd, options.home);
+	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
+	const prompt = route.coordinator ? coordinatorTask(before) : actPrompt(it);
+	if (options.send?.(route.session, prompt)) {
+		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
 		return it;
 	}
 	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
-	await (options.launch ?? launchPi)(forYouFolder(), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model, focus: options.focus });
+	await (options.launch ?? launchPi)(route.cwd, mode, { prompt, sessionId: route.session, name: route.name, model: route.coordinator ? forYouSession.model : undefined, focus: options.focus });
 	return it;
+}
+
+/** What the coordinator gets when brook taps a loop: the loop, and the choice is its own. */
+export const coordinatorTask = (it: Item) => `brook tapped "${it.button || "Do it"}" on loop ${it.id}.
+
+${actPrompt({ ...it, session: undefined })}
+
+Decide where this is best done: here, in a session already open or already on this loop, or a new session in the project. Use the loops tool to hand it off.`;
+
+/**
+ * What the coordinator ("For you" session) knows at the start of each turn, rebuilt from files,
+ * so its own chat can stay short: memory (projects and folders), every open loop with its brief,
+ * and the Pi sessions open right now. Work stays in per-loop sessions; this is the map.
+ */
+export function coordinatorContext(dir?: string, live: LiveSession[] = [], now = Date.now()): string {
+	const P = paths(dir);
+	const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
+	const open = readOpen(dir, now);
+	const loop = (i: Item) => [
+		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}] ${i.title} (${i.source})`,
+		i.project ? `  project: ${i.project}` : "",
+		i.session ? `  session: ${i.session}${i.session === forYouSession.id ? " (this one)" : ""}` : "",
+		i.note ? i.note.split("\n").map(l => `  ${l}`).join("\n") : "",
+	].filter(Boolean).join("\n");
+	return `## Proactive coordinator
+You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
+use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
+
+### Memory
+${memory}
+
+### Open loops
+${open.map(loop).join("\n") || "(none)"}
+
+### Pi sessions open now
+${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}`;
 }

@@ -2,11 +2,11 @@
 // Later / ✕ / "on it" from every view.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../src/proactive.ts";
-import { dismissItem, forYouView, laterItem, readOpen, readPending, takeItem } from "../src/proactive-store.ts";
+import { dismissItem, forYouView, laterItem, readOpen, takeItem } from "../src/proactive-store.ts";
 import { relayAllowed } from "../src/remote-relay-agent.ts";
 
 const DAY = 86_400_000;
@@ -73,7 +73,6 @@ test("store: Later parks a loop, ✕ drops it, @ takes it 'on it'; the view spli
 	assert.equal(laterItem("d", dir, now), true);
 	assert.equal(dismissItem("b", dir), true);
 	assert.ok(takeItem("c", "sess-9", dir));
-	assert.deepEqual(readPending(dir), []);
 	const v = forYouView(dir, now);
 	assert.deepEqual(v.pending, []);
 	assert.deepEqual(v.onit.map(i => [i.id, i.session]), [["c", "sess-9"]]);
@@ -90,4 +89,65 @@ test("store: Later parks a loop, ✕ drops it, @ takes it 'on it'; the view spli
 
 test("relay allows Later from the phone", () => {
 	assert.ok(relayAllowed("/api/foryou/abc_1/later", "POST"));
+});
+
+test("routing: the main button goes to the coordinator; the loops tool can send it to a live, own, or new session", async () => {
+	const { routeFor, actItem } = await import("../src/proactive-store.ts");
+	const home = "/Users/b";
+	const live = [{ id: "pix-foryou", name: "For you", cwd: home }, { id: "s1", name: "newsdecision", cwd: "/Users/b/work/nd" }];
+	const it = loop("a", { project: "~/work/nd" });
+	assert.deepEqual(routeFor(it, live, undefined, undefined, home), { session: "pix-foryou", name: "For you", cwd: home, coordinator: true }, "no hard rules: the coordinator decides");
+	assert.deepEqual(routeFor(it, live, "s1", undefined, home), { session: "s1", name: "newsdecision", cwd: "/Users/b/work/nd", coordinator: false });
+	assert.deepEqual(routeFor(it, live, "new", undefined, home), { session: "loop-a", name: "Loop a", cwd: "/Users/b/work/nd", coordinator: false });
+	assert.equal(routeFor(it, live, "new", "~/other", home).cwd, "/Users/b/other");
+	assert.equal(routeFor(loop("x"), live, "new", undefined, home).coordinator, true, "new with no folder stays with the coordinator");
+	const owned = loop("b", { status: "onit", session: "my-sess", sessionCwd: "/Users/b/x" });
+	assert.equal(routeFor(owned, [], "my-sess", undefined, home).cwd, "/Users/b/x", "a closed session is resumed in its folder");
+
+	const dir = inbox(loop("e", { project: "/tmp", button: "Start test" }));
+	const launched = [];
+	await actItem("e", { dir, launch: async (...a) => { launched.push(a); }, mode: "relay" });
+	assert.equal(launched[0][2].sessionId, "pix-foryou"); assert.equal(launched[0][2].model, "openai-codex/gpt-6-luna");
+	assert.match(launched[0][2].prompt, /brook tapped "Start test" on loop e[\s\S]*Decide where this is best done[\s\S]*loops tool/);
+	const sent = [];
+	await actItem("e", { dir, into: "new", send: (s, t) => (sent.push([s, t]), false), launch: async (...a) => { launched.push(a); } });
+	assert.equal(launched[1][0], "/tmp"); assert.equal(launched[1][2].sessionId, "loop-e"); assert.equal(launched[1][2].model, undefined);
+	assert.doesNotMatch(launched[1][2].prompt, /Decide where/, "a work session gets the task, not the choice");
+	assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"session":"loop-e","wakeAt":null,"sessionCwd":"\/tmp"/);
+});
+
+test("the brief: notes stay on the loop, go into the task, and are capped", async () => {
+	const { noteItem } = await import("../src/proactive-store.ts");
+	const { actPrompt, addNote } = await import("../src/proactive.ts");
+	const dir = inbox(loop("n"));
+	assert.equal(noteItem("n", "  signed up,\n got API key  ", dir), true);
+	assert.equal(noteItem("n", "", dir), false); assert.equal(noteItem("zz", "x", dir), false);
+	const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
+	assert.match(it.note, /^- \d{4}-\d{2}-\d{2}: signed up, got API key$/);
+	const p = actPrompt(it);
+	assert.match(p, /Progress so far[\s\S]*signed up, got API key/);
+	assert.match(p, /proactive-daemon\.ts note n "/);
+	let note; for (let i = 0; i < 20; i++) note = addNote(note, `step ${i}`);
+	assert.equal(note.split("\n").length, 12); assert.match(note, /step 19$/);
+});
+
+test("coordinator context: memory, every open loop with project, session and brief, and live sessions", async () => {
+	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const dir = inbox(loop("a", { project: "~/nd", status: "onit", session: "loop-a", note: "- 2026-10-09: half done" }), loop("b"), loop("c", { status: "dismissed" }));
+	writeFileSync(join(dir, "memory.md"), "- newsdecision lives in ~/nd\n");
+	const c = coordinatorContext(dir, [{ id: "s1", name: "nd", cwd: "/x", busy: true }]);
+	assert.match(c, /newsdecision lives in ~\/nd/);
+	assert.match(c, /id=a \[Pi is on it\] Loop a[\s\S]*project: ~\/nd[\s\S]*session: loop-a[\s\S]*half done/);
+	assert.match(c, /id=b \[needs brook\]/);
+	assert.doesNotMatch(c, /id=c/);
+	assert.match(c, /- nd \(s1\) in \/x, busy/);
+	assert.match(c, /Nothing outbound without his confirmation/);
+});
+
+test("judge: a loop can carry a project folder; bad paths are dropped; the judge sees progress", () => {
+	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "T", action: "x", project: "~/workspace/minara/newsdecision" }, { title: "U", action: "y", project: "newsdecision" }], update: [{ id: "a", project: "/abs" }] }));
+	assert.equal(v.alerts[0].project, "~/workspace/minara/newsdecision"); assert.equal(v.alerts[1].project, undefined); assert.equal(v.update[0].project, "/abs");
+	const p = judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], now: "", pending: [loop("a", { note: "- d: one\n- d: two" })] });
+	assert.match(p, /progress: - d: two/);
+	assert.match(p, /"project" is the folder/);
 });
