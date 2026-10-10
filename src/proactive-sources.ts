@@ -70,7 +70,7 @@ export function parseWechatChats(json: unknown, o: { sinceSec: number; exclude?:
 	const list = (json as { data?: { sessions?: any[] } })?.data?.sessions ?? [];
 	const skip = new Set(o.exclude ?? []);
 	return list
-		.filter(s => s?.username && (s.chat_type === "group" || s.chat_type === "private") && !/^gh_|holder$|^@/.test(String(s.username)) && !/holder$/.test(String(s.chat ?? "")) && Number(s.timestamp ?? 0) >= o.sinceSec && !skip.has(s.chat) && !skip.has(s.username))
+		.filter(s => s?.username && (s.chat_type === "group" || s.chat_type === "private") && !/^gh_|holder$|^@|^notifymessage$/.test(String(s.username)) && !/holder$/.test(String(s.chat ?? "")) && Number(s.timestamp ?? 0) >= o.sinceSec && !skip.has(s.chat) && !skip.has(s.username))
 		.slice(0, o.max ?? 30)
 		.map(s => ({ kind: "wechat", id: String(s.username), name: `WeChat: ${String(s.chat ?? s.username).trim()}` }));
 }

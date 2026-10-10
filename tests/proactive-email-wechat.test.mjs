@@ -34,7 +34,7 @@ test("parseWechatChats: only recent groups/private chats, no official accounts o
 	const s = (chat, username, chat_type, timestamp = 100) => ({ chat, username, chat_type, timestamp });
 	const out = parseWechatChats({ data: { sessions: [
 		s("G", "1@chatroom", "group"), s("微信支付", "gh_1", "official_account"), s("@placeholder_foldgroup", "@placeholder_foldgroup", "folded"),
-		s("brandservicesessionholder", "brandservicesessionholder", "private"), s("Old", "2@chatroom", "group", 1), s("Noisy", "3@chatroom", "group"), s("黄老师", "wxid_1", "private"),
+		s("brandservicesessionholder", "brandservicesessionholder", "private"), s("Old", "2@chatroom", "group", 1), s("Noisy", "3@chatroom", "group"), s("黄老师", "wxid_1", "private"), s("Service Notifications", "notifymessage", "private"),
 	] } }, { sinceSec: 50, exclude: ["Noisy"] });
 	assert.deepEqual(out, [{ kind: "wechat", id: "1@chatroom", name: "WeChat: G" }, { kind: "wechat", id: "wxid_1", name: "WeChat: 黄老师" }]);
 });
