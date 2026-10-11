@@ -33,9 +33,12 @@ export function statusText(shells: number, agents: number, nextLook?: number): s
 		agents ? `${agents} agent${agents === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
 	if (!parts.length) return undefined;
-	const look = nextLook === undefined ? "" : ` · look ${new Date(nextLook).toTimeString().slice(0, 5)}`;
+	const look = nextLook === undefined ? "" : ` · look ${clock(nextLook)}`;
 	return `${parts.join(" + ")} running${look} · /jobs`;
 }
+
+/** Local wall-clock HH:MM, so the agent can tell Brook when it will next look. */
+export const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
 
 const MAX_RUNNING = 4;
 const MAX_HISTORY = 32;
@@ -118,7 +121,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 		const active = [...jobs.values()].filter((job) => job.state === "running");
 		if (closed || (active.length === 0 && subagents.size === 0)) return;
 		const lines = [
-			...active.map((job) => `Shell ${job.id}: running · ${job.command.slice(0, 160)}`),
+			...active.map((job) => `Shell ${job.id}: running${job.nextLook ? ` · next health check ${clock(job.nextLook)}` : ""} · ${job.command.slice(0, 160)}`),
 			...[...subagents].map(([id, run]) => `Subagent ${id}: active · ${run.mode}${run.agents.length ? ` · ${run.agents.join(", ")}` : ""}`),
 		];
 		return { messages: [...event.messages, {
@@ -227,7 +230,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 						try {
 							pi.sendMessage({
 								customType: "pix-background-health",
-								content: `${describe(job)}\nHealth check ${checkpoint} after ${delay}s. The command is still running. Inspect background status id=${job.id} if useful; otherwise continue other work or yield. The next check is automatic.`,
+								content: `${describe(job)}\nHealth check ${checkpoint} after ${delay}s. The command is still running. Inspect background status id=${job.id} if useful; otherwise continue other work or yield. The next check is automatic${(() => { const d = reminderDelaySeconds(reminder, interval, checkpoint); return d === undefined ? "" : ` at ${clock(Date.now() + d * 1000)}`; })()}.`,
 								display: false,
 								details: { id: job.id, checkpoint },
 							}, { triggerTurn: true, deliverAs: "followUp" });
@@ -273,7 +276,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 			job.done = job.done.catch((error) => {
 				if (!closed && ctx.hasUI) ctx.ui.notify(`Background ${job.id} notification failed: ${String(error)}`, "error");
 			});
-			return result(`${describe(job)}\nCompletion will wake the agent${reminder === "off" ? "" : `; ${reminder} health checks will also wake while it runs`}. If a todo step waits on it, set that step's job to ${job.id}. Do other work or yield; no polling needed.`, job);
+			return result(`${describe(job)}\nCompletion will wake the agent${reminder === "off" ? "" : `; ${reminder} health checks will also wake while it runs${job.nextLook ? ` (first at ${clock(job.nextLook)})` : ""}`}. If a todo step waits on it, set that step's job to ${job.id}. Do other work or yield; no polling needed.`, job);
 		},
 	});
 }

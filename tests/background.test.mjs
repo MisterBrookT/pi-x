@@ -371,3 +371,17 @@ test("state query reports the earliest next health check, and changes are announ
 	assert.equal(after.running, 0);
 	assert.equal(after.nextLook, undefined);
 });
+
+test("the agent is told the next health check time, so it can tell Brook", async (t) => {
+	const timers = clock();
+	const goalRef = { current: { id: "g1", active: true } };
+	const h = harness(t, "tui", timers, goalRef);
+	const g = await gate(t);
+	const started = text(await h.call({ action: "start", command: g.command, reminder: "fixed", intervalSeconds: 600 }));
+	assert.match(started, /first at \d\d:\d\d/);
+	const ctxResult = h.handlers.get("context")({ messages: [] });
+	assert.match(ctxResult.messages.at(-1).content, /next health check \d\d:\d\d/);
+	timers.fire();
+	assert.match(h.messages.at(-1).message.content, /next check is automatic at \d\d:\d\d/);
+	await h.call({ action: "stop", id: "1" });
+});
