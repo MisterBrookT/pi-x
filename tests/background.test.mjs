@@ -178,7 +178,7 @@ test("one small tool returns before completion and wakes once with stdout and st
 	const h = harness(t);
 	assert.equal(h.tool.name, "background");
 	assert.match(h.tool.description, /Completion notifies automatically/);
-	assert.match(h.tool.description, /stopped on exit, reload, or branch switch/);
+	assert.match(h.tool.description, /kept across \/reload, stopped on exit/);
 	assert.match(h.tool.description, /No stdin.*bash-only extension hooks/);
 	assert.doesNotMatch(h.tool.description, /do other work|do not poll|start requires command/);
 	assert.match(h.tool.parameters.properties.command.description, /required for start/);
@@ -384,4 +384,45 @@ test("the agent is told the next health check time, so it can tell Brook", async
 	timers.fire();
 	assert.match(h.messages.at(-1).message.content, /next check is automatic at \d\d:\d\d/);
 	await h.call({ action: "stop", id: "1" });
+});
+
+test("/reload keeps a running job: the new instance gets its result and health checks", async (t) => {
+	const sm = SessionManager.inMemory();
+	const make = () => {
+		let tool; const handlers = new Map(); const messages = []; const events = new EventEmitter(); const statuses = new Map();
+		registerBackground({
+			events: createEventBus(),
+			registerTool(v) { tool = v; }, on(n, h) { handlers.set(n, h); },
+			sendMessage(m, o) { messages.push({ message: m, options: o }); events.emit("wake", m); },
+		});
+		const ctx = { cwd: process.cwd(), mode: "tui", hasUI: true, sessionManager: sm, thinkingLevel: "off",
+			ui: { notify() {}, setStatus: (k, v) => { if (v === undefined) statuses.delete(k); else statuses.set(k, v); } } };
+		handlers.get("session_start")({}, ctx);
+		const call = (args) => tool.execute("t", validateToolArguments(tool, { type: "toolCall", id: "t", name: tool.name, arguments: args }), undefined, undefined, ctx);
+		return { handlers, messages, call, ctx, status: () => statuses.get("pix-background"), wake: () => once(events, "wake", { signal: AbortSignal.timeout(10000) }).then(([m]) => m) };
+	};
+	const g = await gate(t);
+	const a = make();
+	await a.call({ action: "start", command: g.command });
+	await a.handlers.get("session_shutdown")({ reason: "reload" }, a.ctx);
+	const b = make();
+	t.after(() => b.handlers.get("session_shutdown")({ reason: "quit" }, b.ctx));
+	assert.match(text(await b.call({ action: "status" })), /Job 1: running/, "the job is still running after reload");
+	assert.match(b.status() ?? "", /1 job/);
+	const res = await g.request();
+	const woke = b.wake();
+	res.end("done after reload");
+	const msg = await woke;
+	assert.match(msg.content, /Job 1: completed/);
+	assert.match(msg.content, /done after reload/);
+	assert.equal(a.messages.filter((m) => m.message.customType === "pix-background").length, 0, "the old instance stays silent");
+	assert.match(text(await b.call({ action: "start", command: "true" })), /Job 2:/, "ids continue after reload");
+});
+
+test("quit still stops running jobs", async (t) => {
+	const h = harness(t);
+	const g = await gate(t);
+	await h.call({ action: "start", command: g.command });
+	await h.handlers.get("session_shutdown")({ reason: "quit" }, h.ctx);
+	assert.match(text(await (async () => { try { return await h.call({ action: "status" }); } catch (e) { return { content: [{ text: e.message }] }; } })()), /closing|No background jobs/);
 });
