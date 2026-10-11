@@ -186,3 +186,19 @@ test("the session list carries the next background health check for the phone", 
   await put({ busy: false, waiting: 1, nextLook: "junk" });
   assert.equal((await list()).nextLook, undefined, "invalid values are dropped");
 });
+
+test("sidebar links come from a local file, only http(s), and the relay allows the route", async t => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { relayAllowed } = await import("../src/remote-relay-agent.ts");
+  const dir = await mkdtemp(join(tmpdir(), "links-"));
+  const linksPath = join(dir, "links.json");
+  await writeFile(linksPath, JSON.stringify([{ label: "Book", url: "https://decision.example/" }, { label: "Bad", url: "javascript:alert(1)" }, { label: "", url: "https://x" }]));
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, linksPath }); t.after(() => hub.close());
+  const get = async () => (await fetch(`http://127.0.0.1:${hub.port}/api/links`, { headers: { authorization: `Bearer ${token}` } })).json();
+  assert.deepEqual(await get(), [{ label: "Book", url: "https://decision.example/" }]);
+  assert.ok(relayAllowed("/api/links", "GET"));
+  assert.ok(!relayAllowed("/api/links", "POST"));
+});

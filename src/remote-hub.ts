@@ -20,6 +20,17 @@ import { actItem, dismissItem, doneItem, forYouView, laterItem, nowItem } from "
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
 export const remoteTokenPath = join(homedir(), ".pi/agent/pix-remote/token");
+/** Bookmarks shown in the phone sidebar: [{ "label": "Book", "url": "https://..." }]. Local only, never in Git. */
+export const remoteLinksPath = join(homedir(), ".pi/agent/pix-remote/links.json");
+export async function readRemoteLinks(path = remoteLinksPath): Promise<{ label: string; url: string }[]> {
+  try {
+    const raw = JSON.parse(await readFile(path, "utf8"));
+    return (Array.isArray(raw) ? raw : []).flatMap((l: any) => {
+      const label = String(l?.label ?? "").trim().slice(0, 60), url = String(l?.url ?? "").trim();
+      return label && /^https?:\/\//.test(url) ? [{ label, url: url.slice(0, 2000) }] : [];
+    }).slice(0, 20);
+  } catch { return []; }
+}
 
 import type { RemoteHelper } from "./remote-helpers.ts";
 export interface RemoteSnapshot {
@@ -133,7 +144,7 @@ export interface RemoteHubOptions {
   token: string; port?: number; host?: string; push?: PushSender;
   /** Start a new Pi process with remote on in this already validated folder. */
   launch?: (dir: string, session?: string) => Promise<void>;
-  home?: string; sessionsDir?: string; memoryRoot?: string;
+  home?: string; sessionsDir?: string; memoryRoot?: string; linksPath?: string;
   /** Milliseconds since the Mac keyboard or mouse was last used; injectable for tests. */
   macIdleMs?: () => number;
   /** How long one "visible" presence report counts as Pix on screen; injectable for tests. */
@@ -339,6 +350,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         try { await options.launch(target.cwd, target.file); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
         return send(res, 202, { started: true, path: target.cwd });
       }
+      if (req.method === "GET" && path === "/api/links") return send(res, 200, await readRemoteLinks(options.linksPath));
       if (req.method === "GET" && path === "/api/memory") return send(res, 200, await listMemory(options.memoryRoot));
       if (req.method === "GET" && path === "/api/memory/file") {
         const file = await readMemory(url.searchParams.get("path"), options.memoryRoot);
