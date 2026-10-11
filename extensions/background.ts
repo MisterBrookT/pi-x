@@ -81,7 +81,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 		pi.events.emit(BACKGROUND_CHANGED, {});
 		if (!ctx.hasUI) return;
 		statusCtx = ctx;
-		const looks = [...jobs.values()].filter((job) => job.state === "running" && job.goalId && job.nextLook).map((job) => job.nextLook!);
+		const looks = [...jobs.values()].filter((job) => job.state === "running" && job.nextLook).map((job) => job.nextLook!);
 		ctx.ui.setStatus("pix-background", statusText(runningCount(), subagents.size, looks.length ? Math.min(...looks) : undefined));
 	};
 

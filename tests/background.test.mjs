@@ -309,11 +309,11 @@ test("the footer status counts running jobs and clears when they finish", { time
 	assert.equal(h.status(), undefined);
 	const g = await gate(t);
 	const first = g.request();
-	await h.call({ action: "start", command: g.command });
+	await h.call({ action: "start", command: g.command, reminder: "off" });
 	await first;
 	assert.equal(h.status(), "1 job running · /jobs");
 	const second = g.request();
-	await h.call({ action: "start", command: g.command });
+	await h.call({ action: "start", command: g.command, reminder: "off" });
 	const response = await second;
 	assert.equal(h.status(), "2 jobs running · /jobs");
 	const wake = h.wake();
@@ -323,6 +323,14 @@ test("the footer status counts running jobs and clears when they finish", { time
 	const stopped = await h.call({ action: "stop", id: "1" });
 	assert.equal(stopped.details.state, "stopped");
 	assert.equal(h.status(), undefined);
+});
+
+test("footer shows the next look for jobs started outside a goal too", { timeout: 15000 }, async (t) => {
+	const h = harness(t, "tui");
+	const g = await gate(t);
+	g.request();
+	await h.call({ action: "start", command: g.command, reminder: "fixed", intervalSeconds: 3600 });
+	assert.match(h.status(), /^1 job running · look \d\d:\d\d · \/jobs$/);
 });
 
 test("footer status names shells and agents together, with the control command", () => {
