@@ -1,7 +1,7 @@
 import { createBashToolDefinition, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { BACKGROUND_JOB_END, BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../src/background-state.ts";
+import { BACKGROUND_CHANGED, BACKGROUND_JOB_END, BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../src/background-state.ts";
 
 type State = "running" | "completed" | "failed" | "stopped";
 type Reminder = "off" | "fixed" | "exponential";
@@ -52,6 +52,7 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 	const runningCount = () => [...jobs.values()].filter((job) => job.state === "running").length;
 	/** Footer indicator: background work is otherwise invisible while the agent does something else. */
 	const showStatus = (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => {
+		pi.events.emit(BACKGROUND_CHANGED, {});
 		if (!ctx.hasUI) return;
 		statusCtx = ctx;
 		const looks = [...jobs.values()].filter((job) => job.state === "running" && job.goalId && job.nextLook).map((job) => job.nextLook!);
@@ -76,7 +77,12 @@ export default function backgroundExtension(pi: ExtensionAPI, timers: Pick<typeo
 
 	pi.events.on(BACKGROUND_STATE_QUERY, (data: unknown) => {
 		if (data && typeof data === "object" && "running" in data) {
-			(data as BackgroundState).running += [...jobs.values()].filter((job) => job.state === "running").length;
+			const state = data as BackgroundState;
+			const running = [...jobs.values()].filter((job) => job.state === "running");
+			state.running += running.length;
+			for (const job of running) {
+				if (job.nextLook && (state.nextLook === undefined || job.nextLook < state.nextLook)) state.nextLook = job.nextLook;
+			}
 		}
 	});
 

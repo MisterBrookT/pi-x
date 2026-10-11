@@ -10,7 +10,7 @@ import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort, remoteHost, startRemoteHub, type RemoteHub, type RemoteAbort, type RemoteAction, type RemotePrompt, type RemoteSnapshot } from "../src/remote-hub.ts";
 import { branchMessages, remoteMedia, remoteMessages } from "../src/remote-state.ts";
 import { createPushSender } from "../src/remote-push.ts";
-import { backgroundState } from "../src/background-state.ts";
+import { BACKGROUND_CHANGED, backgroundState } from "../src/background-state.ts";
 import { runningHelpers } from "../src/remote-helpers.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../src/remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "./question.ts";
@@ -83,6 +83,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   pi.on("input", event => { if (event.source === "interactive") origin = "mac"; });
   let pendingQuestion: { id: string; question: string; options: { label: string; description?: string }[] } | undefined;
   pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) }; schedulePush(); } });
+  pi.events.on(BACKGROUND_CHANGED, () => schedulePush());
   pi.events.on(QUESTION_CLOSE, (data: any) => { if (pendingQuestion && data?.id === pendingQuestion.id) { pendingQuestion = undefined; schedulePush(); } });
   const answerQuestion = (answer: string) => { if (!pendingQuestion || !answer.trim()) return false; pi.events.emit(QUESTION_ANSWER, { id: pendingQuestion.id, answer }); return true; };
   let streaming = "";
@@ -166,7 +167,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, waiting: busy ? 0 : backgroundState(pi).running, question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); return { waiting: busy ? 0 : bg.running, nextLook: bg.running ? bg.nextLook : undefined }; })(), question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {

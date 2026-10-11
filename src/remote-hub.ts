@@ -35,6 +35,8 @@ export interface RemoteSnapshot {
   question?: RemoteQuestion;
   /** Background jobs still running while the agent is idle: Pi will resume on its own. */
   waiting?: number;
+  /** Next scheduled background health check (epoch ms), shown on the phone like the Mac footer. */
+  nextLook?: number;
   messages: RemoteMessage[];
   streaming?: string;
   streamingHtml?: string;
@@ -203,10 +205,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(({ id, name, named, cwd, busy, waiting, updatedAt, messages }) => {
+    .map(({ id, name, named, cwd, busy, waiting, nextLook, updatedAt, messages }) => {
       const last = messages.at(-1);
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
-      return { id, name, named, cwd, busy, waiting, updatedAt, preview };
+      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -458,7 +460,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
           const next: Registered = {
             ...extra,
-            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), origin: snapshot.origin === "phone" ? "phone" : snapshot.origin === "mac" ? "mac" : undefined, question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0),
+            id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), origin: snapshot.origin === "phone" ? "phone" : snapshot.origin === "mac" ? "mac" : undefined, question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0), nextLook: Number.isFinite(Number(snapshot.nextLook)) && Number(snapshot.nextLook) > 0 ? Number(snapshot.nextLook) : undefined,
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,

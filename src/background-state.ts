@@ -4,8 +4,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 export const BACKGROUND_STATE_QUERY = "pix:background-state:query";
 /** Emitted with { id, state } when a background job ends, so todo steps waiting on it can be refreshed. */
 export const BACKGROUND_JOB_END = "pix:background-job-end";
+/** Emitted when running jobs or their next health check change, so remote views can refresh. */
+export const BACKGROUND_CHANGED = "pix:background-changed";
 export interface BackgroundState {
 	running: number;
+	/** Earliest scheduled health check (epoch ms) among running jobs, if any. */
+	nextLook?: number;
 	goal?: { id: string; active: boolean };
 }
 

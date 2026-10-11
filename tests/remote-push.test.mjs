@@ -173,3 +173,16 @@ test("pushes follow the conversation: Mac-driven turns stay silent while Brook i
   await turn("mac");
   assert.deepEqual(notes.map(n => n.body), ["Pi finished", "Pi finished"], "Mac task, Brook walked away: push");
 });
+
+test("the session list carries the next background health check for the phone", async t => {
+  const push = { publicKey: async () => "k", count: async () => 1, subscribe: async () => {}, notify: async () => {} };
+  const token = "t".repeat(40);
+  const hub = await startRemoteHub({ token, port: 0, push }); t.after(() => hub.close());
+  const put = body => fetch(`http://127.0.0.1:${hub.port}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ id: "s1", name: "w", cwd: "/", messages: [], ...body }) });
+  const at = Date.UTC(2026, 9, 11, 7, 30);
+  await put({ busy: false, waiting: 1, nextLook: at });
+  const list = async () => { const j = await (await fetch(`http://127.0.0.1:${hub.port}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json(); return j.sessions?.[0] ?? j[0]; };
+  assert.equal((await list()).nextLook, at);
+  await put({ busy: false, waiting: 1, nextLook: "junk" });
+  assert.equal((await list()).nextLook, undefined, "invalid values are dropped");
+});

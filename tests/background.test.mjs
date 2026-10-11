@@ -349,3 +349,25 @@ test("completion wakes when a different goal became active while the job ran", {
 	assert.equal(h.messages.at(-1).options.triggerTurn, true);
 	assert.match(h.messages.at(-1).message.content, /Continue the existing task/);
 });
+
+test("state query reports the earliest next health check, and changes are announced", async (t) => {
+	const timers = clock();
+	const goalRef = { current: { id: "g1", active: true } };
+	const h = harness(t, "tui", timers, goalRef);
+	const { BACKGROUND_CHANGED } = await import("../src/background-state.ts");
+	let changed = 0;
+	h.bus.on(BACKGROUND_CHANGED, () => { changed++; });
+	const g = await gate(t);
+	const before = Date.now();
+	await h.call({ action: "start", command: g.command, reminder: "fixed", intervalSeconds: 600 });
+	const state = { running: 0 };
+	h.bus.emit(BACKGROUND_STATE_QUERY, state);
+	assert.equal(state.running, 1);
+	assert.ok(state.nextLook >= before + 600_000 && state.nextLook <= Date.now() + 600_000, "next check is the scheduled reminder time");
+	assert.ok(changed > 0, "starting a job announces a change so the phone refreshes");
+	await h.call({ action: "stop", id: "1" });
+	const after = { running: 0 };
+	h.bus.emit(BACKGROUND_STATE_QUERY, after);
+	assert.equal(after.running, 0);
+	assert.equal(after.nextLook, undefined);
+});
