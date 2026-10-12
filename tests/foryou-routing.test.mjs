@@ -168,3 +168,9 @@ test("regression: the pile check sees each loop's latest progress, so it can clo
 	assert.match(p, /latest progress: - 2026-10-11: Submitted and verified/);
 	assert.match(p, /says the work is finished[\s\S]*close it/);
 });
+
+test("regression: ✓ Done and Now work from the phone through the relay", async () => {
+	const { relayAllowed } = await import("../src/remote-relay-agent.ts");
+	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(relayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
+	assert.ok(!relayAllowed("/api/foryou/abc123/rm", "POST"));
+});
