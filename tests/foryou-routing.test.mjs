@@ -139,3 +139,10 @@ test("Mac: Something else asks for text; dismissing the picker changes nothing",
 	assert.match(pi.sent[0], /only draft it/);
 	assert.ok(!existsSync(join(d, "nothing")));
 });
+
+test("judgment log: weekly prune keeps the last 30 days and unreadable lines", async () => {
+	const { pruneLog } = await import("../src/proactive.ts");
+	const now = Date.parse("2026-10-12T00:00:00Z");
+	const text = [{ at: "2026-08-01T00:00:00Z", kind: "judge" }, { at: "2026-10-01T00:00:00Z", kind: "error" }].map(x => JSON.stringify(x)).join("\n") + "\nnot json\n";
+	assert.equal(pruneLog(text, now), JSON.stringify({ at: "2026-10-01T00:00:00Z", kind: "error" }) + "\nnot json\n");
+});

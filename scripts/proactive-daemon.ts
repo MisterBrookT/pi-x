@@ -17,7 +17,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
 import { actItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
@@ -82,7 +82,7 @@ async function housekeeping(cfg: Config, state: Record<string, string>) {
 				}
 				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), raw, close: v.close, merge: v.merge });
 				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}`);
-			} catch (e) { log(`pile: error ${(e as Error).message}`); }
+			} catch (e) { log(`pile: error ${(e as Error).message}`); judged({ kind: "error", source: "pile", error: (e as Error).message }); }
 		}
 		state["@pile"] = new Date(now).toISOString();
 	}
@@ -93,9 +93,14 @@ async function housekeeping(cfg: Config, state: Record<string, string>) {
 				if (!out.startsWith("#") || out.length < 20) continue;
 				if (!dry) { writeCard(P.dir, c.name, out); appendFileSync(P.memoryLog, `${new Date().toISOString()} ${c.name} tidied (${c.text.split("\n").length} -> ${out.split("\n").length} lines)\n`); }
 				judged({ kind: "tidy", card: c.name, before: c.text, after: out });
-			} catch (e) { log(`tidy ${c.name}: error ${(e as Error).message}`); }
+			} catch (e) { log(`tidy ${c.name}: error ${(e as Error).message}`); judged({ kind: "error", source: `tidy ${c.name}`, error: (e as Error).message }); }
 		}
 		state["@tidy"] = new Date(now).toISOString();
+	}
+	// Weekly: the judgment log keeps the last 30 days.
+	if (now - Date.parse(state["@prune"] ?? "0") > 7 * DAY) {
+		if (existsSync(P.judgments) && !dry) { const before = readFileSync(P.judgments, "utf8"), after = pruneLog(before, now); if (after.length !== before.length) { writeFileSync(P.judgments, after); log(`judgments: pruned to last 30 days (${before.split("\n").length - 1} -> ${after.split("\n").length - 1} lines)`); } }
+		state["@prune"] = new Date(now).toISOString();
 	}
 }
 
@@ -103,7 +108,7 @@ async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
 	const work = await workSessions();
 	let sources = cfg.sources;
-	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
+	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
 		try {
 			const adapter = adapterFor(src);
@@ -161,7 +166,7 @@ async function tick(cfg: Config) {
 				const target = to ? work.find(w => w.id === to) : undefined;
 				if (target && !parked) { suggestItem(it.id, { id: target.id, name: target.name }); log(`card: ${it.id} -> ${target.name}`); }
 			}
-		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); }
+		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
 	}
 	await housekeeping(cfg, state);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));

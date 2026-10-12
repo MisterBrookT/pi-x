@@ -287,6 +287,12 @@ export function parsePile(raw: string, open: Set<string>): { close: { id: string
 	} catch { return { close: [], merge: [] }; }
 }
 
+/** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */
+export function pruneLog(text: string, now: number, days = 30): string {
+	const cut = now - days * 86_400_000;
+	return text.split("\n").filter(l => { if (!l.trim()) return false; try { const t = Date.parse(JSON.parse(l).at); return Number.isNaN(t) || t >= cut; } catch { return true; } }).map(l => l + "\n").join("");
+}
+
 /** Public view of one item for the phone: no internal paths or commands. */
 export const publicItem = (i: Item) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
 
