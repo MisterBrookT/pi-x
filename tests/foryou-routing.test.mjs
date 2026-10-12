@@ -146,3 +146,25 @@ test("judgment log: weekly prune keeps the last 30 days and unreadable lines", a
 	const text = [{ at: "2026-08-01T00:00:00Z", kind: "judge" }, { at: "2026-10-01T00:00:00Z", kind: "error" }].map(x => JSON.stringify(x)).join("\n") + "\nnot json\n";
 	assert.equal(pruneLog(text, now), JSON.stringify({ at: "2026-10-01T00:00:00Z", kind: "error" }) + "\nnot json\n");
 });
+
+test("regression: a loop Pi finished does not sit silently in 'Pi is on it'", async () => {
+	const { staleOnit } = await import("../src/proactive.ts");
+	const { finishedItem } = await import("../src/proactive-store.ts");
+	const now = Date.parse("2026-10-12T20:00:00Z");
+	const old = loop("o", { status: "onit", session: "s", at_status: "2026-10-10T00:00:00Z" });
+	const fresh = loop("f", { status: "onit", session: "s", at_status: "2026-10-12T19:00:00Z" });
+	assert.deepEqual(staleOnit([old, fresh, loop("p")], now).map(i => i.id), ["o"], "untouched for 6 h comes back");
+	// A session that finishes says so: the loop returns to brook with a Check button.
+	const d = tmp(old);
+	assert.equal(finishedItem("o", "  ", d), false);
+	assert.ok(finishedItem("o", "Form filled, screenshot confirmed", d));
+	const [it] = parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8"));
+	assert.equal(it.status, "pending"); assert.equal(it.button, "Check result");
+	assert.match(it.note, /Finished: Form filled/);
+});
+
+test("regression: the pile check sees each loop's latest progress, so it can close finished ones", () => {
+	const p = pilePrompt({ me: "b", memory: "", open: [loop("a", { note: "- 2026-10-10: old\n- 2026-10-11: Submitted and verified" })], now: "n" });
+	assert.match(p, /latest progress: - 2026-10-11: Submitted and verified/);
+	assert.match(p, /says the work is finished[\s\S]*close it/);
+});

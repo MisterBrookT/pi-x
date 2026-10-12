@@ -6,6 +6,7 @@
 //        node scripts/proactive-daemon.ts later <id>    hide until near its due date (or tomorrow)
 //        node scripts/proactive-daemon.ts note <id> "<progress>"  add a line to the loop's brief
 //        node scripts/proactive-daemon.ts next <id> "<button>" "<next step>" ["<what is done>"]  step done; next one is brook's
+//        node scripts/proactive-daemon.ts finished <id> "<what was done>"  whole loop done; brook checks and closes it
 //        node scripts/proactive-daemon.ts done <id>     brook handled it himself
 //        node scripts/proactive-daemon.ts now <id>      bring a parked loop back now
 //        node scripts/proactive-daemon.ts open <id>     show the session that is on it
@@ -17,10 +18,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
+import { actItem, finishedItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -168,6 +169,12 @@ async function tick(cfg: Config) {
 			}
 		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
 	}
+	// "On it" loops untouched for 6 h come back to brook: no loop sits silently in "Pi is on it".
+	if (!dry) for (const it of staleOnit(parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : ""), Date.now())) {
+		nextItem(it.id, { button: "Check result", action: "The Pi session stopped working on this. Check where it stands: ✓ if done, or tap to continue.", note: "No progress for 6 h; back to brook" });
+		judged({ kind: "stale", id: it.id, title: it.title, session: it.session });
+		log(`stale: ${it.id} back to brook`);
+	}
 	await housekeeping(cfg, state);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
@@ -190,6 +197,10 @@ if (verb === "note") {
 if (verb === "next") {
 	const [button = "", action = "", note] = process.argv.slice(4);
 	if (!nextItem(itemId, { button, action, note })) { console.error(`no open loop ${itemId} (or empty button/step)`); process.exit(1); }
+	process.exit(0);
+}
+if (verb === "finished") {
+	if (!finishedItem(itemId, process.argv.slice(4).join(" "))) { console.error(`no open loop ${itemId} (or empty summary)`); process.exit(1); }
 	process.exit(0);
 }
 if (verb === "done" || verb === "now") {

@@ -8,7 +8,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { readFileSync } from "node:fs";
-import { actItem, answerSuggestion, cardTask, openSuggestions, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, finishedItem, answerSuggestion, cardTask, openSuggestions, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
 const TOOL = "loops";
@@ -44,9 +44,9 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["handoff", "note", "next", "later", "done", "drop"] as const),
+			action: StringEnum(["handoff", "note", "next", "finished", "later", "done", "drop"] as const),
 			id: Type.String({ description: "Loop id" }),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
 			cwd: Type.Optional(Type.String({ description: "handoff into \"new\": the project folder (default: the loop's project)" })),
@@ -57,6 +57,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		async execute(_id, p) {
 			const done = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
 			if (p.action === "note") return done(noteItem(p.id, p.text ?? "", deps.dir) ? "Noted." : `No loop ${p.id}, or empty note.`);
+			if (p.action === "finished") return done(finishedItem(p.id, p.text ?? "", deps.dir) ? "Back to brook to check and close." : `No open loop ${p.id}, or empty text.`);
 			if (p.action === "later") return done(laterItem(p.id, deps.dir) ? "Parked." : `No open loop ${p.id}.`);
 			if (p.action === "next") return done(nextItem(p.id, { button: p.button ?? "", action: p.step ?? "", note: p.text }, deps.dir) ? `Moved ${p.id} on: "${p.button}".` : `No open loop ${p.id}, or missing button/step.`);
 			if (p.action === "done") return done(doneItem(p.id, deps.dir) ? "Done." : `No open loop ${p.id}.`);

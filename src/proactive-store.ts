@@ -58,6 +58,12 @@ export function doneItem(id: string, dir?: string): boolean {
 	return true;
 }
 
+/** A work session says the whole loop is done: it comes back once so brook can check and close it (✓). */
+export function finishedItem(id: string, summary: string, dir?: string): boolean {
+	const text = summary.replace(/\s+/g, " ").trim();
+	return !!text && nextItem(id, { button: "Check result", action: `Finished: ${text.slice(0, 180)}. Check it, then ✓ to close.`, note: `Finished: ${text}` }, dir);
+}
+
 /** Now: bring a parked or "on it" loop back to "needs you" at once. */
 export function nowItem(id: string, dir?: string): boolean {
 	if (!readAll(dir).some(i => i.id === id && isOpen(i))) return false;

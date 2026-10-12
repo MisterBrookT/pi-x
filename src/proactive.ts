@@ -266,13 +266,14 @@ export function pilePrompt(o: { me: string; memory: string; open: Item[]; now: s
 Look at every loop below and decide which ones should leave the list:
 - "close": finished, answered, cancelled, or stale (older than ~2 weeks, past due with no sign anyone still waits, or no longer relevant)
 - "merge": two loops about the same thing; keep the better one, close the other
-Leave a loop when unsure. Never close a loop that has recent progress or a future due date.
+- a loop whose latest progress line says the work is finished, submitted, or confirmed: close it
+Leave a loop when unsure. Do not close a loop that is still in progress or has a future due date.
 
 ## Memory
 ${o.memory || "(empty)"}
 
 ## Open loops
-${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}`).join("\n")}
+${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}${i.note ? `\n  latest progress: ${i.note.split("\n").at(-1)!.slice(0, 400)}` : ""}`).join("\n")}
 
 Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}]}`;
 }
@@ -285,6 +286,14 @@ export function parsePile(raw: string, open: Set<string>): { close: { id: string
 		const merge = (Array.isArray(v.merge) ? v.merge : []).filter((m: any) => open.has(m?.keep) && open.has(m?.drop) && m.keep !== m.drop).map((m: any) => ({ keep: m.keep, drop: m.drop, why: why(m.why) }));
 		return { close, merge };
 	} catch { return { close: [], merge: [] }; }
+}
+
+/**
+ * "On it" loops nobody touched for `hours`: the session stopped (finished without saying so, or stuck).
+ * They come back to brook as "needs you" with a Check button, so nothing sits silently in "Pi is on it".
+ */
+export function staleOnit(items: Item[], now: number, hours = 6): Item[] {
+	return items.filter(i => i.status === "onit" && now - Date.parse(i.at_status ?? i.at) > hours * 3_600_000);
 }
 
 /** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */
@@ -317,5 +326,7 @@ Draft anything outbound and show it to me first; do not send without my confirma
 When you stop, record where the loop stands, so whoever picks it up next knows (one of these):
 - still in progress: ${cli} note ${it.id} "<what is done, what is next>"
 - this step is finished and the next step is brook's (e.g. after a test, sending the results):
-  ${cli} next ${it.id} "<1-3 word outcome button, e.g. Send results to Amber>" "<the next step>" "<what is done>"`;
+  ${cli} next ${it.id} "<1-3 word outcome button, e.g. Send results to Amber>" "<the next step>" "<what is done>"
+- the whole loop is finished (nothing left to do): ${cli} finished ${it.id} "<what was done, one line>"
+  (brook gets it back once to check and close; never leave a finished loop "on it")`;
 }
