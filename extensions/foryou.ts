@@ -8,7 +8,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { readFileSync } from "node:fs";
-import { actItem, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, answerSuggestion, cardTask, openSuggestions, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
 const TOOL = "loops";
@@ -33,7 +33,9 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 	return !!(await actItem(id, { into, cwd }));
 }
 
-export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; dir?: string }
+export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; dir?: string; cardPollMs?: number }
+
+export const CARD_DO = "Do it", CARD_NOT_NOW = "Not now", CARD_ELSE = "Something else…";
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -70,7 +72,36 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);
 		pi.setActiveTools([...active]);
 	};
-	pi.on("session_start", (_e, ctx) => apply(ctx));
+	// Job cards: For you suggested this session do a loop's next step. Show it when Pi is idle; nothing
+	// runs until brook picks. The phone shows the same card; whichever answers first wins, the other closes.
+	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined;
+	const check = async (ctx: any) => {
+		const sid = ctx?.sessionManager?.getSessionId?.();
+		if (!sid || !ctx.hasUI) return;
+		const it = openSuggestions(deps.dir).find(i => i.suggest!.session === sid);
+		if (showing && showing !== it?.id) { close?.abort(); return; }
+		if (!it || showing || !ctx.isIdle()) return;
+		showing = it.id; close = new AbortController();
+		try {
+			const title = `For you · ${it.source}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
+			const pick = await ctx.ui.select(title, [CARD_DO, CARD_NOT_NOW, CARD_ELSE], { signal: close.signal });
+			if (!pick) return;
+			const text = pick === CARD_ELSE ? await ctx.ui.input("What should this session do instead?", "", { signal: close.signal }) : undefined;
+			if (pick === CARD_ELSE && !text?.trim()) return;
+			const answer = pick === CARD_DO ? "do" : pick === CARD_NOT_NOW ? "notnow" : "else";
+			if (!answerSuggestion(it.id, answer, { text, by: "mac", dir: deps.dir })) { ctx.ui.notify("That card was already answered.", "info"); return; }
+			const task = answer === "notnow" ? undefined : cardTask(it.id, sid, ctx.cwd, deps.dir);
+			if (task) pi.sendUserMessage(task);
+		} finally { showing = undefined; close = undefined; }
+	};
+	pi.on("session_start", (_e, ctx) => {
+		apply(ctx);
+		clearInterval(timer);
+		timer = setInterval(() => void check(ctx).catch(() => {}), deps.cardPollMs ?? 4000);
+		timer.unref?.();
+	});
+	pi.on("agent_end", (_e, ctx) => void check(ctx).catch(() => {}));
+	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
 	pi.on("before_agent_start", async (event, ctx) => {
 		apply(ctx);
 		if (!isCoordinator(ctx)) return undefined;

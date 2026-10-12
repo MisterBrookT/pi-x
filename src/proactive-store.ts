@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { actPrompt, addNote, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
+import { memoryAll, memoryDir } from "./proactive-memory.ts";
 
 export function readPending(dir?: string): Item[] {
 	const { inbox } = paths(dir);
@@ -124,6 +125,49 @@ export function noteItem(id: string, text: string, dir?: string): boolean {
 	return true;
 }
 
+/**
+ * Job cards. The judge may suggest that a live session does a loop's next step; the card shows in that
+ * session (Mac and phone) and nothing runs until brook answers there. First answer wins.
+ * do = run the next step in that session; else = run brook's own instruction there; notnow = drop the card,
+ * the loop stays in For you.
+ */
+export function suggestItem(id: string, session: { id: string; name?: string }, dir?: string, now = new Date()): boolean {
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	if (!it || !/^[\w.-]{1,80}$/.test(session.id)) return false;
+	write(dir, { id, suggest: { session: session.id, ...(session.name ? { name: session.name } : {}), at: now.toISOString() } });
+	return true;
+}
+
+/** Cards still waiting for brook, by session id. */
+export function openSuggestions(dir?: string): Item[] {
+	return readAll(dir).filter(i => isOpen(i) && i.status !== "onit" && i.suggest && !i.suggest.answer);
+}
+
+export type SuggestAnswer = "do" | "notnow" | "else";
+/** Record brook's answer. False when there is no open card for this loop, it is answered already, or "else" has no text. */
+export function answerSuggestion(id: string, answer: SuggestAnswer, o: { text?: string; by?: string; dir?: string; now?: Date } = {}): Item | undefined {
+	const it = readAll(o.dir).find(i => i.id === id && isOpen(i));
+	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
+	if (!it?.suggest || it.suggest.answer || !["do", "notnow", "else"].includes(answer) || (answer === "else" && !text)) return undefined;
+	const suggest = { ...it.suggest, answer, ...(text && answer === "else" ? { text } : {}), answeredAt: (o.now ?? new Date()).toISOString(), ...(o.by ? { by: o.by } : {}) };
+	write(o.dir, { id, suggest });
+	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: suggest.answeredAt, kind: "card", id, title: it.title, session: it.suggest.session, answer, text: suggest.text, by: o.by }) + "\n");
+	return { ...it, suggest };
+}
+
+/**
+ * The work a session runs after brook said yes on its card: takes the loop ("on it" here) and returns
+ * the prompt. Undefined when the card was not answered do/else for this session, or it already ran.
+ */
+export function cardTask(id: string, session: string, cwd: string, dir?: string): string | undefined {
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	const s = it?.suggest;
+	if (!it || !s || s.session !== session || (s.answer !== "do" && s.answer !== "else") || (it.status === "onit" && it.session === session)) return undefined;
+	takeItem(id, session, dir, cwd);
+	const base = actPrompt({ ...it, session: undefined }, paths(dir).dir);
+	return s.answer === "else" ? `brook answered a For you card with his own instruction. Do this instead of the suggested step:\n${s.text}\n\n(The loop, for context:)\n${base}` : `brook tapped "Do it" on a For you card in this session.\n\n${base}`;
+}
+
 /** The coordinator: one Pi session that sees every loop, does small ones itself, and hands big ones to work sessions. */
 export const forYouSession = { id: "pix-foryou", name: "For you", model: "openai-codex/gpt-6.1-sol" };
 
@@ -186,7 +230,7 @@ Decide where this is best done: here, in a session already open or already on th
  */
 export function coordinatorContext(dir?: string, live: LiveSession[] = [], now = Date.now()): string {
 	const P = paths(dir);
-	const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
+	const memory = existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
 	const open = readOpen(dir, now);
 	const loop = (i: Item) => [
 		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}] ${i.title} (${i.source})`,

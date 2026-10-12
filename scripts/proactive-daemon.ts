@@ -17,9 +17,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
+import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
+import { actItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -31,7 +32,8 @@ const readJson = <T>(f: string, d: T): T => { try { return JSON.parse(readFileSy
 function setup(): Config {
 	mkdirSync(P.dir, { recursive: true });
 	if (!existsSync(P.config)) writeFileSync(P.config, JSON.stringify(defaultConfig, null, 2));
-	if (!existsSync(P.memory)) writeFileSync(P.memory, "# Proactive memory\n\nWhat I care about, open promises, project state. Edit freely.\n");
+	if (!existsSync(P.memory) && !existsSync(memoryDir(P.dir))) writeFileSync(P.memory, "# Proactive memory\n\nWhat I care about, open promises, project state. Edit freely.\n");
+	if (migrateMemory(P.dir)) log("memory: moved memory.md into memory/ cards");
 	return { ...defaultConfig, ...readJson(P.config, {}) };
 }
 
@@ -45,9 +47,61 @@ async function ask(prompt: string, model: string): Promise<string> {
 	return out;
 }
 
+/** One line per judgment in judgments.jsonl: what the judge saw, what it said, what changed. For tuning. */
+const judged = (entry: Record<string, unknown>) => { try { appendFileSync(P.judgments, JSON.stringify({ at: new Date().toISOString(), ...entry }) + "\n"); } catch { /* */ } };
+
+/** What brook is working on: open Pi sessions from the Remote hub (name, folder, current todo, last line). */
+async function workSessions(): Promise<WorkSession[]> {
+	try {
+		const token = readFileSync(remoteTokenPath, "utf8").trim();
+		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/sessions`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000) });
+		const list = res.ok ? await res.json() as any[] : [];
+		return list.filter(s => s.id !== "pix-foryou").slice(0, 12).map(s => ({ id: String(s.id), name: String(s.name ?? ""), cwd: String(s.cwd ?? ""), busy: !!s.busy, todo: s.todo ? String(s.todo).slice(0, 160) : undefined, preview: s.preview ? String(s.preview).slice(0, 160) : undefined }));
+	} catch { return []; }
+}
+
+const DAY = 86_400_000;
+/**
+ * Once a day: ask the judge which open loops are finished, stale, or duplicates, and close them.
+ * Once a week: tidy long memory cards (merge duplicates, drop outdated lines). Both are logged.
+ */
+async function housekeeping(cfg: Config, state: Record<string, string>) {
+	const now = Date.now();
+	if (now - Date.parse(state["@pile"] ?? "0") > DAY) {
+		const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
+		const open = items.filter(isOpen);
+		if (open.length) {
+			try {
+				const prompt = pilePrompt({ me: cfg.me, memory: existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : "", open, now: new Date().toString() });
+				const raw = await ask(prompt, cfg.model);
+				const v = parsePile(raw, new Set(open.map(i => i.id)));
+				const stamp = new Date().toISOString();
+				if (!dry) {
+					for (const c of v.close) appendFileSync(P.inbox, JSON.stringify({ id: c.id, status: "resolved", at_status: stamp, closedWhy: c.why }) + "\n");
+					for (const m of v.merge) appendFileSync(P.inbox, JSON.stringify({ id: m.drop, status: "resolved", at_status: stamp, closedWhy: `merged into ${m.keep}: ${m.why}` }) + "\n");
+				}
+				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), raw, close: v.close, merge: v.merge });
+				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}`);
+			} catch (e) { log(`pile: error ${(e as Error).message}`); }
+		}
+		state["@pile"] = new Date(now).toISOString();
+	}
+	if (existsSync(memoryDir(P.dir)) && now - Date.parse(state["@tidy"] ?? "0") > 7 * DAY) {
+		for (const c of listCards(P.dir).filter(c => c.text.split("\n").length > 15)) {
+			try {
+				const out = (await ask(tidyPrompt(c.name, c.text, new Date().toDateString()), cfg.model)).trim().replace(/^```\w*\n|\n```$/g, "");
+				if (!out.startsWith("#") || out.length < 20) continue;
+				if (!dry) { writeCard(P.dir, c.name, out); appendFileSync(P.memoryLog, `${new Date().toISOString()} ${c.name} tidied (${c.text.split("\n").length} -> ${out.split("\n").length} lines)\n`); }
+				judged({ kind: "tidy", card: c.name, before: c.text, after: out });
+			} catch (e) { log(`tidy ${c.name}: error ${(e as Error).message}`); }
+		}
+		state["@tidy"] = new Date(now).toISOString();
+	}
+}
 
 async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
+	const work = await workSessions();
 	let sources = cfg.sources;
 	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
@@ -63,14 +117,19 @@ async function tick(cfg: Config) {
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
-			if (!judge) { if (last) state[key] = last; continue; }
+			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); if (last) state[key] = last; continue; }
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.
 			const pending = items.filter(isOpen).slice(-20);
 			const feedback = items.filter(i => !isOpen(i)).slice(-10);
-			const memory = existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
-			const raw = await ask(judgePrompt({ me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString() }), cfg.model);
+			const cards = existsSync(memoryDir(P.dir));
+			const memory = cards ? memoryForPrompt(P.dir, { msgs: [...ctx, ...fresh], source: src, extra: pending.map(p => p.title).join("\n") }) : existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
+			const prompt = judgePrompt({ me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString(), work, cards });
+			let raw = "";
+			try { raw = await ask(prompt, cfg.model); } catch (e) { judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, prompt, error: (e as Error).message }); throw e; }
 			const v = parseVerdict(raw);
-			if (v && (v.memory.add.length || v.memory.remove.length) && !dry) {
+			const changes = v && cards && !dry ? applyCardEdits(P.dir, v.cards, { source: src.name }) : [];
+			if (changes.length) { logCardChanges(P.memoryLog, changes); log(`memory: ${changes.map(c => `${c.card} +${c.added.length} -${c.removed.length}`).join(", ")}`); }
+			if (v && !cards && (v.memory.add.length || v.memory.remove.length) && !dry) {
 				const r = applyMemory(memory, v.memory);
 				if (r.added.length || r.removed.length) {
 					writeFileSync(P.memory, r.text);
@@ -80,6 +139,7 @@ async function tick(cfg: Config) {
 				}
 			}
 			if (last) state[key] = last;
+			judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, pending: pending.map(p => p.id), work: work.map(w => w.id), memoryChars: memory.length, prompt, raw, verdict: v, cardChanges: changes, dry });
 			if (!v) { log(`${src.name}: ${fresh.length} new -> bad verdict: ${raw.slice(0, 120)}`); continue; }
 			const open = new Set(pending.map(p => p.id));
 			const close = v.close.filter(id => open.has(id));
@@ -90,16 +150,20 @@ async function tick(cfg: Config) {
 			for (const id of close) appendFileSync(P.inbox, JSON.stringify({ id, status: "resolved", at_status: stamp }) + "\n");
 			for (const u of update) appendFileSync(P.inbox, JSON.stringify(updateLine(pending.find(p => p.id === u.id)!, u, now)) + "\n");
 			const listed = [...items];
-			for (const { state, ...a } of v.alerts) {
+			for (const { state, to, ...a } of v.alerts) {
 				// Over the hourly limit an alert still enters the list, just without a push (quiet).
 				// A new loop that is already parked (e.g. waiting on someone) is quiet and comes back later.
 				const parked = state === "waiting" || state === "later";
 				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project ?? a.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
 				listed.push(it);
 				appendFileSync(P.inbox, JSON.stringify(it) + "\n");
+				// The judge thinks a live session is already on this: offer a job card there (brook decides).
+				const target = to ? work.find(w => w.id === to) : undefined;
+				if (target && !parked) { suggestItem(it.id, { id: target.id, name: target.name }); log(`card: ${it.id} -> ${target.name}`); }
 			}
 		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); }
 	}
+	await housekeeping(cfg, state);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
 }

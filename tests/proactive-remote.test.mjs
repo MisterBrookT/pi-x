@@ -176,3 +176,67 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   assert.equal(await list.isHidden(), true, "no list once the word is done");
   assert.deepEqual(errors, []);
 });
+
+test("phone job card: shows in the suggested session; Do it sends the loop's work there once; Mac and phone see it close", async t => {
+  const { suggestItem } = await import("../src/proactive-store.ts");
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  suggestItem("j1", { id: "s1", name: "backtest" }, dir);
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "backtest", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
+  assert.ok(relayAllowed("/api/foryou/j1/card", "POST"), "the phone can answer through the relay");
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  const card = page.locator('[data-job="j1"]');
+  await card.waitFor();
+  assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Not now", "Something else…"]);
+  const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
+  await card.getByRole("button", { name: "Do it" }).click();
+  const { prompts } = await next;
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /tapped "Do it"[\s\S]*Switch the backtest loader/);
+  await card.waitFor({ state: "detached", timeout: 8000 });
+  const again = await fetch(`${base}/api/foryou/j1/card`, { method: "POST", headers: auth, body: JSON.stringify({ answer: "do" }) });
+  assert.equal(again.status, 409, "first answer wins");
+  const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
+  assert.equal(it.status, "onit"); assert.equal(it.session, "s1"); assert.equal(it.suggest.by, "phone");
+  assert.deepEqual(errors, []);
+});
+
+test("phone job card: Something else sends brook's own words; Not now sends nothing", async t => {
+  const { suggestItem } = await import("../src/proactive-store.ts");
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("k1"), item("k2")].map(x => JSON.stringify(x)).join("\n") + "\n");
+  suggestItem("k1", { id: "s1" }, dir);
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  const card = page.locator('[data-job="k1"]');
+  await card.waitFor();
+  await card.getByRole("button", { name: "Something else…" }).click();
+  await card.locator("textarea").fill("Only draft a reply");
+  const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
+  await card.getByRole("button", { name: "Send" }).click();
+  assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
+  // Not now: no prompt, loop stays pending.
+  suggestItem("k2", { id: "s1" }, dir);
+  const card2 = page.locator('[data-job="k2"]');
+  await card2.waitFor({ timeout: 8000 });
+  await card2.getByRole("button", { name: "Not now" }).click();
+  await card2.waitFor({ state: "detached", timeout: 8000 });
+  const k2 = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2");
+  assert.equal(k2.status, "pending"); assert.equal(k2.suggest.answer, "notnow");
+});
