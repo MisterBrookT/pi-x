@@ -208,3 +208,23 @@ test("work sessions are told how to move a loop on (next) or leave a note", asyn
 	assert.match(p, /PIX_PROACTIVE_DIR=\/tmp\/x node .*proactive-daemon\.ts note z "/);
 	assert.match(p, /proactive-daemon\.ts next z "<1-3 word outcome button/);
 });
+
+test("parseVerdict: a group question aimed at someone else (no @, reply, or name) is not brook's loop", () => {
+	const v = parseVerdict(JSON.stringify({ alerts: [
+		{ title: "回答：接入Claude是否用CLI", action: "Reply in group", for: "others", evidence: "follows 张三's Grok Bot share", refs: ["9"] },
+		{ title: "Who uses CLI?", action: "Reply", for: "me", evidence: "", refs: ["9"] },
+		{ title: "Ship newsdecision by Fri", action: "Plan", for: "project", evidence: "memory: brook owns newsdecision", due: "2026-10-16" },
+		{ title: "Reply to 杨奕辉", action: "Answer", for: "me", evidence: "@brook in id=12" },
+		{ title: "Send deck", action: "Send", for: "promise", evidence: "brook said he'd send it" },
+	] }));
+	assert.deepEqual(v.alerts.map(a => a.title), ["Ship newsdecision by Fri", "Reply to 杨奕辉", "Send deck"]);
+	assert.equal(v.alerts[0].due, "2026-10-16");
+});
+
+test("judgePrompt: group chats demand recipient evidence; questions after someone else's share are theirs", () => {
+	const p = judgePrompt({ me: "brook", memory: "", source: { kind: "wechat", id: "g@chatroom", name: "WeChat: AI群", chat: "group" }, context: [{ id: "1", time: "t", sender: "张三", text: "分享我的 Grok Bot 工作流" }], fresh: [{ id: "2", time: "t", sender: "李四", text: "你接入claude是用cli吗？" }], pending: [], now: "n" });
+	assert.match(p, /\[wechat, group chat\]/);
+	assert.match(p, /When unsure who it is for, create nothing/);
+	assert.match(p, /"for": "me\|project\|promise", "evidence"/);
+	assert.match(p, /deadlines, and promises that matter to his projects/);
+});

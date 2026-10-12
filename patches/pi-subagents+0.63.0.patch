@@ -1,0 +1,458 @@
+diff --git a/src/extension/index.ts b/src/extension/index.ts
+index 3b32600..cef0bd0 100644
+--- a/src/extension/index.ts
++++ b/src/extension/index.ts
+@@ -12,6 +12,7 @@
+  *   { "asyncByDefault": true, "defaultSubagentContext": "fork", "forkContext": { "mode": "pruned", "model": "provider/model" }, "forceTopLevelAsync": true, "maxSubagentDepth": 1, "intercomBridge": { "mode": "always", "instructionFile": "./intercom-bridge.md" }, "worktreeSetupHook": "./scripts/setup-worktree.mjs" }
+  */
+ 
++import { runtimeCleanupCauseForShutdown, workflowCleanupAbortReason, type RuntimeCleanupCause } from "../workflows/workflow-reuse.ts";
+ import { randomUUID } from "node:crypto";
+ import * as fs from "node:fs";
+ import * as os from "node:os";
+@@ -96,7 +97,7 @@ const SLOW_RELOAD_PHASE_MS = 250;
+ const RUNTIME_REGISTRY_STORE_KEY = "__piSubagentRuntimeRegistry";
+ 
+ interface SubagentRuntimeEntry {
+-	cleanup(): void;
++	cleanup(cause?: RuntimeCleanupCause): void;
+ 	sessionManager: object | null;
+ 	visibleControlNotices: Set<string>;
+ }
+@@ -957,14 +958,16 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 	const runtimeEntry: SubagentRuntimeEntry = {
+ 		sessionManager: null,
+ 		visibleControlNotices,
+-		cleanup() {
++		cleanup(cause: RuntimeCleanupCause = "shutdown") {
+ 			if (runtimeCleaned) return;
+ 			runtimeCleaned = true;
+ 			const shuttingDownParentSession = parentSessionEnvValue;
+ 			// Workflow continuations retain their launch context; abort them before
+-			// teardown so a reload cannot launch through a stale context.
++			// teardown so a reload cannot launch through a stale context. A same-session
++			// runtime replacement tags the abort so background children keep running and
++			// a relaunch of the same script can reuse them (backport of 0.74.0 #2546).
+ 			for (const controller of state.workflowControllers?.values() ?? []) {
+-				if (!controller.signal.aborted) controller.abort(new Error("Workflow stopped because the extension session was replaced or reloaded."));
++				if (!controller.signal.aborted) controller.abort(workflowCleanupAbortReason(cause));
+ 			}
+ 			state.workflowControllers?.clear();
+ 			state.workflowChildStops?.clear();
+@@ -1040,7 +1043,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		runtimeRegistry.activeEntries.add(runtimeEntry);
+ 		if (previousRuntime && previousRuntime !== runtimeEntry) {
+ 			try {
+-				previousRuntime.cleanup();
++				previousRuntime.cleanup("runtime-replaced");
+ 			} catch {
+ 				// Best effort cleanup for stale resources from the replaced runtime.
+ 			}
+@@ -1086,8 +1089,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		supervisorChannel.activateTransport();
+ 	});
+ 
+-	pi.on("session_shutdown", async () => {
+-		runtimeEntry.cleanup();
++	pi.on("session_shutdown", async (event) => {
++		runtimeEntry.cleanup(runtimeCleanupCauseForShutdown(event));
+ 		await herdrStatusBridge.flush();
+ 	});
+ }
+diff --git a/src/runs/foreground/subagent-executor.ts b/src/runs/foreground/subagent-executor.ts
+index 060ff78..1ac67fc 100644
+--- a/src/runs/foreground/subagent-executor.ts
++++ b/src/runs/foreground/subagent-executor.ts
+@@ -92,7 +92,8 @@ import {
+ import { stopAsyncRun } from "./async-stop-action.ts";
+ import { dismissRecoveredWorkflow } from "./async-dismiss-action.ts";
+ import { promotePausedWorkflowIfSettled, reconcileDetachedWorkflowChildCompletion } from "./workflow-detach-reconcile.ts";
+-import { reconcileAsyncRun } from "../background/stale-run-reconciler.ts";
++import { checkPidLiveness, reconcileAsyncRun } from "../background/stale-run-reconciler.ts";
++import { appendWorkflowChildJournal, shouldStopWorkflowChildOnAbort, findWorkflowReuseSource, matchWorkflowReuse, workflowChildFingerprint, workflowScriptDigest, workflowStopCause, WORKFLOW_RUNTIME_REPLACED_RELAUNCH_NOTICE } from "../../workflows/workflow-reuse.ts";
+ import { resolveAsyncRootResultPath, waitForImportedAsyncRoot } from "../background/chain-root-attachment.ts";
+ import { resultFilePath, writeAsyncResultFile } from "../background/result-files.ts";
+ import { attachRootChildrenToSteps, createNestedRoute, findNestedControlResult, resolveInheritedNestedRouteFromEnv, resolveNestedAsyncDir, resolveNestedParentAddressFromEnv, snapshotNestedEventFiles, updateForegroundNestedProjection, writeNestedControlRequest, writeNestedEvent, type NestedRunResolutionScope } from "../shared/nested-events.ts";
+@@ -2119,7 +2120,7 @@ async function resumeAsyncRun(input: {
+ 	if (input.params.workflowParentRunId !== undefined && result.details.asyncDir) {
+ 		const asyncDir = result.details.asyncDir;
+ 		const resultPath = workflowAwaitedAsyncResultPath(asyncDir);
+-		const stopOnAbort = () => { stopAsyncRun(input.deps.state, revivedId, input.deps.kill, { asyncDir, resolvedId: revivedId }); };
++		const stopOnAbort = () => { if (shouldStopWorkflowChildOnAbort(input.signal?.reason)) stopAsyncRun(input.deps.state, revivedId, input.deps.kill, { asyncDir, resolvedId: revivedId }); };
+ 		if (input.signal?.aborted) stopOnAbort();
+ 		else input.signal?.addEventListener("abort", stopOnAbort, { once: true });
+ 		let completed: Awaited<ReturnType<typeof waitForImportedAsyncRoot>>;
+@@ -3091,7 +3092,8 @@ async function waitForWorkflowAsyncSingleResult(
+ 	if (params.workflowAwaitAsync !== true || !launchResult.details.asyncDir) return launchResult;
+ 	const asyncDir = launchResult.details.asyncDir;
+ 	const resultPath = workflowAwaitedAsyncResultPath(asyncDir);
+-	const stopOnAbort = () => { stopAsyncRun(options.state, options.runId, options.kill, { asyncDir, resolvedId: options.runId }); };
++	// A replaced runtime leaves the child running so a relaunch of the workflow can re-attach to it.
++	const stopOnAbort = () => { if (shouldStopWorkflowChildOnAbort(options.signal?.reason)) stopAsyncRun(options.state, options.runId, options.kill, { asyncDir, resolvedId: options.runId }); };
+ 	if (options.signal?.aborted) stopOnAbort();
+ 	else options.signal?.addEventListener("abort", stopOnAbort, { once: true });
+ 	let completed: Awaited<ReturnType<typeof waitForImportedAsyncRoot>>;
+@@ -3104,6 +3106,14 @@ async function waitForWorkflowAsyncSingleResult(
+ 		options.signal?.removeEventListener("abort", stopOnAbort);
+ 	}
+ 	fs.rmSync(resultPath, { force: true });
++	return workflowAwaitedChildToolResult(completed, options, launchResult.details);
++}
++
++function workflowAwaitedChildToolResult(
++	completed: Awaited<ReturnType<typeof waitForImportedAsyncRoot>>,
++	options: { runId: string; task: string },
++	details: Details,
++): AgentToolResult<Details> {
+ 	const usage = importedAsyncRootUsage(completed);
+ 	const childResult: SingleResult = omitUndefinedProperties({
+ 		index: 0,
+@@ -3135,13 +3145,57 @@ async function waitForWorkflowAsyncSingleResult(
+ 		content: [{ type: "text", text: completed.success ? completed.output || completed.error || `Async workflow child ${options.runId} completed without output.` : completed.error || completed.output || `Async workflow child ${options.runId} completed without output.` }],
+ 		...(completed.success ? {} : { isError: true }),
+ 		details: {
+-			...launchResult.details,
++			...details,
+ 			runId: options.runId,
+ 			results: [childResult],
+ 		},
+ 	};
+ }
+ 
++/**
++ * Re-attaches to a workflow-awaited async child started by an earlier, runtime-replaced run of
++ * the same workflow. Waits for that exact run to publish its result; launches nothing. Returns
++ * undefined when the run is gone or never published, so the caller launches the child fresh.
++ */
++async function reattachWorkflowAsyncChild(
++	runId: string,
++	task: string,
++	signal: AbortSignal,
++	state: SubagentState,
++	kill?: ExecutorDeps["kill"],
++): Promise<AgentToolResult<Details> | undefined> {
++	const asyncDir = path.join(DIRS.async, runId);
++	const status = readStatus(asyncDir);
++	if (!status || (status.runId && status.runId !== runId) || status.mode !== "single") return undefined;
++	const resultPath = workflowAwaitedAsyncResultPath(asyncDir);
++	// A runner that died without publishing anything cannot be reused; launch the child again.
++	const runnerGone = (): boolean => {
++		if (fs.existsSync(resultPath)) return false;
++		const current = readStatus(asyncDir);
++		if (!current || (current.state !== "running" && current.state !== "queued")) return false;
++		return typeof current.pid === "number" && checkPidLiveness(current.pid) === "dead";
++	};
++	let exited = false;
++	const stopOnAbort = () => { if (shouldStopWorkflowChildOnAbort(signal.reason)) stopAsyncRun(state, runId, kill, { asyncDir, resolvedId: runId }); };
++	if (signal.aborted) stopOnAbort();
++	else signal.addEventListener("abort", stopOnAbort, { once: true });
++	let completed: Awaited<ReturnType<typeof waitForImportedAsyncRoot>>;
++	try {
++		completed = await waitForImportedAsyncRoot({ runId, asyncDir, resultPath, index: 0 }, {
++			shouldAbort: () => signal.aborted || (exited = runnerGone()),
++			timeoutMessage: "Workflow stopped before async child completed.",
++		});
++	} catch {
++		return undefined;
++	} finally {
++		signal.removeEventListener("abort", stopOnAbort);
++	}
++	if (exited) return undefined;
++	if (signal.aborted) return workflowAwaitedChildToolResult(completed, { runId, task }, { mode: "single", asyncId: runId, asyncDir, results: [] });
++	fs.rmSync(resultPath, { force: true });
++	return workflowAwaitedChildToolResult(completed, { runId, task }, { mode: "single", asyncId: runId, asyncDir, results: [] });
++}
++
+ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Promise<AgentToolResult<Details> | null> {
+ 	const {
+ 		params,
+@@ -4460,11 +4514,14 @@ export function prepareWorkflowLaunchParams(
+ 			...(capabilityCeiling ? { capabilityCeiling } : {}),
+ 		};
+ 	}
++	// Backport of 0.66.0 #1891: an omitted async follows asyncByDefault and the workflow awaits the
++	// background runner, so a same-session reload can leave the child running for reuse.
++	const asyncOmitted = childParams.async === undefined && workflowDefaults.async === undefined;
+ 	const launchParams = {
+ 		...workflowDefaults,
+-		async: options.externalAsyncRequired === true && childParams.async === undefined && workflowDefaults.async === undefined ? true : false,
++		...(options.externalAsyncRequired === true && asyncOmitted ? { async: true } : {}),
+ 		...childParams,
+-		...(options.externalAsyncRequired === true && childParams.async === undefined && workflowDefaults.async === undefined ? { workflowAwaitAsync: true } : {}),
++		...(asyncOmitted ? { workflowAwaitAsync: true } : {}),
+ 		...(options.missionDetached ? { mission: false } : {}),
+ 		workflowParentRunId: parentWorkflowRunId,
+ 		workflowKey,
+@@ -4905,7 +4962,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 					pid: process.pid,
+ 					steps: [],
+ 					...(workflowPreflight ? { preflight: workflowPreflight } : {}),
+-					workflow: { trace: [], emits: [], console: [], ...(workflowResource ? { resource: workflowResource.provenance } : {}) },
++					workflow: { trace: [], emits: [], console: [], scriptDigest: workflowScriptDigest(requestParams.workflowScript), ...(workflowResource ? { resource: workflowResource.provenance } : {}) },
+ 					workflowChildren: workflowChildSummary({ parentToolCallId: toolCallId, workflowRunId, workflowState: "running", inventoryComplete: false }),
+ 					runFanoutBudget: getRunFanoutBudgetSnapshot(workflowFanoutBudget),
+ 				};
+@@ -5053,6 +5110,10 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 				}
+ 				appendWorkflowEvent({ type: "subagent.workflow.started" });
+ 				const { workflowScript, async: _workflowAsync, chatProgress: _chatProgress, ...workflowRequest } = requestParams;
++				// Backport of 0.74.0 #2546: a relaunch of a script whose previous run in this session was
++				// stopped by runtime replacement reuses that run's succeeded children and re-attaches to
++				// its still-running async children instead of launching duplicates.
++				const workflowReuseSource = findWorkflowReuseSource(DIRS.async, currentSessionId ?? undefined, workflowScriptDigest(workflowScript));
+ 				void Promise.resolve().then(async () => {
+ 					const workflowDeadlineAt = timeout === undefined ? undefined : Date.now() + timeout;
+ 					const workflowResults: SingleResult[] = [];
+@@ -5231,6 +5292,21 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 									...(childPhase ? { phase: childPhase } : {}),
+ 									heartbeat: { status: "running", ...(childPhase ? { phase: childPhase } : {}) },
+ 								});
++								const childFingerprint = workflowChildFingerprint(childParams);
++								const priorChild = workflowReuseSource ? matchWorkflowReuse(workflowReuseSource, key, childFingerprint) : undefined;
++								if (priorChild?.kind === "settled") {
++									const reused: WorkflowScriptChildResult = { ...priorChild.result, key, reused: true };
++									if (reused.runId) workflowChildRunIds.set(key, reused.runId);
++									const step = status.steps?.find((candidate) => candidate.workflowKey === key);
++									if (step) {
++										step.status = "completed";
++										if (reused.runId) step.runId = reused.runId;
++										persist({ tolerateStatusWriteFailure: true });
++									}
++									appendWorkflowChildJournal(asyncDir, { type: "settle", key, fingerprint: childFingerprint, result: reused });
++									recordMissionWorkflowChild(missionBinding, workflowRunId, key, { status: "completed", ...(reused.runId ? { runId: reused.runId } : {}), artifactPaths: reused.artifactPaths, completedAt: new Date().toISOString(), heartbeat: { status: "completed", ...(childPhase ? { phase: childPhase } : {}) } });
++									return reused;
++								}
+ 								let preparedChildParams: SubagentParamsLike | undefined;
+ 								const result = await runMissionWorkflowChild(missionBinding, workflowRunId, key, childPhase, () => {
+ 									const childRequest = bindMissionWorkflowChildAsyncLaunch(
+@@ -5240,6 +5316,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 									);
+ 									preparedChildParams = childRequest;
+ 									workflowLaunchObservers.set(childRequest, (launch) => {
++										if (launch.async && launch.runId && childRequest.workflowAwaitAsync === true) appendWorkflowChildJournal(asyncDir, { type: "start", key, fingerprint: childFingerprint, runId: launch.runId });
+ 										const step = status.steps?.find((candidate) => candidate.workflowKey === key);
+ 										if (step) {
+ 											step.agent = launch.agent;
+@@ -5252,7 +5329,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 										}
+ 										recordMissionWorkflowChild(missionBinding, workflowRunId, key, { status: "running", agent: launch.agent, ...(launch.sessionFile ? { sessionPath: launch.sessionFile } : {}) });
+ 									});
+-									return execute(randomUUID(), childRequest, workflowSignal, (update) => {
++									const launchChild = () => execute(randomUUID(), childRequest, workflowSignal, (update) => {
+ 										const progress = update.details.progress?.[0];
+ 										const step = status.steps?.find((candidate) => candidate.workflowKey === key);
+ 										if (!progress || !step || step.stopped) return;
+@@ -5278,6 +5355,16 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 											heartbeat: { status: step.status, ...(childPhase ? { phase: childPhase } : {}) },
+ 										});
+ 									}, ctx, preserveActiveSession, workflowParentModel);
++									if (priorChild?.kind !== "started") return launchChild();
++									const step = status.steps?.find((candidate) => candidate.workflowKey === key);
++									if (step) {
++										step.runId = priorChild.runId;
++										step.async = true;
++										persist({ tolerateStatusWriteFailure: true });
++									}
++									appendWorkflowChildJournal(asyncDir, { type: "start", key, fingerprint: childFingerprint, runId: priorChild.runId });
++									return reattachWorkflowAsyncChild(priorChild.runId, typeof childRequest.task === "string" ? childRequest.task : "", workflowSignal, deps.state, deps.kill)
++										.then((reattached) => reattached ?? launchChild());
+ 								});
+ 								workflowResults.push(...result.details.results);
+ 								for (const childResult of result.details.results) {
+@@ -5285,6 +5372,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 								}
+ 								const child = workflowChildResult(key, result, preparedChildParams ?? childParams, deps.state);
+ 								if (child.runId) workflowChildRunIds.set(key, child.runId);
++								if (!workflowSignal.aborted) appendWorkflowChildJournal(asyncDir, { type: "settle", key, fingerprint: childFingerprint, result: child });
+ 								const step = status.steps?.find((candidate) => candidate.workflowKey === key);
+ 								if (step) {
+ 									step.async = Boolean(result.details.asyncId || result.details.asyncDir);
+@@ -5356,7 +5444,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
+ 						const workflowChildren = workflowChildSummary({ parentToolCallId: toolCallId, workflowRunId, workflowState, inventoryComplete: true, trace: partial.trace, children: partial.children, steps: status.steps });
+ 						const finalPreflightWarnings = workflowPreflightWarnings(workflowPreflight, partial.trace, { settled: true });
+ 						const finalPreflightTrace = annotateWorkflowPreflightTrace(partial.trace, workflowPreflight);
+-						status = compactOptional<AsyncStatus>({ ...status, state, stopped: stopped || undefined, activityState: pauseForDetached ? "needs_attention" : undefined, error: workflowFailureMessage(error, workflowRunId, partial.children), endedAt: Date.now(), workflow: { trace: finalPreflightTrace, emits: partial.emits, console: partial.console, ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}) }, workflowChildren });
++						const stopCause = stopped ? workflowStopCause(controller.signal.reason) : undefined;
++						const failureMessage = workflowFailureMessage(error, workflowRunId, partial.children);
++						status = compactOptional<AsyncStatus>({ ...status, state, stopped: stopped || undefined, activityState: pauseForDetached ? "needs_attention" : undefined, error: stopCause ? `${failureMessage} ${WORKFLOW_RUNTIME_REPLACED_RELAUNCH_NOTICE}` : failureMessage, endedAt: Date.now(), workflow: { trace: finalPreflightTrace, emits: partial.emits, console: partial.console, scriptDigest: status.workflow?.scriptDigest, ...(stopCause ? { stopCause } : {}), ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}) }, workflowChildren });
+ 						if (pauseForDetached) {
+ 							const promoted = promotePausedWorkflowIfSettled(status);
+ 							if (promoted) status = promoted;
+diff --git a/src/shared/types.ts b/src/shared/types.ts
+index 235c228..1591ffc 100644
+--- a/src/shared/types.ts
++++ b/src/shared/types.ts
+@@ -1452,6 +1452,10 @@ export interface Details {
+ 	mission?: MissionRecord;
+ 	workflow?: {
+ 		value?: unknown;
++		/** sha256 of the workflow script; keys same-script relaunch reuse. */
++		scriptDigest?: string;
++		/** "runtime-replaced" when the owning extension runtime was replaced (reload) while running. */
++		stopCause?: "runtime-replaced";
+ 		resource?: WorkflowResourceProvenanceV1;
+ 		preflightWarnings?: string[];
+ 		trace: Array<{
+diff --git a/src/workflows/scripted-workflow.ts b/src/workflows/scripted-workflow.ts
+index d769ea2..66dd3ac 100644
+--- a/src/workflows/scripted-workflow.ts
++++ b/src/workflows/scripted-workflow.ts
+@@ -981,6 +981,8 @@ export interface WorkflowScriptChildResult {
+ 	externalAdapter?: import("../shared/types.ts").ExternalCliReceiptMetadata;
+ 	resumability?: { state: "resumable" } | { state: "not-resumable"; reason: string };
+ 	continuation?: { runIds: string[] };
++	/** Result copied from an earlier runtime-replaced run of the same workflow script. */
++	reused?: boolean;
+ 	artifactPaths: string[];
+ 	results?: SingleResult[];
+ }
+diff --git a/src/workflows/workflow-reuse.ts b/src/workflows/workflow-reuse.ts
+new file mode 100644
+index 0000000..31bfa62
+--- /dev/null
++++ b/src/workflows/workflow-reuse.ts
+@@ -0,0 +1,144 @@
++// Backport of pi-subagents 0.74.0 workflow reuse (#2546) for the 0.63.0 executor.
++import { createHash } from "node:crypto";
++import * as fs from "node:fs";
++import * as path from "node:path";
++import { readRecentTerminalRunIndex } from "../runs/background/terminal-run-index.ts";
++import { readStatus } from "../shared/utils.ts";
++import type { WorkflowScriptChildResult } from "./scripted-workflow.ts";
++
++/** Stop cause recorded when the extension runtime that owned the workflow was replaced (/reload, resume, session switch). */
++export const WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED = "runtime-replaced";
++const WORKFLOW_CHILD_JOURNAL_FILE = "workflow-children.jsonl";
++export const WORKFLOW_RUNTIME_REPLACED_RELAUNCH_NOTICE = "Async children that were still running keep running; relaunch the same workflow script to reuse finished children and re-attach to running ones.";
++
++export type WorkflowChildJournalRecord =
++	| { type: "start"; key: string; fingerprint: string; runId: string }
++	| { type: "settle"; key: string; fingerprint: string; result: WorkflowScriptChildResult };
++
++export interface WorkflowReuseSource {
++	runId: string;
++	started: Map<string, { fingerprint: string; runId: string }>;
++	settled: Map<string, { fingerprint: string; result: WorkflowScriptChildResult }>;
++}
++
++/** Abort reason for workflow controllers torn down by runtime replacement; carries the cause as data, not text. */
++export function runtimeReplacedAbortReason(): Error {
++	return Object.assign(new Error("Workflow stopped because the extension session was replaced or reloaded."), { workflowStopCause: WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED });
++}
++
++export type RuntimeCleanupCause = "runtime-replaced" | "shutdown";
++
++/**
++ * Pi reports why a session's extension runtime shuts down. Only "reload" keeps the same
++ * session; "new", "resume" and "fork" switch sessions and "quit" exits, so those cancel.
++ */
++export function runtimeCleanupCauseForShutdown(event: { reason?: string } | undefined): RuntimeCleanupCause {
++	return event?.reason === "reload" ? "runtime-replaced" : "shutdown";
++}
++
++export function workflowCleanupAbortReason(cause: RuntimeCleanupCause): Error {
++	return cause === "runtime-replaced" ? runtimeReplacedAbortReason() : new Error("Workflow stopped because the extension session ended or switched.");
++}
++
++/** Whether aborting a workflow should also stop its awaited background child. */
++export function shouldStopWorkflowChildOnAbort(reason: unknown): boolean {
++	return workflowStopCause(reason) === undefined;
++}
++
++export function workflowStopCause(reason: unknown): typeof WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED | undefined {
++	return reason instanceof Error && (reason as { workflowStopCause?: unknown }).workflowStopCause === WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED
++		? WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED
++		: undefined;
++}
++
++function sha256(text: string): string {
++	return createHash("sha256").update(text).digest("hex");
++}
++
++function stableJson(value: unknown): string {
++	if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
++	if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
++	return JSON.stringify(value) ?? "undefined";
++}
++
++export function workflowScriptDigest(script: string): string {
++	return sha256(script);
++}
++
++/** Hash of the launch params the script host received for a key. */
++export function workflowChildFingerprint(params: Record<string, unknown>): string {
++	return sha256(stableJson(params));
++}
++
++/** Appends synchronously. A lost record only means a later relaunch runs that child again. */
++export function appendWorkflowChildJournal(workflowAsyncDir: string, record: WorkflowChildJournalRecord): void {
++	const journalPath = path.join(workflowAsyncDir, WORKFLOW_CHILD_JOURNAL_FILE);
++	try {
++		fs.appendFileSync(journalPath, `${JSON.stringify(record)}\n`, "utf-8");
++	} catch (error) {
++		console.error(`Failed to append workflow child journal '${journalPath}':`, error);
++	}
++}
++
++export function readWorkflowChildJournal(runId: string, workflowAsyncDir: string): WorkflowReuseSource {
++	const source: WorkflowReuseSource = { runId, started: new Map(), settled: new Map() };
++	let text = "";
++	try {
++		text = fs.readFileSync(path.join(workflowAsyncDir, WORKFLOW_CHILD_JOURNAL_FILE), "utf-8");
++	} catch {
++		return source;
++	}
++	for (const line of text.split("\n")) {
++		let record: WorkflowChildJournalRecord | undefined;
++		try {
++			record = line.trim() ? JSON.parse(line) : undefined;
++		} catch {
++			continue;
++		}
++		if (!record || typeof record.key !== "string" || typeof record.fingerprint !== "string") continue;
++		if (record.type === "start" && typeof record.runId === "string") {
++			source.started.set(record.key, { fingerprint: record.fingerprint, runId: record.runId });
++		} else if (record.type === "settle" && record.result && typeof record.result === "object") {
++			source.settled.set(record.key, { fingerprint: record.fingerprint, result: record.result });
++		}
++	}
++	return source;
++}
++
++/**
++ * The newest terminal workflow of this session with the same script,
++ * when that run stopped because its runtime was replaced.
++ */
++export function findWorkflowReuseSource(asyncDirRoot: string, sessionId: string | undefined, scriptDigest: string): WorkflowReuseSource | undefined {
++	if (!sessionId) return undefined;
++	let runIds: string[];
++	try {
++		runIds = readRecentTerminalRunIndex(asyncDirRoot, { sessionId });
++	} catch {
++		return undefined;
++	}
++	for (const runId of runIds) {
++		const asyncDir = path.join(asyncDirRoot, runId);
++		let status: ReturnType<typeof readStatus>;
++		try {
++			status = readStatus(asyncDir);
++		} catch {
++			continue;
++		}
++		const workflow = status?.workflow as { scriptDigest?: string; stopCause?: string } | undefined;
++		if (status?.mode !== "workflow" || workflow?.scriptDigest !== scriptDigest) continue;
++		return workflow.stopCause === WORKFLOW_STOP_CAUSE_RUNTIME_REPLACED ? readWorkflowChildJournal(runId, asyncDir) : undefined;
++	}
++	return undefined;
++}
++
++/** A settled match is reusable only when that child succeeded; failed or stopped children run again. */
++export function matchWorkflowReuse(source: WorkflowReuseSource, key: string, fingerprint: string):
++	| { kind: "settled"; result: WorkflowScriptChildResult }
++	| { kind: "started"; runId: string }
++	| undefined {
++	const settled = source.settled.get(key);
++	if (settled) return settled.fingerprint === fingerprint && settled.result.ok ? { kind: "settled", result: settled.result } : undefined;
++	const started = source.started.get(key);
++	return started?.fingerprint === fingerprint ? { kind: "started", runId: started.runId } : undefined;
++}

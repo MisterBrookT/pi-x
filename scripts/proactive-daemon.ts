@@ -10,6 +10,7 @@
 //        node scripts/proactive-daemon.ts now <id>      bring a parked loop back now
 //        node scripts/proactive-daemon.ts open <id>     show the session that is on it
 //        node scripts/proactive-daemon.ts dismiss <id>  drop for good
+//        node scripts/proactive-daemon.ts list          print open loops (id, status, title) and exit
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item } from "../src/proactive.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
-import { actItem, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
+import { actItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -138,6 +139,13 @@ if (verb === "act" || verb === "dismiss" || verb === "later") {
 	if (!ok) { console.error(`no open loop ${itemId}`); process.exit(1); }
 	process.exit(0);
 }
+
+if (verb === "list") {
+	for (const i of readOpen()) console.log(`${i.id}\t${i.status}\t${i.source}\t${i.title}`);
+	process.exit(0);
+}
+// Only a bare run (or flags) starts the daemon loop; a mistyped verb must not hang the caller forever.
+if (verb && !verb.startsWith("--")) { console.error(`unknown command: ${verb} (see usage at the top of proactive-daemon.ts)`); process.exit(2); }
 
 const cfg = setup();
 if (!cfg.sources.length) { log(`no sources; edit ${P.config}`); process.exit(once ? 0 : 1); }

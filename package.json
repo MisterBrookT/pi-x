@@ -23,6 +23,8 @@
   },
   "scripts": {
     "bench": "node scripts/bench.mjs",
+    "deploy:relay": "node scripts/deploy-relay.mjs",
+    "prepare": "git config core.hooksPath scripts/git-hooks || true",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
     "test:remote-ui": "node scripts/verify-remote-ui.mjs",
@@ -30,7 +32,8 @@
     "test:relay-session": "node --test scripts/verify-relay-session.mjs",
     "test:relay-workflow": "node --test scripts/verify-relay-workflow.mjs",
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
-    "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs"
+    "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs",
+    "postinstall": "node scripts/apply-pi-subagents-patch.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
@@ -95,6 +98,7 @@
     "agents",
     "docs",
     "extensions",
+    "patches",
     "relay/src/index.ts",
     "relay/wrangler.jsonc",
     "scripts",

@@ -164,6 +164,21 @@ export function saveMarkdownImage(input: { path?: unknown; name?: unknown; data?
   return { status: 200, path: join(folder, file), markdown: `![](${encodeURI(folderName + "/" + file)})` } as const;
 }
 
+/** A file sent from the phone composer: saved under a dated name in the uploads folder, never overwriting. */
+export function saveUpload(input: { name?: unknown; data?: unknown }, dir: string) {
+  const name = safeName(input.name);
+  if (!name || typeof input.data !== "string") return { status: 400, error: "Invalid file" } as const;
+  const bytes = Buffer.from(input.data, "base64");
+  if (!bytes.length || bytes.length > imageUploadLimit) return { status: 413, error: "File is too large (limit 1.2 MB)" } as const;
+  mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const dot = name.lastIndexOf(".") > 0 ? name.lastIndexOf(".") : name.length;
+  let file = `${stamp}-${name}`, n = 1;
+  while (existsSync(join(dir, file))) file = `${stamp}-${name.slice(0, dot)}-${++n}${name.slice(dot)}`;
+  writeFileSync(join(dir, file), bytes, { flag: "wx" });
+  return { status: 200, path: join(dir, file) } as const;
+}
+
 const keptTags = new Set("p br b strong i em u s strike h1 h2 h3 h4 h5 h6 ul ol li table thead tbody tfoot tr td th blockquote pre code sub sup hr div span".split(" "));
 /** Allowlist HTML: known tags only, no attributes except numeric colspan/rowspan, no scripts, styles or resources. */
 export function sanitizeDocumentHtml(html: string): string {

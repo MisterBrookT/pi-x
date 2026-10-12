@@ -8,3 +8,7 @@
 - When extending Pi APIs or TUI behavior, test against the real public interface shape rather than permissive mocks that hide compatibility failures.
 - Run the relevant focused tests while developing and the repository's full check before delivery. If a test is impractical, state what is untested and why.
 - Keep tests deterministic, readable, and focused on behavior rather than implementation details.
+
+## Delivery
+
+- The phone page is served by the relay Worker (`relay/`), not the Mac, so the Mac's autoreload never updates it. A post-commit hook (`scripts/git-hooks/post-commit`, enabled by `npm install` via `core.hooksPath`) deploys the relay whenever a commit touches `relay/` or `src/remote-{web,relay-web,sw}.ts`. Deploy by hand with `npm run deploy:relay`; skip once with `PIX_SKIP_RELAY_DEPLOY=1`.

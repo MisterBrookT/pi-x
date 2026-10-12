@@ -1,0 +1,33 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { startRemoteHub } from '../src/remote-hub.ts';
+import { relayAllowed } from '../src/remote-relay-agent.ts';
+
+test('authenticated document previews expose all PDF pages through relay-allowed API', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'pix-document-api-'));
+  const pdf = join(home, 'multipage.pdf');
+  await copyFile(resolve('scripts/fixtures/document-multipage.pdf'), pdf);
+  const token = 'synthetic-document-api-token';
+  const hub = await startRemoteHub({ token, port: 0, home, memoryRoot: home });
+  t.after(async () => { await hub.close(); await rm(home, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${hub.port}`;
+  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  await fetch(base + '/agent/fixture', { method: 'PUT', headers, body: JSON.stringify({ name: 'Document fixture', cwd: home, busy: false, messages: [] }) });
+  const endpoint = '/api/sessions/fixture/file/preview?path=' + encodeURIComponent(pdf);
+  assert.equal(relayAllowed(endpoint, 'GET'), true);
+  const meta = await (await fetch(base + endpoint, { headers })).json();
+  assert.equal(meta.kind, 'pages');
+  assert.equal(meta.pages, 3);
+  const response = await fetch(base + endpoint + '&page=3', { headers });
+  assert.equal(response.status, 200);
+  const last = await response.json();
+  assert.equal(last.page, 3);
+  assert.equal(last.mimeType, 'image/jpeg');
+  assert.ok(Buffer.from(last.data, 'base64').length > 1000);
+  assert.equal((await fetch(base + endpoint + '&page=4', { headers })).status, 400);
+  assert.equal((await fetch(base + endpoint)).status, 401);
+  assert.equal((await fetch(base + '/api/sessions/fixture/file/preview?path=/etc/passwd', { headers })).status, 404);
+});

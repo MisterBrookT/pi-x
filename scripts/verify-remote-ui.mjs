@@ -1,6 +1,6 @@
 // Mobile browser acceptance for Pix Remote. Run: npm run test:remote-ui
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
@@ -19,7 +19,7 @@ await writeFile(join(fixtureHome, "hub", "AGENTS.md"), "# Hub rules\n\n- Keep it
 await writeFile(join(fixtureHome, "hub", "skills", "writing", "SKILL.md"), "# Writing skill");
 // Mac files the chat mentions: a PDF, a short video and a Word document in the session folder.
 const demo = join(fixtureHome, "projects", "demo");
-await writeFile(join(demo, "report.pdf"), "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n");
+await writeFile(join(demo, "report.pdf"), await readFile(new URL('./fixtures/document-multipage.pdf', import.meta.url)));
 await writeFile(join(demo, "clip.mp4"), Buffer.alloc(700_000, 1));
 await writeFile(join(demo, "letter.html"), "<meta charset=utf-8><h1>Recommendation</h1><p><b>Strong</b> candidate</p>");
 const { execFileSync } = await import("node:child_process");
@@ -167,25 +167,31 @@ try {
   await page.waitForTimeout(300);
   assert.equal(await page.locator("#title").textContent(), "Pix UI test");
   await fetch(`${base}/agent/other2`, { method: "DELETE", headers: auth });
-  // Quick actions: a menu next to +, disabled while Pi works, New chat asks first, typed /reload works too.
+  // + holds only Photo and File; session actions live in the ✦ sheet, disabled while Pi works.
   await page.getByRole("button", { name: "Add" }).click();
-  const menu = page.getByRole("menu", { name: "Quick actions" });
-  await menu.waitFor();
-  assert.deepEqual(await menu.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["Photo", "Reload Pi", "New chat", "Compact"]);
+  const plus = page.getByRole("menu", { name: "Quick actions" });
+  await plus.waitFor();
+  assert.deepEqual(await plus.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["Photo", "File"]);
   await page.screenshot({ path: new URL("actions.png", output).pathname });
+  await page.locator("#actionsShade").click({ position: { x: 20, y: 200 } });
+  const openSheet = () => page.locator("#modelChip").click();
+  const menu = page.locator("#sessionActions");
+  await openSheet(); await menu.waitFor();
+  assert.deepEqual(await menu.getByRole("menuitem").evaluateAll(els => els.map(e => e.querySelector("b").textContent)), ["Rewind", "Reload Pi", "New chat", "Compact"]);
+  await page.screenshot({ path: new URL("session-actions.png", output).pathname });
   const reload = page.waitForRequest(r => r.url().endsWith("/api/sessions/fixture/action") && r.method() === "POST");
   await menu.getByRole("menuitem", { name: /Reload Pi/ }).click();
   assert.deepEqual(JSON.parse((await reload).postData()), { action: "reload" });
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "reload" }] });
   await menu.waitFor({ state: "hidden" });
   page.once("dialog", d => d.dismiss());
-  await page.getByRole("button", { name: "Add" }).click();
+  await openSheet();
   await menu.getByRole("menuitem", { name: /New chat/ }).click();
   await page.waitForTimeout(200);
   // Another Pi session is already open, like jevbench; New chat must not fall onto it.
   await fetch(`${base}/agent/other`, { method: "PUT", headers: auth, body: JSON.stringify({ id: "other", name: "Other", named: true, cwd: "/w", busy: false, messages: [] }) });
   page.once("dialog", d => d.accept());
-  await page.getByRole("button", { name: "Add" }).click();
+  await openSheet();
   await menu.getByRole("menuitem", { name: /New chat/ }).click();
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "new" }] }, "cancelling New chat sends nothing; confirming sends it once");
   // Regression guard: after New chat the phone follows the new session, not another open one.
@@ -200,9 +206,9 @@ try {
   assert.deepEqual(await (await fetch(`${base}/agent/fixture/next`, { headers: auth })).json(), { prompts: [{ action: "compact" }] }, "typed /compact runs the action, not a chat message");
   await page.waitForFunction(() => document.querySelector("#input").value === "", null, { timeout: 3000 });
   streaming = "busy"; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor();
-  await page.getByRole("button", { name: "Add" }).click();
+  await openSheet();
   assert.equal(await menu.getByRole("menuitem", { name: /Reload Pi/ }).isDisabled(), true, "actions wait until Pi is idle");
-  await page.locator("#actionsShade").click({ position: { x: 20, y: 200 } });
+  await page.locator("#modelShade").click({ position: { x: 20, y: 20 } });
   streaming = ""; await publish(); await page.getByRole("button", { name: "Stop Pi" }).waitFor({ state: "hidden" });
   await group.locator("summary").first().click();
   await job.locator('summary').click();
@@ -315,7 +321,7 @@ try {
   const fileChip = name => page.locator('#messages .file-chip').filter({ hasText: name });
   assert.match(await fileChip('report.pdf').textContent(), /report\.pdf.*B/);
   await fileChip('report.pdf').click();
-  await page.locator('#fileBody iframe[src^="blob:"]').waitFor();
+  await page.getByRole('img', { name: 'Page 3 of 3', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Close file' }).click();
   await fileChip('clip.mp4').click();
   await page.locator('#fileBody video[src^="blob:"]').waitFor();

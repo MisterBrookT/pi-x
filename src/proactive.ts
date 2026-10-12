@@ -17,7 +17,7 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 });
 
 /** One watched channel. `kind` picks the adapter in proactive-sources.ts; extra keys are adapter-specific. */
-export interface Source { kind: string; id: string; name: string; project?: string; [key: string]: unknown }
+export interface Source { kind: string; id: string; name: string; project?: string; chat?: "group" | "private"; [key: string]: unknown }
 export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; maxPerHour: number }
 export const defaultConfig: Config = { me: "", sources: [], intervalSec: 600, model: "openai-codex/gpt-6-luna", maxPerHour: 4 };
 
@@ -89,15 +89,19 @@ export function judgePrompt(o: { me: string; memory: string; source: Source; con
 	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and keep track of his open loops:
 things still unfinished between ${o.me} and someone else. He should only see what needs him now.
 A loop is worth tracking when:
-- someone asks ${o.me} something, @mentions him, or waits on him
+- someone asks ${o.me} something, @mentions him, replies to him, or waits on him (a direct chat counts as asking him)
 - something he asked for is delivered, or a blocker/decision/deadline appears
 - it changes what he should do next in his project (see memory)
 - he promised something and it is still open
 Never track chit-chat, FYI, or anything that needs nothing from him. If your suggested action would be "no follow-up", do not create it.
 Messages marked (me) are ${o.me}'s own.
+In a group chat, a question or request is for ${o.me} only with evidence: it @mentions or names him, quotes/replies to his message,
+answers something he just said, or memory says it is his job. A question that follows someone else's share or message
+(e.g. "你接入claude是用cli吗？" after another person posted their bot workflow) is for that person, not him: no loop.
+When unsure who it is for, create nothing. Project updates, deadlines, and promises that matter to his projects (see memory) still count.
 
 Now: ${o.now}
-Source: ${o.source.name} [${o.source.kind}]${o.source.project ? ` (project: ${o.source.project})` : ""}
+Source: ${o.source.name} [${o.source.kind}${o.source.chat ? `, ${o.source.chat} chat` : ""}]${o.source.project ? ` (project: ${o.source.project})` : ""}
 
 ## Memory
 ${o.memory || "(empty)"}
@@ -136,8 +140,10 @@ Most of the time, change nothing.
 never start with "Draft" or "Prepare". Good: "Reply to 杨奕辉", "Send wallet address", "Start Databento test", "Check backtest", "Ask 黄恩浩".
 "due" is YYYY-MM-DD when there is a deadline, else omit.
 "project" is the folder of the project this loop belongs to, taken from memory (e.g. "~/workspace/minara/newsdecision"); omit if none is clear.
+Every alert needs "for" and "evidence": "me" = addressed to him, "project" = changes his project (memory), "promise" = he owes or is owed it.
+If you cannot fill "evidence", it is not his loop: leave it out.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], "memory": {"add": ["- ..."], "remove": ["exact existing line"]}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -156,7 +162,10 @@ export function parseVerdict(raw: string): Verdict | null {
 		const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined)) as T;
 		// "No follow-up" is not a loop: drop it (the judge sometimes says so in the action).
 		const noop = (a: any) => /无需跟进|no (follow[- ]?up|action)( needed)?|nothing to do/i.test(String(a.action ?? ""));
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project) }));
+		// Recipient guard: an alert the judge says is for someone else, or with no evidence it is his, is dropped.
+		// A verdict without "for" (older shape) is kept.
+		const unaddressed = (a: any) => a.for !== undefined && (!["me", "project", "promise"].includes(String(a.for)) || !str(a.evidence, 200));
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project) }));
 		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project) }));
 		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) } };
 	} catch { return null; }

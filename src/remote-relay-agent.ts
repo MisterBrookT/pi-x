@@ -1,8 +1,12 @@
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { readRemoteToken } from "./remote-hub.ts";
+import { readRemoteToken, tailSession } from "./remote-hub.ts";
+
+/** Turns (user messages and everything after) a phone gets per session at first; older ones load on request. */
+export const relayTail = 5;
 
 /** Largest phone request body: text plus one resized photo (see remote-web image target). */
 export const relayRequestLimit = 1_300_000;
@@ -28,8 +32,9 @@ export const relayRoom = (secret: string) => digest("room:", secret).toString("h
 export const sealRelayFrame = (secret: string, value: unknown) => {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", digest("key:", secret), iv);
-  const data = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final(), cipher.getAuthTag()]);
-  return JSON.stringify({ iv: iv.toString("base64url"), data: data.toString("base64url") });
+  // Compress before encrypting (ciphertext does not compress): chat JSON shrinks ~4x on the phone link.
+  const data = Buffer.concat([cipher.update(deflateRawSync(JSON.stringify(value))), cipher.final(), cipher.getAuthTag()]);
+  return JSON.stringify({ iv: iv.toString("base64url"), z: 1, data: data.toString("base64url") });
 };
 export const openRelayFrame = (secret: string, frame: string): any => {
   const value = JSON.parse(frame);
@@ -38,10 +43,11 @@ export const openRelayFrame = (secret: string, frame: string): any => {
   if (iv.length !== 12 || data.length < 16 || data.length > 2_000_000) throw Error("Invalid encrypted frame");
   const decipher = createDecipheriv("aes-256-gcm", digest("key:", secret), iv);
   decipher.setAuthTag(data.subarray(-16));
-  return JSON.parse(Buffer.concat([decipher.update(data.subarray(0, -16)), decipher.final()]).toString("utf8"));
+  const plain = Buffer.concat([decipher.update(data.subarray(0, -16)), decipher.final()]);
+  return JSON.parse((value.z === 1 ? inflateRawSync(plain, { maxOutputLength: 20_000_000 }) : plain).toString("utf8"));
 };
 
-export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image)$/.test(path)
+export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
   || method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later)$/.test(path)
   || method === "GET" && (path === "/api/folders" || path === "/api/links" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume"); };
 
@@ -63,17 +69,18 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     headers: { authorization: `Bearer ${localToken}`, "content-type": "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
-  const publishSessions = async () => {
-    const res = await local("/api/sessions");
-    if (!res.ok) return;
-    const sessions = await res.json() as { id: string }[];
+  // On hello: the list, For you, and only the session the phone shows (its tail). Others load on open,
+  // so a reconnect costs tens of KB instead of every transcript. Older phones send no `active`: all, tailed.
+  const publishSessions = async (active?: string) => {
+    // Fetch everything at once, and send the session the phone shows first: it is what Brook is looking at.
+    const json = async (path: string) => { try { const r = await local(path); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
+    const one = (id: string) => json(`/api/sessions/${encodeURIComponent(id)}?tail=${relayTail}`);
+    const [sessions, forYou, shown] = await Promise.all([json("/api/sessions") as Promise<{ id: string }[] | undefined>, json("/api/foryou"), active ? one(active) : undefined]);
+    if (!sessions) return;
     send({ kind: "event", event: "sessions", data: sessions });
-    const forYou = await local("/api/foryou");
-    if (forYou.ok) send({ kind: "event", event: "foryou", data: await forYou.json() });
-    for (const { id } of sessions) {
-      const one = await local(`/api/sessions/${encodeURIComponent(id)}`);
-      if (one.ok) send({ kind: "event", event: "session", data: await one.json() });
-    }
+    if (shown && sessions.some(s => s.id === active)) send({ kind: "event", event: "session", data: shown });
+    if (forYou) send({ kind: "event", event: "foryou", data: forYou });
+    if (typeof active !== "string") for (const s of await Promise.all(sessions.map(s => one(s.id)))) if (s) send({ kind: "event", event: "session", data: s });
   };
   const listen = async (controller: AbortController) => {
     try {
@@ -88,7 +95,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
           const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
           const type = block.match(/^event: (sessions|session|sessionPatch|stream|foryou)$/m)?.[1];
           const data = block.match(/^data: (.+)$/m)?.[1];
-          if (type && data) { try { send({ kind: "event", event: type, data: JSON.parse(data) }); } catch {} }
+          if (type && data) { try { const value = JSON.parse(data); send({ kind: "event", event: type, data: type === "session" ? tailSession(value, relayTail) : value }); } catch {} }
         }
         if (buffer.length > 2_000_000) buffer = "";
       }
@@ -112,7 +119,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
       try {
         if (event.data === "pong") { lastPong = Date.now(); return; }
         const message = openRelayFrame(secret, String(event.data));
-        if (message.kind === "hello") { await publishSessions(); return; }
+        if (message.kind === "hello") { await publishSessions(typeof message.active === "string" ? message.active : undefined); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || typeof message.body !== "string") return;
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.
         if (!relayAllowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }

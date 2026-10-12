@@ -9,7 +9,7 @@ import { relayRoom, sealRelayFrame, openRelayFrame, rotateRelayKey, readRelayOri
 import { remoteRelayWebScript } from "../src/remote-relay-web.ts";
 import { remoteAppHtml } from "../src/remote-web.ts";
 
-const browser = vm.createContext({ crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, EventTarget, MessageEvent, setTimeout, clearTimeout, console });
+const browser = vm.createContext({ crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, EventTarget, MessageEvent, setTimeout, clearTimeout, console, Response, Blob, DecompressionStream });
 vm.runInContext(remoteRelayWebScript, browser);
 const evaluate = (expression) => vm.runInContext(expression, browser);
 
@@ -121,4 +121,64 @@ test("the Mac relays live-text stream events to the phone", async t => {
   await fetch(`http://127.0.0.1:${hub.port}/agent/s1/stream`, { method: "PUT", headers: auth, body: JSON.stringify({ streaming: "Hi", streamingHtml: "<p>Hi</p>" }) });
   for (let i = 0; i < 80 && !frames.some(f => f.event === "stream"); i++) await new Promise(r => setTimeout(r, 25));
   assert.deepEqual(frames.find(f => f.event === "stream")?.data, { id: "s1", streaming: "Hi", streamingHtml: "<p>Hi</p>" });
+});
+
+test("frames are compressed before encryption and the phone opens them", async () => {
+  const secret = randomBytes(32).toString("base64url");
+  browser.secret = secret;
+  await evaluate("relayIdentity(secret).then(({key})=>{relayKey=key})");
+  const big = { kind: "event", event: "session", data: { messages: Array.from({ length: 200 }, (_, i) => ({ id: `m${i}`, role: "assistant", text: "the same long answer text ".repeat(20) })) } };
+  const frame = sealRelayFrame(secret, big);
+  assert.ok(frame.length < JSON.stringify(big).length / 4, `compressed: ${frame.length}`);
+  browser.frame = frame;
+  assert.equal(JSON.stringify(await evaluate("relayOpen(frame)")), JSON.stringify(big));
+  assert.deepEqual(openRelayFrame(secret, frame), big);
+});
+
+test("on hello the Mac sends only the shown session, tailed, not every transcript", async t => {
+  const { WebSocketServer } = await import("ws");
+  const { startRemoteHub } = await import("../src/remote-hub.ts");
+  const { startRemoteRelayAgent, relayTail } = await import("../src/remote-relay-agent.ts");
+  const token = "r".repeat(32), secret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  // 25 turns of 4 messages: a user prompt, then assistant/tool messages.
+  const messages = Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`, role: i % 4 ? "assistant" : "user", text: `msg ${i}` }));
+  for (const id of ["a", "b", "c"]) await fetch(`http://127.0.0.1:${hub.port}/agent/${id}`, { method: "PUT", headers: auth, body: JSON.stringify({ name: id, cwd: "/tmp", busy: false, messages }) });
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  t.after(() => server.close());
+  await new Promise(r => server.once("listening", r));
+  const frames = [];
+  server.on("connection", socket => {
+    socket.on("message", data => { const text = String(data); if (text === "ping") return socket.send("pong"); try { frames.push(openRelayFrame(secret, text)); } catch {} });
+    setTimeout(() => socket.send(sealRelayFrame(secret, { kind: "hello", active: "b" })), 100);
+  });
+  const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret, localBase: `http://127.0.0.1:${hub.port}`, localToken: token });
+  t.after(() => agent.stop());
+  await agent.ready;
+  for (let i = 0; i < 80 && !frames.some(f => f.event === "session"); i++) await new Promise(r => setTimeout(r, 25));
+  await new Promise(r => setTimeout(r, 150));
+  const sent = frames.filter(f => f.event === "session").map(f => f.data);
+  assert.deepEqual(sent.map(s => s.id), ["b"], "only the session on screen");
+  const order = frames.filter(f => f.kind === "event").map(f => f.event);
+  assert.ok(order.indexOf("session") < order.lastIndexOf("foryou"), "the shown session arrives before For you, so a returning phone updates first");
+  assert.equal(relayTail, 5, "relay defaults to five whole turns");
+  assert.equal(sent[0].messages.length, relayTail * 4, "whole turns, not a message count");
+  assert.equal(sent[0].messages[0].role, "user", "starts at a user message");
+  assert.equal(sent[0].older, 100 - relayTail * 4, "phone knows how many are older");
+  assert.equal(sent[0].messages.at(-1).text, "msg 99");
+  // The full transcript is still available on demand ("Show earlier").
+  const full = await (await fetch(`http://127.0.0.1:${hub.port}/api/sessions/b`, { headers: auth })).json();
+  assert.equal(full.messages.length, 100);
+});
+
+test("tailSession keeps whole turns and leaves short sessions alone", async () => {
+  const { tailSession } = await import("../src/remote-hub.ts");
+  const roles = ["user", "assistant", "assistant", "user", "assistant", "user", "assistant", "user"];
+  const s = { messages: roles.map((role, i) => ({ id: i, role })) };
+  assert.deepEqual(tailSession(s, 2).messages.map(m => m.id), [5, 6, 7]);
+  assert.equal(tailSession(s, 2).older, 5);
+  assert.equal(tailSession(s, 4), s, "exactly 4 turns: nothing hidden");
+  assert.equal(tailSession(s, 9), s);
+  assert.equal(tailSession(s, 0), s);
 });

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Keep the phone page in step with the Mac: a commit that touches what the relay Worker bundles
+# deploys it. The Mac side updates itself (autoreload); the relay page does not.
+# Skip once with PIX_SKIP_RELAY_DEPLOY=1 git commit ...
+[ -n "$PIX_SKIP_RELAY_DEPLOY" ] && exit 0
+cd "$(git rev-parse --show-toplevel)" || exit 0
+git diff-tree --no-commit-id --name-only -r HEAD | grep -qE '^(relay/|src/remote-(web|relay-web|sw)\.ts$)' || exit 0
+node scripts/deploy-relay.mjs

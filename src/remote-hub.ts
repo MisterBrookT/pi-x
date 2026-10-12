@@ -11,7 +11,8 @@ import { validSubscription, type PushSender } from "./remote-push.ts";
 import { remoteServiceWorker } from "./remote-sw.ts";
 import { launchableFolder, listFolders, pastSessions, resumableSession, listMemory, readMemory, recentFolders } from "./remote-mac.ts";
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
-import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, readRemoteChunk, saveEditable } from "./remote-files.ts";
+import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, saveUpload, readRemoteChunk, saveEditable } from "./remote-files.ts";
+import { previewRemoteDocument } from "./remote-document-preview.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
@@ -21,6 +22,7 @@ export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
 export const remoteTokenPath = join(homedir(), ".pi/agent/pix-remote/token");
 /** Bookmarks shown in the phone sidebar: [{ "label": "Book", "url": "https://..." }]. Local only, never in Git. */
+export const remoteUploadsDir = join(homedir(), ".pi/agent/pix-remote/uploads");
 export const remoteLinksPath = join(homedir(), ".pi/agent/pix-remote/links.json");
 export async function readRemoteLinks(path = remoteLinksPath): Promise<{ label: string; url: string }[]> {
   try {
@@ -61,13 +63,15 @@ export interface RemoteSnapshot {
   thinking?: string;
   models?: { id: string; name: string }[];
   thinkingLevels?: string[];
+  /** Earlier user messages on this branch that the phone may rewind to, like double Esc on the Mac. */
+  rewinds?: { id: string; text: string }[];
 }
 
 export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
-export interface RemoteAction { action: RemoteActionName | "model" | "thinking" | "answer"; value?: string }
+export interface RemoteAction { action: RemoteActionName | "model" | "thinking" | "answer" | "rewind"; value?: string }
 export interface RemoteQuestion { id: string; question: string; options: { label: string; description?: string }[] }
 
 interface Registered extends RemoteSnapshot {
@@ -81,6 +85,18 @@ const staleMs = 20_000;
 const pollMs = 25_000;
 const bodyLimit = 2_000_000;
 // A relay frame base64-encodes the encrypted JSON again; leave room for that wrapper.
+/**
+ * Only the last `turns` turns (0 = all): from the `turns`-th last user message on. Tool calls and results
+ * are messages too, so counting messages would cut a single turn. `older` counts what was left out.
+ */
+export function tailSession<T extends { messages: unknown[] }>(session: T, turns: number): T & { older?: number } {
+  if (!(turns > 0)) return session;
+  let start = session.messages.length, seen = 0;
+  while (start > 0 && seen < turns) if ((session.messages[--start] as { role?: string })?.role === "user") seen++;
+  if (seen < turns) start = 0;
+  if (start === 0) return session;
+  return { ...session, messages: session.messages.slice(start), older: start };
+}
 export function fitRemoteSnapshot(snapshot: RemoteSnapshot, maxBytes = 1_300_000): RemoteSnapshot {
   if (Buffer.byteLength(JSON.stringify(snapshot)) <= maxBytes) return snapshot;
   let low = 0, high = snapshot.messages.length;
@@ -142,6 +158,8 @@ export interface RemoteHub {
 /** Start the hub on loopback. Rejects with EADDRINUSE when another session already hosts it. */
 export interface RemoteHubOptions {
   token: string; port?: number; host?: string; push?: PushSender;
+  /** Where files sent from the phone composer are saved (default ~/.pi/agent/pix-remote/uploads). */
+  uploadsDir?: string;
   /** Start a new Pi process with remote on in this already validated folder. */
   launch?: (dir: string, session?: string) => Promise<void>;
   home?: string; sessionsDir?: string; memoryRoot?: string; linksPath?: string;
@@ -365,11 +383,12 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       // Mac files named in chat or browsed in the Files panel; remote-files.ts checks every path.
       // Phone editor: open and save existing Markdown/text files; saveEditable refuses stale overwrites.
-      const makeMatch = path.match(/^\/api\/sessions\/([^/]+)\/file\/(create|image)$/);
+      const makeMatch = path.match(/^\/api\/sessions\/([^/]+)\/file\/(create|image|upload)$/);
       if (makeMatch && req.method === "POST") {
         if (!sessions.has(decodeURIComponent(makeMatch[1]))) return send(res, 404, { error: "session is no longer connected" });
         const roots = { home: options.home, hubRoot: options.memoryRoot };
-        const { status, ...result } = makeMatch[2] === "create" ? createEditable(await body(req), roots) : saveMarkdownImage(await body(req), roots);
+        const input = await body(req);
+        const { status, ...result } = makeMatch[2] === "create" ? createEditable(input, roots) : makeMatch[2] === "upload" ? saveUpload(input, options.uploadsDir ?? remoteUploadsDir) : saveMarkdownImage(input, roots);
         return send(res, status, result);
       }
       const editMatch = path.match(/^\/api\/sessions\/([^/]+)\/file\/(source|save)$/);
@@ -394,6 +413,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           return send(res, status, chunk);
         }
         const file = checkRemotePath(target, roots);
+        if (file && !file.dir && (file.kind === "pdf" || file.kind === "slides")) {
+          const { status, ...result } = await previewRemoteDocument(target, url.searchParams.get("page"), roots);
+          return send(res, status, result);
+        }
         if (file && !file.dir && file.kind === "markdown" && file.size <= 256_000) return send(res, 200, { path: file.path, name: file.name, html: renderRemoteMarkdown(await readFile(file.path, "utf8"), { home: options.home, hubRoot: options.memoryRoot, dirs: [dirname(file.path)] }) });
         if (!file || file.dir || file.kind !== "word" || file.size > previewSourceLimit) return send(res, 404, { error: "no preview for this file" });
         const html = await convertDocument(file.path).catch(() => undefined);
@@ -405,7 +428,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (sessionMatch) {
         const session = sessions.get(decodeURIComponent(sessionMatch[1]));
         if (!session) return send(res, 404, { error: "session is no longer connected" });
-        if (req.method === "GET" && !sessionMatch[2]) return send(res, 200, publicSession(session));
+        if (req.method === "GET" && !sessionMatch[2]) return send(res, 200, tailSession(publicSession(session), Number(url.searchParams.get("tail")) || 0));
         if (req.method === "POST" && sessionMatch[2] === "/abort") {
           await body(req);
           session.prompts.push({ abort: true });
@@ -414,10 +437,11 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         }
         if (req.method === "POST" && sessionMatch[2] === "/action") {
           const input = await body(req), action = input.action, value = typeof input.value === "string" ? input.value : undefined;
-          if (!["reload", "new", "compact", "close", "delete", "model", "thinking", "answer"].includes(action)) return send(res, 400, { error: "unknown action" });
+          if (!["reload", "new", "compact", "close", "delete", "model", "thinking", "answer", "rewind"].includes(action)) return send(res, 400, { error: "unknown action" });
           // Only offer what this session listed, so the phone cannot pick arbitrary models.
           if (action === "answer" && (!session.question || !value?.trim())) return send(res, 400, { error: "no question is waiting" });
           if (action === "model" && !session.models?.some(m => m.id === value)) return send(res, 400, { error: "unknown model" });
+          if (action === "rewind" && !session.rewinds?.some(r => r.id === value)) return send(res, 400, { error: "unknown message" });
           if (action === "thinking" && !session.thinkingLevels?.includes(value ?? "")) return send(res, 400, { error: "unknown thinking level" });
           // A question arrives mid-turn, so answering is the one action allowed while Pi works.
           if (session.busy && action !== "answer") return send(res, 409, { error: "Pi is working. Stop it or wait, then try again." });
@@ -474,6 +498,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
             ...extra,
             id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), origin: snapshot.origin === "phone" ? "phone" : snapshot.origin === "mac" ? "mac" : undefined, question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0), nextLook: Number.isFinite(Number(snapshot.nextLook)) && Number(snapshot.nextLook) > 0 ? Number(snapshot.nextLook) : undefined,
             model: snapshot.model, thinking: snapshot.thinking, models: Array.isArray(snapshot.models) ? snapshot.models.slice(0, 40) : undefined, thinkingLevels: Array.isArray(snapshot.thinkingLevels) ? snapshot.thinkingLevels.slice(0, 10) : undefined,
+            rewinds: Array.isArray(snapshot.rewinds) ? snapshot.rewinds.slice(-40).map((r: any) => ({ id: String(r?.id ?? "").slice(0, 100), text: String(r?.text ?? "").slice(0, 300) })) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,
           };

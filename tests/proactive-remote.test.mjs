@@ -147,3 +147,32 @@ test("hub: Do it with a live For you session queues the task into it (no new tab
   const prompts = await next;
   assert.match(JSON.stringify(prompts), /Title a/);
 });
+
+test("phone composer: typing @ suggests For you items and a tap inserts the mention that is sent", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("a1"), item("b2", { title: "Knight backtest" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.getByText("hello there").waitFor();
+  const list = page.getByRole("listbox", { name: "For you items" });
+  await page.locator("#input").click();
+  await page.keyboard.type("check @");
+  await list.waitFor();
+  assert.equal(await list.getByRole("option").count(), 2);
+  await page.keyboard.type("kni");
+  assert.equal(await list.getByRole("option").count(), 1);
+  await list.getByRole("option").first().click();
+  assert.equal(await page.locator("#input").inputValue(), "check @foryou:b2 ");
+  assert.equal(await list.isHidden(), true);
+  await page.keyboard.type("x");
+  assert.equal(await list.isHidden(), true, "no list once the word is done");
+  assert.deepEqual(errors, []);
+});

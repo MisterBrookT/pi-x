@@ -149,7 +149,7 @@ test("keyboard modes: Esc to read, arrows scroll, letters press buttons, Enter t
   await page.keyboard.press("a");
   await page.waitForFunction(() => document.activeElement?.dataset?.action === "photo");
   await page.keyboard.press("ArrowDown");
-  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), "reload");
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.action), "file");
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#actions").isHidden(), true);
 

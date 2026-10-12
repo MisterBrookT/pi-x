@@ -161,13 +161,19 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (useRelay) await ensureRelay(wait);
   };
 
+  // Like double Esc on the Mac: earlier user messages the phone may rewind to (newest last).
+  const rewindPoints = (entries: readonly any[]) => entries.flatMap((e: any) => {
+    if (e?.type !== "message" || e.message?.role !== "user") return [];
+    const c = e.message.content, text = typeof c === "string" ? c : Array.isArray(c) ? c.filter((p: any) => p?.type === "text").map((p: any) => p.text).join(" ") : "";
+    return text.trim() ? [{ id: String(e.id), text: text.trim().slice(0, 300) }] : [];
+  }).slice(-40);
   const snapshot = (branch: readonly any[]): RemoteSnapshot | undefined => {
     if (!ctx) return;
     const manager = ctx.sessionManager;
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); return { waiting: busy ? 0 : bg.running, nextLook: bg.running ? bg.nextLook : undefined }; })(), question: pendingQuestion, messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); return { waiting: busy ? 0 : bg.running, nextLook: bg.running ? bg.nextLook : undefined }; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {
@@ -273,6 +279,10 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       if (!ctx.isIdle()) return;
       if (prompt.action === "delete") deleteOnShutdown = ctx.sessionManager.getSessionFile() ?? "";
       ctx.shutdown(); return;
+    }
+    if (typeof prompt === "object" && "action" in prompt && prompt.action === "rewind") {
+      if (ctx.isIdle() && /^[\w-]+$/.test(prompt.value ?? "")) pi.sendUserMessage(`/rc rewind ${prompt.value}`, { expandPromptTemplates: true });
+      return;
     }
     if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc ${prompt.action}`, { expandPromptTemplates: true }); return; }
     const content = typeof prompt === "string" ? prompt : [
@@ -415,6 +425,14 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     handler: async (args, next) => {
       const action = args.trim();
       // Phone quick actions arrive as /rc reload|new|compact; typing them in the terminal also works.
+      const rewind = /^rewind ([\w-]+)$/.exec(action);
+      if (rewind) {
+        if (!next.isIdle()) { next.ui.notify("Pi is working. Stop it or wait, then try again.", "warning"); return; }
+        const entry = next.sessionManager.getEntry?.(rewind[1]) as any;
+        if (entry?.type !== "message" || entry.message?.role !== "user") { next.ui.notify("That message is not in this session.", "warning"); return; }
+        await next.navigateTree(rewind[1], { summarize: false });
+        schedulePush(); return;
+      }
       if (action === "reload" || action === "new" || action === "compact") {
         if (!next.isIdle()) { next.ui.notify("Pi is working. Stop it or wait, then try again.", "warning"); return; }
         if (action === "compact") { next.compact({ onError: error => next.ui.notify(`Compact failed: ${error.message}`, "error") }); return; }

@@ -72,7 +72,7 @@ export function parseWechatChats(json: unknown, o: { sinceSec: number; exclude?:
 	return list
 		.filter(s => s?.username && (s.chat_type === "group" || s.chat_type === "private") && !/^gh_|holder$|^@|^notifymessage$/.test(String(s.username)) && !/holder$/.test(String(s.chat ?? "")) && Number(s.timestamp ?? 0) >= o.sinceSec && !skip.has(s.chat) && !skip.has(s.username))
 		.slice(0, o.max ?? 30)
-		.map(s => ({ kind: "wechat", id: String(s.username), name: `WeChat: ${String(s.chat ?? s.username).trim()}` }));
+		.map(s => ({ kind: "wechat", id: String(s.username), name: `WeChat: ${String(s.chat ?? s.username).trim()}`, chat: s.chat_type }));
 }
 
 /** WeChat history -> Msg[], oldest first. In private chats the other side has an empty sender. */
