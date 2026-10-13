@@ -53,8 +53,8 @@ export interface Item extends Alert { id: string; at: string; source: string; so
 	sessionCwd?: string;
 	/** The loop's brief: dated progress lines written by whoever worked on it. Survives any chat. */
 	note?: string;
-	/** A job card offered in a session: brook answers there (Do it / Plan first / Discuss / Later / No / Something else). */
-	suggest?: { session: string; name?: string; at: string; answer?: "do" | "plan" | "discuss" | "later" | "no" | "notnow" | "else"; text?: string; answeredAt?: string; by?: string } }
+	/** A job card offered in a session: brook answers there (Do it / Discuss / Later / No / Something else). */
+	suggest?: { session: string; name?: string; at: string; answer?: "do" | "discuss" | "later" | "no" | "notnow" | "else"; text?: string; answeredAt?: string; by?: string } }
 
 /** The daemon script: work sessions call its `note` verb to leave progress on a loop. */
 export const daemonScript = fileURLToPath(new URL("../scripts/proactive-daemon.ts", import.meta.url));

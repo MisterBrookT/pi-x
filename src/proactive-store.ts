@@ -136,8 +136,7 @@ export function noteItem(id: string, text: string, dir?: string): boolean {
 /**
  * Job cards. The judge may suggest that a live session does a loop's next step; the card shows in that
  * session (Mac and phone) and nothing runs until brook answers there. First answer wins.
- * do = run the next step in that session; plan = write a plan only and wait for his OK;
- * discuss = talk it through with him first, no changes; else = run brook's own instruction there;
+ * do = run the next step in that session; discuss = talk it through with him first, no changes; else = run brook's own instruction there;
  * later = hide the loop and remind him in 2 days (morning); no = he won't do it, the loop closes.
  */
 export function suggestItem(id: string, session: { id: string; name?: string }, dir?: string, now = new Date()): boolean {
@@ -152,14 +151,15 @@ export function openSuggestions(dir?: string): Item[] {
 	return readAll(dir).filter(i => isOpen(i) && i.status !== "onit" && i.suggest && !i.suggest.answer);
 }
 
-export type SuggestAnswer = "do" | "plan" | "discuss" | "later" | "no" | "else";
+export type SuggestAnswer = "do" | "discuss" | "later" | "no" | "else";
 export const cardLaterDays = 2;
 /** Record brook's answer. False when there is no open card for this loop, it is answered already, or "else" has no text. */
 export function answerSuggestion(id: string, answer: SuggestAnswer, o: { text?: string; by?: string; dir?: string; now?: Date } = {}): Item | undefined {
 	const it = readAll(o.dir).find(i => i.id === id && isOpen(i));
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
 	if ((answer as string) === "notnow") answer = "later"; // older Mac/phone pages
-	if (!it?.suggest || it.suggest.answer || !["do", "plan", "discuss", "later", "no", "else"].includes(answer) || (answer === "else" && !text)) return undefined;
+	if ((answer as string) === "plan") answer = "discuss";
+	if (!it?.suggest || it.suggest.answer || !["do", "discuss", "later", "no", "else"].includes(answer) || (answer === "else" && !text)) return undefined;
 	const suggest = { ...it.suggest, answer, ...(text && answer === "else" ? { text } : {}), answeredAt: (o.now ?? new Date()).toISOString(), ...(o.by ? { by: o.by } : {}) };
 	const at = o.now ?? new Date();
 	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, suggest, status: "later", wakeAt: wake.toISOString() }); }
@@ -176,10 +176,9 @@ export function answerSuggestion(id: string, answer: SuggestAnswer, o: { text?: 
 export function cardTask(id: string, session: string, cwd: string, dir?: string): string | undefined {
 	const it = readAll(dir).find(i => i.id === id && isOpen(i));
 	const s = it?.suggest;
-	if (!it || !s || s.session !== session || !["do", "plan", "discuss", "else"].includes(s.answer ?? "") || (it.status === "onit" && it.session === session)) return undefined;
+	if (!it || !s || s.session !== session || !["do", "discuss", "else"].includes(s.answer ?? "") || (it.status === "onit" && it.session === session)) return undefined;
 	takeItem(id, session, dir, cwd);
 	const base = actPrompt({ ...it, session: undefined }, paths(dir).dir);
-	if (s.answer === "plan") return `brook tapped "Plan first" on a For you card in this session. Make a short plan for the next step: what you would do, in what order, and what you need from him. Change nothing, send nothing, and wait for his OK.\n\n${base}`;
 	if (s.answer === "discuss") return `brook tapped "Discuss" on a For you card in this session. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`;
 	return s.answer === "else" ? `brook answered a For you card with his own instruction. Do this instead of the suggested step:\n${s.text}\n\n(The loop, for context:)\n${base}` : `brook tapped "Do it" on a For you card in this session.\n\n${base}`;
 }

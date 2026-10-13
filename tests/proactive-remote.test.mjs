@@ -222,7 +222,7 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Plan first No changes until you say", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Do it" }).click();
   const { prompts } = await next;

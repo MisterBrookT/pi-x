@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
 import { answerSuggestion, cardTask, openSuggestions, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_DO, CARD_DISCUSS, CARD_ELSE, CARD_LATER, CARD_NO, CARD_PLAN } from "../extensions/foryou.ts";
+import register, { CARD_DO, CARD_DISCUSS, CARD_ELSE, CARD_LATER, CARD_NO } from "../extensions/foryou.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -130,7 +130,7 @@ test("Mac: the card shows Do it / Not now / Something else in its session and Do
 	await new Promise(r => setTimeout(r, 0));
 	pi.handlers.agent_end[0]({}, macCtx("s1", [CARD_DO], shown));
 	await new Promise(r => setTimeout(r, 20));
-	assert.deepEqual(shown[0].options, [CARD_DO, CARD_PLAN, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE]);
+	assert.deepEqual(shown[0].options, [CARD_DO, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE]);
 	assert.match(shown[0].title, /For you · Knight\nLoop a/);
 	assert.equal(pi.sent.length, 1);
 	assert.match(pi.sent[0], /tapped "Do it"/);
@@ -201,11 +201,11 @@ test("health: a source failing 3 checks in a row shows in For you; one success c
 	assert.deepEqual(forYouView(d).problems, [{ text: "Feishu: login expired (2 chats)", since: "t0" }]);
 });
 
-test("job card: Plan first and Discuss send work that changes nothing until brook says", () => {
+test("job card: Discuss sends work that changes nothing until brook says; an old Plan answer counts as Discuss", () => {
 	const d = tmp(loop("p"), loop("q"));
 	suggestItem("p", { id: "s1" }, d); suggestItem("q", { id: "s2" }, d);
 	assert.ok(answerSuggestion("p", "plan", { dir: d }));
-	assert.match(cardTask("p", "s1", "/x", d), /^brook tapped "Plan first"[\s\S]*Change nothing, send nothing, and wait for his OK/);
+	assert.match(cardTask("p", "s1", "/x", d), /^brook tapped "Discuss"/);
 	assert.ok(answerSuggestion("q", "discuss", { dir: d }));
 	assert.match(cardTask("q", "s2", "/x", d), /^brook tapped "Discuss"[\s\S]*ask what he wants/);
 	assert.equal(parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8")).find(i => i.id === "p").status, "onit");

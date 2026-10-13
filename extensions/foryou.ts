@@ -35,7 +35,7 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 
 export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; dir?: string; cardPollMs?: number }
 
-export const CARD_DO = "Do it", CARD_PLAN = "Plan first (no changes until I say)", CARD_DISCUSS = "Discuss with me first", CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
+export const CARD_DO = "Do it", CARD_DISCUSS = "Discuss with me first", CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -85,11 +85,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		showing = it.id; close = new AbortController();
 		try {
 			const title = `For you · ${it.source}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
-			const pick = await ctx.ui.select(title, [CARD_DO, CARD_PLAN, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
+			const pick = await ctx.ui.select(title, [CARD_DO, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
 			if (!pick) return;
 			const text = pick === CARD_ELSE ? await ctx.ui.input("What should this session do instead?", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
-			const answer = pick === CARD_DO ? "do" : pick === CARD_PLAN ? "plan" : pick === CARD_DISCUSS ? "discuss" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
+			const answer = pick === CARD_DO ? "do" : pick === CARD_DISCUSS ? "discuss" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
 			if (!answerSuggestion(it.id, answer, { text, by: "mac", dir: deps.dir })) { ctx.ui.notify("That card was already answered.", "info"); return; }
 			const task = answer === "later" || answer === "no" ? undefined : cardTask(it.id, sid, ctx.cwd, deps.dir);
 			if (task) pi.sendUserMessage(task);

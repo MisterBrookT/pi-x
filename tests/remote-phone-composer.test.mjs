@@ -66,3 +66,11 @@ test('optimistic prompts appear immediately and reconcile once, without losing f
   app.add({ ...p, id: 2, known: new Set(['old']), failed: false });
   assert.match(app.promptRows(snapshot), /pending-2/, 'already acknowledged message cannot consume another prompt');
 });
+
+test('regression: a prompt the Mac rewrites (an @foryou mention expands into the job) shows once, not twice', () => {
+  const code = [line('const esc='), line('function reconcilePrompts('), line('function promptRows(')].join('\n');
+  const app = runInNewContext(`let pendingPrompts=[];const acknowledgedPrompts=new Set();${code};({add:p=>pendingPrompts.push(p),promptRows})`);
+  app.add({ id: 1, session: 'a', text: '@foryou:07470c9d See what we missed', known: new Set(['old']), failed: false });
+  const expanded = { id: 'a', messages: [{ id: 'old', role: 'user', text: 'earlier' }, { id: 'new', role: 'user', text: 'A proactive loop from 新闻…\nSee what we missed' }] };
+  assert.equal(app.promptRows(expanded), '', 'the expanded message stands in for the typed one');
+});
