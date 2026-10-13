@@ -270,6 +270,7 @@ Look at every loop below and decide which ones should leave the list:
 Leave a loop when unsure. Do not close a loop that is still in progress or has a future due date.
 Also, for loops that need ${o.me} now: if one open Pi session below works in that loop's project (same folder or
 clearly the same work), put it in "route": ${o.me} gets a card in that session asking whether it should do the next step.
+When several sessions share a folder, pick the one he is actively using (it has "doing", or the most recent "last").
 
 ## Open Pi sessions
 ${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.todo ? `; doing: ${w.todo}` : ""}${w.preview ? `; last: ${w.preview.replace(/\s+/g, " ").slice(0, 120)}` : ""}`).join("\n") || "(none)"}

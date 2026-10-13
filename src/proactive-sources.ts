@@ -36,7 +36,9 @@ export function parseFeishu(json: unknown): Msg[] {
 
 const feishu: Adapter = {
 	async fetch(src) {
-		const { stdout } = await run("lark-cli", ["im", "+chat-messages-list", "--as", "user", "--chat-id", src.id, "--order", "desc", "--page-size", "30", "--no-reactions"], { maxBuffer: 1 << 24, timeout: 60_000 });
+		// lark-cli sometimes fails with "token_invalid" while it refreshes the token: retry once.
+		const args = ["im", "+chat-messages-list", "--as", "user", "--chat-id", src.id, "--order", "desc", "--page-size", "30", "--no-reactions"];
+		const { stdout } = await run("lark-cli", args, { maxBuffer: 1 << 24, timeout: 60_000 }).catch(async () => { await new Promise(r => setTimeout(r, 3000)); return run("lark-cli", args, { maxBuffer: 1 << 24, timeout: 60_000 }); });
 		return parseFeishu(JSON.parse(stdout));
 	},
 	howToRead: (src, refs) => `Feishu chat ${src.id}. Read with: lark-cli im +messages-mget --as user --message-ids ${refs.join(",") || "<ids>"} (or +chat-messages-list --chat-id ${src.id}).`,
