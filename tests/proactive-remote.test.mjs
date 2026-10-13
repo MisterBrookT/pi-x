@@ -83,6 +83,20 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
   assert.ok(await page.getByText("Why a").isVisible());
+  // Regression: the dot means "new since you looked". Opening For you calms it; it stays calm after
+  // closing (and after a reload) until something new arrives.
+  await page.locator("#closeForYou").click();
+  assert.equal(await page.locator("#forYouDot").isHidden(), true, "seen: no dot though a loop is still open");
+  await page.reload();
+  await page.locator("#forYouOpen").waitFor();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator("#forYouDot").isHidden(), true, "still calm after reload");
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("n1", { at: new Date(Date.now() + 1000).toISOString() })) + "\n");
+  await page.locator("#forYouDot").waitFor({ timeout: 8000 });
+  await page.locator("#forYouOpen").click();
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "n1", status: "dismissed" }) + "\n");
+  await page.locator('[data-fy="n1"] [data-fy-act="act"]').waitFor({ state: "detached", timeout: 8000 });
+  pushes.length = 0;
 
   // A new item appears on the Mac side: the phone list updates and a push goes out.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b")) + "\n");
@@ -113,7 +127,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.locator("#forYouDot").isHidden(), true, "no dot when nothing is pending");
   await page.locator("#forYouOpen").click();
   await page.getByText("All clear").waitFor();
-  assert.ok(await page.getByText("2 handled").isVisible(), "today's handled items stay visible");
+  assert.ok(await page.getByText("3 handled").isVisible(), "today's handled items stay visible");
   assert.ok(await page.getByText("Title c").isVisible(), "parked loops stay visible under Later");
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
