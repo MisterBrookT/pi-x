@@ -345,7 +345,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         const it = answerSuggestion(cardMatch[1], answer, { text, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
         if (!it) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
         const target = sessions.get(it.suggest!.session);
-        const task = answer === "notnow" ? undefined : cardTask(it.id, it.suggest!.session, target?.cwd ?? "", options.proactiveDir);
+        const task = answer === "later" || answer === "no" ? undefined : cardTask(it.id, it.suggest!.session, target?.cwd ?? "", options.proactiveDir);
         if (task && target) {
           target.prompts.push(target.busy ? { text: task, images: [], mode: "followUp" } : task);
           if (target.waiter) { const w = target.waiter; target.waiter = undefined; w(target.prompts.splice(0)); }

@@ -222,7 +222,7 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Not now", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Plan first No changes until you say", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Do it" }).click();
   const { prompts } = await next;
@@ -236,7 +236,7 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   assert.deepEqual(errors, []);
 });
 
-test("phone job card: Something else sends brook's own words; Not now sends nothing", async t => {
+test("phone job card: Something else sends brook's own words; Later sends nothing and parks it", async t => {
   const { suggestItem } = await import("../src/proactive-store.ts");
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("k1"), item("k2")].map(x => JSON.stringify(x)).join("\n") + "\n");
@@ -261,8 +261,8 @@ test("phone job card: Something else sends brook's own words; Not now sends noth
   suggestItem("k2", { id: "s1" }, dir);
   const card2 = page.locator('[data-job="k2"]');
   await card2.waitFor({ timeout: 8000 });
-  await card2.getByRole("button", { name: "Not now" }).click();
+  await card2.getByRole("button", { name: /^Later/ }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });
   const k2 = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2");
-  assert.equal(k2.status, "pending"); assert.equal(k2.suggest.answer, "notnow");
+  assert.equal(k2.status, "later"); assert.equal(k2.suggest.answer, "later");
 });

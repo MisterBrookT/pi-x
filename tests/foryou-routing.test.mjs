@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
 import { answerSuggestion, cardTask, openSuggestions, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_DO, CARD_ELSE, CARD_NOT_NOW } from "../extensions/foryou.ts";
+import register, { CARD_DO, CARD_DISCUSS, CARD_ELSE, CARD_LATER, CARD_NO, CARD_PLAN } from "../extensions/foryou.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -71,7 +71,7 @@ test("job card: nothing runs until brook answers; first answer wins; every answe
 	assert.equal(cardTask("a", "s1", "/nd", d), undefined, "no task before an answer");
 	assert.deepEqual(publicItem(parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8"))[0]).suggest, { session: "s1", name: "backtest" });
 	assert.ok(answerSuggestion("a", "do", { by: "phone", dir: d }));
-	assert.equal(answerSuggestion("a", "notnow", { by: "mac", dir: d }), undefined, "second answer loses");
+	assert.equal(answerSuggestion("a", "later", { by: "mac", dir: d }), undefined, "second answer loses");
 	const task = cardTask("a", "s1", "/nd", d);
 	assert.match(task, /tapped "Do it"[\s\S]*Switch loader/);
 	assert.equal(cardTask("a", "s1", "/nd", d), undefined, "runs once");
@@ -82,12 +82,18 @@ test("job card: nothing runs until brook answers; first answer wins; every answe
 	assert.deepEqual(log.map(l => [l.kind, l.answer, l.by]), [["card", "do", "phone"]]);
 });
 
-test("job card: Not now keeps the loop in For you; Something else needs text and runs brook's words", () => {
-	const d = tmp(loop("a"), loop("b"));
-	suggestItem("a", { id: "s1" }, d); suggestItem("b", { id: "s2" }, d);
-	assert.ok(answerSuggestion("a", "notnow", { dir: d }));
+test("job card: Later hides the loop and brings it back in 2 days; No closes it; Something else runs brook's words", () => {
+	const d = tmp(loop("a"), loop("b"), loop("c"));
+	suggestItem("a", { id: "s1" }, d); suggestItem("b", { id: "s2" }, d); suggestItem("c", { id: "s3" }, d);
+	const now = new Date("2026-10-13T05:00:00");
+	assert.ok(answerSuggestion("a", "later", { dir: d, now }));
 	assert.equal(cardTask("a", "s1", "/x", d), undefined);
-	assert.equal(parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8")).find(i => i.id === "a").status, "pending");
+	const a = parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8")).find(i => i.id === "a");
+	assert.equal(a.status, "later");
+	assert.equal(a.wakeAt, new Date("2026-10-15T09:00:00").toISOString(), "back in 2 days, in the morning");
+	assert.ok(answerSuggestion("c", "no", { dir: d }));
+	assert.equal(cardTask("c", "s3", "/x", d), undefined);
+	assert.equal(parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8")).find(i => i.id === "c").status, "dismissed");
 	assert.equal(answerSuggestion("b", "else", { text: "  ", dir: d }), undefined);
 	assert.ok(answerSuggestion("b", "else", { text: "Just reply thanks to Knight", dir: d }));
 	assert.match(cardTask("b", "s2", "/x", d), /^brook answered a For you card with his own instruction[\s\S]*Just reply thanks to Knight/);
@@ -124,7 +130,7 @@ test("Mac: the card shows Do it / Not now / Something else in its session and Do
 	await new Promise(r => setTimeout(r, 0));
 	pi.handlers.agent_end[0]({}, macCtx("s1", [CARD_DO], shown));
 	await new Promise(r => setTimeout(r, 20));
-	assert.deepEqual(shown[0].options, [CARD_DO, CARD_NOT_NOW, CARD_ELSE]);
+	assert.deepEqual(shown[0].options, [CARD_DO, CARD_PLAN, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE]);
 	assert.match(shown[0].title, /For you · Knight\nLoop a/);
 	assert.equal(pi.sent.length, 1);
 	assert.match(pi.sent[0], /tapped "Do it"/);
@@ -193,4 +199,14 @@ test("health: a source failing 3 checks in a row shows in For you; one success c
 	const d = tmp();
 	writeFileSync(join(d, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (2 chats)", since: "t0" }] }));
 	assert.deepEqual(forYouView(d).problems, [{ text: "Feishu: login expired (2 chats)", since: "t0" }]);
+});
+
+test("job card: Plan first and Discuss send work that changes nothing until brook says", () => {
+	const d = tmp(loop("p"), loop("q"));
+	suggestItem("p", { id: "s1" }, d); suggestItem("q", { id: "s2" }, d);
+	assert.ok(answerSuggestion("p", "plan", { dir: d }));
+	assert.match(cardTask("p", "s1", "/x", d), /^brook tapped "Plan first"[\s\S]*Change nothing, send nothing, and wait for his OK/);
+	assert.ok(answerSuggestion("q", "discuss", { dir: d }));
+	assert.match(cardTask("q", "s2", "/x", d), /^brook tapped "Discuss"[\s\S]*ask what he wants/);
+	assert.equal(parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8")).find(i => i.id === "p").status, "onit");
 });
