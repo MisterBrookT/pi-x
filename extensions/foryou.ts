@@ -8,7 +8,8 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { readFileSync } from "node:fs";
-import { actItem, finishedItem, answerSuggestion, cardTask, openSuggestions, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, finishedItem, answerCard, currentCard, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
 const TOOL = "loops";
@@ -33,9 +34,19 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 	return !!(await actItem(id, { into, cwd }));
 }
 
-export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; dir?: string; cardPollMs?: number }
+export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number }
 
-export const CARD_DO = "Do it", CARD_DISCUSS = "Discuss with me first", CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
+/** Answer through the hub when it runs (it queues work into sessions and updates the phone). */
+async function answerViaHub(id: string, body: { answer: CardAnswer; to?: string; text?: string }): Promise<"ok" | "gone" | "nohub"> {
+	try {
+		const token = readFileSync(remoteTokenPath, "utf8").trim();
+		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/foryou/${encodeURIComponent(id)}/card`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ ...body, by: "mac" }), signal: AbortSignal.timeout(8000) });
+		return res.ok ? "ok" : res.status === 409 ? "gone" : "nohub";
+	} catch { return "nohub"; }
+}
+
+export const CARD_DO = "Do it here", CARD_NEW = "New session in its project", CARD_DISCUSS = "Discuss with me first", CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
+export const cardSend = (name: string) => `Send to ${name} ›`;
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -73,26 +84,33 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);
 		pi.setActiveTools([...active]);
 	};
-	// Job cards: For you suggested this session do a loop's next step. Show it when Pi is idle; nothing
-	// runs until brook picks. The phone shows the same card; whichever answers first wins, the other closes.
+	// Cards: in the For you session only. When Pi is idle, show the oldest loop that needs brook; nothing
+	// runs until he picks. The phone shows the same card; whichever answers first wins, the other closes.
 	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined;
 	const check = async (ctx: any) => {
-		const sid = ctx?.sessionManager?.getSessionId?.();
-		if (!sid || !ctx.hasUI) return;
-		const it = openSuggestions(deps.dir).find(i => i.suggest!.session === sid);
+		if (!isCoordinator(ctx) || !ctx.hasUI) return;
+		const it = currentCard(deps.dir, await sessions().catch(() => []));
 		if (showing && showing !== it?.id) { close?.abort(); return; }
 		if (!it || showing || !ctx.isIdle()) return;
 		showing = it.id; close = new AbortController();
 		try {
-			const title = `For you · ${it.source}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
-			const pick = await ctx.ui.select(title, [CARD_DO, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
+			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
+			const sends = it.targets.map(t => ({ label: cardSend(t.name), to: t.id }));
+			const pick = await ctx.ui.select(title, [CARD_DO, ...sends.map(x => x.label), CARD_NEW, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
 			if (!pick) return;
-			const text = pick === CARD_ELSE ? await ctx.ui.input("What should this session do instead?", "", { signal: close.signal }) : undefined;
+			const text = pick === CARD_ELSE ? await ctx.ui.input("What should For you do instead?", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
-			const answer = pick === CARD_DO ? "do" : pick === CARD_DISCUSS ? "discuss" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
-			if (!answerSuggestion(it.id, answer, { text, by: "mac", dir: deps.dir })) { ctx.ui.notify("That card was already answered.", "info"); return; }
-			const task = answer === "later" || answer === "no" ? undefined : cardTask(it.id, sid, ctx.cwd, deps.dir);
-			if (task) pi.sendUserMessage(task);
+			const send = sends.find(x => x.label === pick);
+			const answer: CardAnswer = pick === CARD_DO ? "do" : send || pick === CARD_NEW ? "send" : pick === CARD_DISCUSS ? "discuss" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
+			const to = send?.to ?? (pick === CARD_NEW ? "new" : undefined);
+			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, to, text });
+			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }
+			if (via === "ok") return;
+			// No hub: answer here directly.
+			const r = answerCard(it.id, answer, { to, text, by: "mac", dir: deps.dir });
+			if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
+			if (r.here) pi.sendUserMessage(r.here);
+			if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);
 		} finally { showing = undefined; close = undefined; }
 	};
 	pi.on("session_start", (_e, ctx) => {

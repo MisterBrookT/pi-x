@@ -194,7 +194,7 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   assert.deepEqual(errors, []);
 });
 
-test("phone job card: shows in the suggested session; Do it sends the loop's work there once; Mac and phone see it close", async t => {
+test("phone card: lives in the For you session; the bell opens it; Send to hands the loop to that session", async t => {
   const { suggestItem } = await import("../src/proactive-store.ts");
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader" })].map(x => JSON.stringify(x)).join("\n") + "\n");
@@ -203,6 +203,7 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "backtest", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [] }) });
   assert.ok(relayAllowed("/api/foryou/j1/card", "POST"), "the phone can answer through the relay");
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
@@ -210,59 +211,56 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
-  // Regression: two sessions can share a name; For you and the session list must point at the right one.
+  await page.getByText("hello there").waitFor();
+  assert.equal(await page.locator("[data-job]").count(), 0, "work sessions show no card");
+  // Only the For you session carries the needs-you mark.
   await page.locator("#menu").click();
-  await page.locator('.row[data-id="s1"] [aria-label="For you card waiting"]').waitFor();
+  await page.locator('.row[data-id="pix-foryou"] [aria-label="For you card waiting"]').waitFor();
+  assert.equal(await page.locator('.row[data-id="s1"] [aria-label="For you card waiting"]').count(), 0);
   await page.keyboard.press("Escape");
   await page.locator("#forYouOpen").click();
-  const link = page.locator('[data-fy="j1"] .fy-card-link');
-  assert.equal((await link.textContent()).trim(), "backtest ›");
-  assert.equal(await link.locator('[aria-label="Card waiting"]').count(), 1, "same needs-you mark as the session list");
-  await link.click();
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it here", "Send to backtest ›", "New session In its project", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await card.getByRole("button", { name: "Do it" }).click();
+  await card.getByRole("button", { name: "Send to backtest ›" }).click();
   const { prompts } = await next;
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /tapped "Do it"[\s\S]*Switch the backtest loader/);
+  assert.match(prompts[0], /Switch the backtest loader/);
   await card.waitFor({ state: "detached", timeout: 8000 });
   const again = await fetch(`${base}/api/foryou/j1/card`, { method: "POST", headers: auth, body: JSON.stringify({ answer: "do" }) });
   assert.equal(again.status, 409, "first answer wins");
   const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
-  assert.equal(it.status, "onit"); assert.equal(it.session, "s1"); assert.equal(it.suggest.by, "phone");
+  assert.equal(it.status, "onit"); assert.equal(it.session, "s1");
   assert.deepEqual(errors, []);
 });
 
-test("phone job card: Something else sends brook's own words; Later sends nothing and parks it", async t => {
-  const { suggestItem } = await import("../src/proactive-store.ts");
+test("phone card: Something else runs brook's words in For you; Later parks the next card", async t => {
   const dir = await folder(t);
-  writeFileSync(join(dir, "inbox.jsonl"), [item("k1"), item("k2")].map(x => JSON.stringify(x)).join("\n") + "\n");
-  suggestItem("k1", { id: "s1" }, dir);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
-  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const card = page.locator('[data-job="k1"]');
   await card.waitFor();
+  assert.match(await card.textContent(), /1 more/);
   await card.getByRole("button", { name: "Something else…" }).click();
   await card.locator("textarea").fill("Only draft a reply");
-  const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
+  const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Send" }).click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
-  // Not now: no prompt, loop stays pending.
-  suggestItem("k2", { id: "s1" }, dir);
+  // The next card shows once For you is idle again.
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const card2 = page.locator('[data-job="k2"]');
   await card2.waitFor({ timeout: 8000 });
   await card2.getByRole("button", { name: /^Later/ }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });
-  const k2 = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2");
-  assert.equal(k2.status, "later"); assert.equal(k2.suggest.answer, "later");
+  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });

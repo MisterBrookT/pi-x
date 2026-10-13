@@ -16,7 +16,7 @@ import { previewRemoteDocument } from "./remote-document-preview.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
-import { actItem, answerSuggestion, cardTask, dismissItem, doneItem, forYouView, laterItem, nowItem, openSuggestions, type SuggestAnswer } from "./proactive-store.ts";
+import { actItem, answerCard, startForYou, currentCard, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -173,6 +173,7 @@ export interface RemoteHubOptions {
   onRetire?: () => void;
   /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
   proactiveDir?: string;
+  proactiveStart?: (prompt: string) => Promise<unknown>;
   proactiveAct?: (id: string, focus?: boolean, into?: string, cwd?: string) => Promise<unknown>;
 }
 
@@ -239,7 +240,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
       // The step it is on now: For you uses this to see what brook is working on.
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
-      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(cards.get(id) ? { card: true } : {}), ...(question ? { asks: true } : {}) };
+      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(id === forYouSession.id && card ? { card: true } : {}), ...(question ? { asks: true } : {}) };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -250,22 +251,21 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const proactiveFile = proactivePaths(options.proactiveDir).inbox;
   const liveSessions = () => [...sessions.values()].map(({ id, name, cwd, busy }) => ({ id, name, cwd, busy }));
   const forYou = () => forYouView(options.proactiveDir);
-  // Job cards: For you suggests a session do a loop's next step; the card shows in that session.
-  type Card = { id: string; title: string; why: string; action: string; source: string; button: string };
-  const cardsNow = () => new Map(openSuggestions(options.proactiveDir).map(i => [i.suggest!.session, { id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, button: i.button ?? "" } as Card]));
-  let cards = cardsNow();
+  // The card: the oldest loop that needs brook, shown in the For you session (one at a time).
+  const cardNow = () => currentCard(options.proactiveDir, liveSessions());
+  let card: Card | undefined = cardNow();
   let knownItems = new Set(forYou().pending.map(i => i.id));
   const onProactive = () => {
     const view = forYou(), list = view.pending;
     publish("foryou", view);
-    for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
+    for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: forYouSession.id, tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
-    const before = cards; cards = cardsNow(); let changedCards = false;
-    for (const s of sessions.values()) if (JSON.stringify(before.get(s.id)) !== JSON.stringify(cards.get(s.id))) {
-      publish("session", publicSession(s)); changedCards = true;
-      if (cards.get(s.id) && !before.get(s.id) && push) notifyPhones({ title: s.name, body: `For you: ${cards.get(s.id)!.title}`, session: s.id, tag: `card-${s.id}` });
+    const before = card; card = cardNow();
+    if (JSON.stringify(before) !== JSON.stringify(card)) {
+      const fy = sessions.get(forYouSession.id);
+      if (fy) publish("session", publicSession(fy));
+      publish("sessions", summary());
     }
-    if (changedCards) publish("sessions", summary());
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);
   const healthFile = proactivePaths(options.proactiveDir).health;
@@ -284,7 +284,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (keep === a.length && keep === b.length && same(oldMeta, meta)) return null;
     return { ...meta, keep, base: a.length, tail: b.slice(keep) };
   };
-  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...(cards.get(s.id) ? { card: cards.get(s.id) } : {}) });
+  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...(s.id === forYouSession.id && card ? { card } : {}) });
   const drop = (id: string) => {
     const session = sessions.get(id);
     if (!session) return;
@@ -337,21 +337,27 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
-      // A job card answer (phone or Mac): first answer wins; Do it / Something else sends the work in.
+      // A card answer (phone or Mac): first answer wins. Do it / Discuss / Something else run in For you;
+      // Send hands the loop to the chosen session (live: queued there; "new": a session in its project).
       const cardMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/card$/);
       if (req.method === "POST" && cardMatch) {
         const input = await body(req).catch(() => ({})) as any;
-        const answer = String(input?.answer ?? "") as SuggestAnswer, text = typeof input?.text === "string" ? input.text : undefined;
-        const it = answerSuggestion(cardMatch[1], answer, { text, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
-        if (!it) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
-        const target = sessions.get(it.suggest!.session);
-        const task = answer === "later" || answer === "no" ? undefined : cardTask(it.id, it.suggest!.session, target?.cwd ?? "", options.proactiveDir);
-        if (task && target) {
-          target.prompts.push(target.busy ? { text: task, images: [], mode: "followUp" } : task);
-          if (target.waiter) { const w = target.waiter; target.waiter = undefined; w(target.prompts.splice(0)); }
-        }
+        const answer = String(input?.answer ?? "") as CardAnswer;
+        const r = answerCard(cardMatch[1], answer, { to: typeof input?.to === "string" ? input.to : undefined, text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
+        if (!r) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
+        const queue = (sid: string, text: string) => {
+          const live = sessions.get(sid);
+          if (!live) return false;
+          live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
+          if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
+          return true;
+        };
+        try {
+          if (r.here && !queue(forYouSession.id, r.here)) await (options.proactiveStart ?? startForYou)(r.here);
+          if (r.into) await (options.proactiveAct ?? ((x: string, f: boolean, i?: string) => actItem(x, { dir: options.proactiveDir, send: queue, live: liveSessions(), into: i })))(r.item.id, false, r.into, undefined);
+        } catch (error) { onProactive(); return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
         onProactive();
-        return send(res, 200, { ok: true, started: !!(task && target) });
+        return send(res, 200, { ok: true });
       }
       const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
       if (req.method === "POST" && forYouMatch) {
@@ -534,6 +540,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           };
           sessions.set(id, next);
           notifyChanges(old, next);
+          // A session joining can add a "Send to" button to the card.
+          if (!old && id !== forYouSession.id) onProactive();
           // Phones get only what changed: messages after the first difference, plus the small fields.
           // A heartbeat with nothing new sends nothing, so the phone never re-draws for no reason.
           const patch = sessionPatch(old, next);

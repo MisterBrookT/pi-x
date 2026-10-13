@@ -134,10 +134,14 @@ export function noteItem(id: string, text: string, dir?: string): boolean {
 }
 
 /**
- * Job cards. The judge may suggest that a live session does a loop's next step; the card shows in that
- * session (Mac and phone) and nothing runs until brook answers there. First answer wins.
- * do = run the next step in that session; discuss = talk it through with him first, no changes; else = run brook's own instruction there;
- * later = hide the loop and remind him in 2 days (morning); no = he won't do it, the loop closes.
+ * Cards. Every loop that needs brook shows as a card in the one For you session (Mac and phone),
+ * oldest first, one at a time. Nothing runs until he answers; the first answer wins (the loop leaves
+ * "needs you"). The judge may suggest a session for the work (`suggest`); the card offers it as a button.
+ *   do      = For you does the next step itself
+ *   send    = hand it to a session (`to`: a live session id, or "new" in the loop's project)
+ *   discuss = For you talks it through with him first, no changes
+ *   else    = For you does his own instruction instead
+ *   later   = hidden, back in 2 days (morning);  no = he won't do it, the loop closes
  */
 export function suggestItem(id: string, session: { id: string; name?: string }, dir?: string, now = new Date()): boolean {
 	const it = readAll(dir).find(i => i.id === id && isOpen(i));
@@ -146,41 +150,52 @@ export function suggestItem(id: string, session: { id: string; name?: string }, 
 	return true;
 }
 
-/** Cards still waiting for brook, by session id. */
-export function openSuggestions(dir?: string): Item[] {
-	return readAll(dir).filter(i => isOpen(i) && i.status !== "onit" && i.suggest && !i.suggest.answer);
+export type CardAnswer = "do" | "send" | "discuss" | "else" | "later" | "no";
+export const cardLaterDays = 2;
+export interface Card { id: string; title: string; why: string; action: string; source: string; due?: string; left: number; targets: { id: string; name: string }[] }
+
+/** Up to two sessions to offer: the judge's pick first, then live sessions in the loop's project folder. */
+export function cardTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string }[] {
+	const others = live.filter(s => s.id !== forYouSession.id);
+	const out: { id: string; name: string }[] = [];
+	const pick = it.suggest && others.find(s => s.id === it.suggest!.session);
+	if (pick) out.push({ id: pick.id, name: pick.name });
+	if (it.project) {
+		const dir = expandHome(it.project, home);
+		for (const s of others) if (out.length < 2 && !out.some(o => o.id === s.id) && s.cwd && (s.cwd === dir || dir.startsWith(s.cwd + "/") || s.cwd.startsWith(dir + "/"))) out.push({ id: s.id, name: s.name });
+	}
+	return out;
 }
 
-export type SuggestAnswer = "do" | "discuss" | "later" | "no" | "else";
-export const cardLaterDays = 2;
-/** Record brook's answer. False when there is no open card for this loop, it is answered already, or "else" has no text. */
-export function answerSuggestion(id: string, answer: SuggestAnswer, o: { text?: string; by?: string; dir?: string; now?: Date } = {}): Item | undefined {
-	const it = readAll(o.dir).find(i => i.id === id && isOpen(i));
-	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
-	if ((answer as string) === "notnow") answer = "later"; // older Mac/phone pages
-	if ((answer as string) === "plan") answer = "discuss";
-	if (!it?.suggest || it.suggest.answer || !["do", "discuss", "later", "no", "else"].includes(answer) || (answer === "else" && !text)) return undefined;
-	const suggest = { ...it.suggest, answer, ...(text && answer === "else" ? { text } : {}), answeredAt: (o.now ?? new Date()).toISOString(), ...(o.by ? { by: o.by } : {}) };
-	const at = o.now ?? new Date();
-	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, suggest, status: "later", wakeAt: wake.toISOString() }); }
-	else if (answer === "no") write(o.dir, { id, suggest, status: "dismissed", at_status: at.toISOString() });
-	else write(o.dir, { id, suggest });
-	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: suggest.answeredAt, kind: "card", id, title: it.title, session: it.suggest.session, answer, text: suggest.text, by: o.by }) + "\n");
-	return { ...it, suggest };
+/** The card For you shows now: the oldest loop that needs brook (undefined when none). */
+export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.now(), home = homedir()): Card | undefined {
+	const waiting = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+	const it = waiting[0];
+	if (!it) return undefined;
+	return { id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), left: waiting.length - 1, targets: cardTargets(it, live, home) };
 }
 
 /**
- * The work a session runs after brook said yes on its card: takes the loop ("on it" here) and returns
- * the prompt. Undefined when the card was not answered do/else for this session, or it already ran.
+ * Record brook's answer and change the loop. Returns what should run in the For you session
+ * (`here`), or where to hand it (`into`); undefined when the card is gone (answered already, or
+ * a bad answer). Every answer is logged.
  */
-export function cardTask(id: string, session: string, cwd: string, dir?: string): string | undefined {
-	const it = readAll(dir).find(i => i.id === id && isOpen(i));
-	const s = it?.suggest;
-	if (!it || !s || s.session !== session || !["do", "discuss", "else"].includes(s.answer ?? "") || (it.status === "onit" && it.session === session)) return undefined;
-	takeItem(id, session, dir, cwd);
-	const base = actPrompt({ ...it, session: undefined }, paths(dir).dir);
-	if (s.answer === "discuss") return `brook tapped "Discuss" on a For you card in this session. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`;
-	return s.answer === "else" ? `brook answered a For you card with his own instruction. Do this instead of the suggested step:\n${s.text}\n\n(The loop, for context:)\n${base}` : `brook tapped "Do it" on a For you card in this session.\n\n${base}`;
+export function answerCard(id: string, answer: CardAnswer, o: { to?: string; text?: string; by?: string; dir?: string; now?: Date } = {}): { item: Item; here?: string; into?: string } | undefined {
+	const at = o.now ?? new Date();
+	const it = readAll(o.dir).find(i => i.id === id && needsYou(i, at.getTime()));
+	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
+	if (!it || !["do", "send", "discuss", "else", "later", "no"].includes(answer) || (answer === "else" && !text)) return undefined;
+	if (answer === "send" && !(o.to && /^[\w.-]{1,80}$/.test(o.to))) return undefined;
+	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(o.to ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
+	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
+	if (answer === "no") { write(o.dir, { id, status: "dismissed" }); return { item: it }; }
+	if (answer === "send") return { item: it, into: o.to };
+	takeItem(id, forYouSession.id, o.dir, forYouFolder());
+	const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
+	const here = answer === "discuss" ? `brook tapped "Discuss" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`
+		: answer === "else" ? `brook answered loop ${id} with his own instruction. Do this instead of the suggested step:\n${text}\n\n(The loop, for context:)\n${base}`
+		: `brook tapped "Do it" on loop ${id}. Do the next step here.\n\n${base}`;
+	return { item: it, here };
 }
 
 /** The coordinator: one Pi session that sees every loop, does small ones itself, and hands big ones to work sessions. */
@@ -229,6 +244,12 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
 	await (options.launch ?? launchPi)(route.cwd, mode, { prompt, sessionId: route.session, name: route.name, model: route.coordinator ? forYouSession.model : undefined, focus: options.focus });
 	return it;
+}
+
+/** Start (or resume) the For you session with a prompt, when it is not open. */
+export async function startForYou(prompt: string, options: { mode?: RemoteMode; launch?: typeof launchPi; home?: string } = {}) {
+	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
+	await (options.launch ?? launchPi)(forYouFolder(options.home), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model, focus: false });
 }
 
 /** What the coordinator gets when brook taps a loop: the loop, and the choice is its own. */

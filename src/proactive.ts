@@ -143,8 +143,8 @@ Decide, in this order:
 2. Is a loop finished (done, answered, cancelled, no longer needed)? Put its id in "close".
 3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
 4. Who should do the next step? If one open Pi session above is clearly already working on this exact thing
-   (same project folder and its "doing"/"last" matches), set "to" to that session id: ${o.me} will get a card there
-   asking whether that session should do it. Otherwise omit "to" (it goes to ${o.me}'s For you list).
+   (same project folder and its "doing"/"last" matches), set "to" to that session id: his card in For you will offer
+   "Send to <that session>". Otherwise omit "to".
 
 ${o.cards ? `You also keep the memory, as cards: "index" (about ${o.me}, what to notify), one card per person
 ("people/<name>", e.g. "people/Knight") and one per project ("projects/<name>", e.g. "projects/newsdecision").
@@ -270,7 +270,7 @@ Look at every loop below and decide which ones should leave the list:
 - a loop whose latest progress line says the work is finished, submitted, or confirmed: close it
 Leave a loop when unsure. Do not close a loop that is still in progress or has a future due date.
 Also, for loops that need ${o.me} now: if one open Pi session below works in that loop's project (same folder or
-clearly the same work), put it in "route": ${o.me} gets a card in that session asking whether it should do the next step.
+clearly the same work), put it in "route": his card in For you will offer "Send to <that session>".
 When several sessions share a folder, pick the one he is actively using (it has "doing", or the most recent "last").
 
 ## Open Pi sessions
