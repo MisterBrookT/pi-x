@@ -234,12 +234,12 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
-    .map(({ id, name, named, cwd, busy, waiting, nextLook, updatedAt, messages, todos }) => {
+    .map(({ id, name, named, cwd, busy, waiting, nextLook, updatedAt, messages, todos, question }) => {
       const last = messages.at(-1);
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
       // The step it is on now: For you uses this to see what brook is working on.
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
-      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(cards.get(id) ? { card: true } : {}) };
+      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(cards.get(id) ? { card: true } : {}), ...(question ? { asks: true } : {}) };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;

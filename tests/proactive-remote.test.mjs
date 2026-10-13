@@ -216,7 +216,8 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   await page.keyboard.press("Escape");
   await page.locator("#forYouOpen").click();
   const link = page.locator('[data-fy="j1"] .fy-card-link');
-  assert.equal((await link.textContent()).trim(), "✦ backtest ›");
+  assert.equal((await link.textContent()).trim(), "backtest ›");
+  assert.equal(await link.locator('[aria-label="Card waiting"]').count(), 1, "same needs-you mark as the session list");
   await link.click();
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
