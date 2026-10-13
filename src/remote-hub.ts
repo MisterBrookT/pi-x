@@ -239,7 +239,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
       // The step it is on now: For you uses this to see what brook is working on.
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
-      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}) };
+      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(cards.get(id) ? { card: true } : {}) };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -260,11 +260,12 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     publish("foryou", view);
     for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: "", tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
-    const before = cards; cards = cardsNow();
+    const before = cards; cards = cardsNow(); let changedCards = false;
     for (const s of sessions.values()) if (JSON.stringify(before.get(s.id)) !== JSON.stringify(cards.get(s.id))) {
-      publish("session", publicSession(s));
+      publish("session", publicSession(s)); changedCards = true;
       if (cards.get(s.id) && !before.get(s.id) && push) notifyPhones({ title: s.name, body: `For you: ${cards.get(s.id)!.title}`, session: s.id, tag: `card-${s.id}` });
     }
+    if (changedCards) publish("sessions", summary());
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);
   // Parked loops come back by time, not by a file change: re-check every minute.

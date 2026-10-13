@@ -193,6 +193,14 @@ test("phone job card: shows in the suggested session; Do it sends the loop's wor
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
+  // Regression: two sessions can share a name; For you and the session list must point at the right one.
+  await page.locator("#menu").click();
+  await page.locator('.row[data-id="s1"] .row-card').waitFor();
+  await page.keyboard.press("Escape");
+  await page.locator("#forYouOpen").click();
+  const link = page.locator('[data-fy="j1"] .fy-card-link');
+  assert.match(await link.textContent(), /Card waiting in backtest/);
+  await link.click();
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
