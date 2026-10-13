@@ -1,8 +1,13 @@
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "../../src/remote-web.ts";
 import { remoteRelayWebScript } from "../../src/remote-relay-web.ts";
 import { remoteServiceWorker } from "../../src/remote-sw.ts";
+import { pageUpdateScript } from "../../src/remote-relay-web.ts";
 
-const html = remoteAppHtml.replace("<script>", `<script>\n${remoteRelayWebScript}\n`);
+// Build id: the page checks /version when it comes back to the screen and reloads itself when a newer
+// page is deployed, so a home-screen app that stays open never keeps running old code.
+const page = remoteAppHtml.replace("<script>", `<script>\n${remoteRelayWebScript}\n`);
+const build = (() => { let h = 2166136261; for (let i = 0; i < page.length; i++) h = Math.imul(h ^ page.charCodeAt(i), 16777619); return (h >>> 0).toString(36); })();
+const html = page.replace("<script>", `<script>\nconst PIX_BUILD=${JSON.stringify(build)};\n${pageUpdateScript}\n`);
 const text = (body: string, type: string, headers: Record<string, string> = {}) => new Response(body, { headers: {
   "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
   "strict-transport-security": "max-age=31536000", ...headers,
@@ -17,6 +22,7 @@ export default {
         "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' wss://${url.host}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
       });
     }
+    if (url.pathname === "/version") return text(JSON.stringify({ build }), "application/json");
     if (url.pathname === "/sw.js") return text(remoteServiceWorker, "text/javascript", { "service-worker-allowed": "/" });
     if (url.pathname === "/icon.svg") return text(remoteIconSvg, "image/svg+xml");
     if (url.pathname === "/manifest.webmanifest") return text(remoteManifest, "application/manifest+json");
@@ -30,7 +36,8 @@ export default {
 
 /** Routes opaque encrypted frames only. No key, plaintext, or transcript is stored here. */
 export class Room {
-  constructor(private state: any) { state.setWebSocketAutoResponse?.(new WebSocketRequestResponsePair("ping", "pong")); }
+  private state: any;
+  constructor(state: any) { this.state = state; state.setWebSocketAutoResponse?.(new WebSocketRequestResponsePair("ping", "pong")); }
   fetch(request: Request) {
     const role = new URL(request.url).pathname.endsWith("/agent") ? "agent" : "phone";
     if (role === "phone" && this.state.getWebSockets("phone").length >= 3) return new Response("Room full", { status: 429 });

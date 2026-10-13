@@ -71,3 +71,6 @@ function relayConnect(secret){
   return events;
 }
 `;
+
+/** Reload the page when the relay serves a newer build (checked on open, return to screen, and every 5 min). */
+export const pageUpdateScript = String.raw`(()=>{let last=0;const check=async()=>{if(Date.now()-last<20000)return;last=Date.now();try{const r=await fetch("/version",{cache:"no-store"});const v=await r.json();if(v.build&&v.build!==PIX_BUILD){const ta=document.getElementById("input");if(ta&&ta.value)try{sessionStorage.pixDraft=ta.value}catch{}location.reload()}}catch{}};document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")check()});addEventListener("pageshow",check);addEventListener("focus",check);setInterval(check,300000)})();`;
