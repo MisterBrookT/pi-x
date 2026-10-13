@@ -63,12 +63,13 @@ async function workSessions(): Promise<WorkSession[]> {
 
 const DAY = 86_400_000;
 /**
- * Once a day: ask the judge which open loops are finished, stale, or duplicates, and close them.
+ * Once an hour: ask the judge which open loops are finished, stale, or duplicates, and close them.
  * Once a week: tidy long memory cards (merge duplicates, drop outdated lines). Both are logged.
  */
 async function housekeeping(cfg: Config, state: Record<string, string>, work: WorkSession[]) {
 	const now = Date.now();
-	if (now - Date.parse(state["@pile"] ?? "0") > DAY) {
+	// Hourly: close finished loops and offer job cards for loops that match a session open now.
+	if (now - Date.parse(state["@pile"] ?? "0") > 3_600_000) {
 		const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 		const open = items.filter(isOpen);
 		if (open.length) {
