@@ -83,6 +83,9 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
   assert.ok(await page.getByText("Why a").isVisible());
+  // A source that keeps failing shows as one calm line at the top of For you.
+  writeFileSync(join(dir, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (3 chats)", since: "x" }] }));
+  await page.getByText("Can't read Feishu: login expired (3 chats)").waitFor({ timeout: 12000 });
   // Regression: the dot means "new since you looked". Opening For you calms it; it stays calm after
   // closing (and after a reload) until something new arrives.
   await page.locator("#closeForYou").click();

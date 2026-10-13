@@ -14,6 +14,7 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 	inbox: join(dir, "inbox.jsonl"),
 	log: join(dir, "daemon.log"),
 	judgments: join(dir, "judgments.jsonl"),
+	health: join(dir, "health.json"),
 	memoryLog: join(dir, "memory.log"),
 });
 
@@ -302,6 +303,31 @@ export function parsePile(raw: string, open: Set<string>, sessions: Set<string> 
  */
 export function staleOnit(items: Item[], now: number, hours = 6): Item[] {
 	return items.filter(i => i.status === "onit" && now - Date.parse(i.at_status ?? i.at) > hours * 3_600_000);
+}
+
+export interface Problem { source: string; since: string; times: number; error: string }
+/** Plain words for a fetch error: a login that expired reads differently from a flaky network. */
+export function problemText(error: string): string {
+	if (/token_invalid|authentication|auth.*expired|not logged in|login/i.test(error)) return "login expired";
+	if (/timed? ?out|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(error)) return "network";
+	if (/pi exited/i.test(error)) return "model call failed";
+	return error.split("\n").find(l => /message|error/i.test(l))?.replace(/[\s"{},]+/g, " ").trim().slice(0, 80) || error.split("\n")[0].slice(0, 80);
+}
+/**
+ * Track failing sources across ticks. A source counts as a problem after it failed `after` checks in a row;
+ * one success clears it. Returns the new state (keyed by source name).
+ */
+export function trackHealth(old: Record<string, Problem>, failed: { source: string; error: string }[], ok: string[], now: string): Record<string, Problem> {
+	const next: Record<string, Problem> = {};
+	for (const [k, p] of Object.entries(old)) if (!ok.includes(k)) next[k] = p;
+	for (const f of failed) next[f.source] = { source: f.source, since: old[f.source]?.since ?? now, times: (old[f.source]?.times ?? 0) + 1, error: problemText(f.error) };
+	return next;
+}
+/** What brook sees: problems that lasted 3+ checks, grouped by kind ("Feishu: login expired, 12 chats"). */
+export function healthSummary(state: Record<string, Problem>, after = 3): { text: string; since: string }[] {
+	const groups = new Map<string, Problem[]>();
+	for (const p of Object.values(state)) if (p.times >= after) { const kind = p.source.startsWith("WeChat") ? "WeChat" : p.source === "Gmail" ? "Gmail" : /model|pile|tidy/.test(p.source) ? "For you" : "Feishu"; const k = `${kind}: ${p.error}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
+	return [...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^WeChat: /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }));
 }
 
 /** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */

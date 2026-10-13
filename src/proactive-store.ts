@@ -31,7 +31,8 @@ export function forYouView(dir?: string, now = Date.now()) {
 	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
 	const handled = all.filter(i => !isOpen(i) && now - Date.parse(i.at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
 	const parked = all.filter(i => isOpen(i) && !needsYou(i, now));
-	let watching = 0;
+	let watching = 0, problems: { text: string; since: string }[] = [];
+	try { problems = JSON.parse(readFileSync(P.health, "utf8")).problems ?? []; } catch {}
 	try { watching = JSON.parse(readFileSync(P.config, "utf8")).sources?.length ?? 0; } catch {}
 	return {
 		pending: all.filter(i => needsYou(i, now)).sort(newest).map(publicItem),
@@ -39,6 +40,7 @@ export function forYouView(dir?: string, now = Date.now()) {
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
 		watching,
+		problems,
 	};
 }
 

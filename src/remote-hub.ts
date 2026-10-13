@@ -268,6 +268,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (changedCards) publish("sessions", summary());
   };
   watchFile(proactiveFile, { interval: 2000 }, onProactive);
+  const healthFile = proactivePaths(options.proactiveDir).health;
+  watchFile(healthFile, { interval: 5000 }, onProactive);
   // Parked loops come back by time, not by a file change: re-check every minute.
   const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
   wake.unref();
@@ -580,6 +582,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     close: () => new Promise<void>((resolve) => {
       clearInterval(sweep);
       unwatchFile(proactiveFile, onProactive);
+      unwatchFile(healthFile, onProactive);
       clearInterval(wake);
       for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);

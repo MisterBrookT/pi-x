@@ -18,7 +18,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
+import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
 import { actItem, finishedItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
@@ -110,12 +110,14 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
 	const work = await workSessions();
+	const failed: { source: string; error: string }[] = [], fine: string[] = [];
 	let sources = cfg.sources;
 	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
 		try {
 			const adapter = adapterFor(src);
 			const msgs = await adapter.fetch(src);
+			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
 			if (!state[key]) { // first run: set cursor, don't flood
@@ -133,7 +135,8 @@ async function tick(cfg: Config) {
 			const memory = cards ? memoryForPrompt(P.dir, { msgs: [...ctx, ...fresh], source: src, extra: pending.map(p => p.title).join("\n") }) : existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
 			const prompt = judgePrompt({ me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString(), work, cards });
 			let raw = "";
-			try { raw = await ask(prompt, cfg.model); } catch (e) { judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, prompt, error: (e as Error).message }); throw e; }
+			try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, prompt, error: (e as Error).message }); throw e; }
+			fine.push("model");
 			const v = parseVerdict(raw);
 			const changes = v && cards && !dry ? applyCardEdits(P.dir, v.cards, { source: src.name }) : [];
 			if (changes.length) { logCardChanges(P.memoryLog, changes); log(`memory: ${changes.map(c => `${c.card} +${c.added.length} -${c.removed.length}`).join(", ")}`); }
@@ -169,7 +172,15 @@ async function tick(cfg: Config) {
 				const target = to ? work.find(w => w.id === to) : undefined;
 				if (target && !parked) { suggestItem(it.id, { id: target.id, name: target.name }); log(`card: ${it.id} -> ${target.name}`); }
 			}
-		} catch (e) { log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
+		} catch (e) { failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
+	}
+	// Sources that keep failing show at the top of For you (phone and Mac) until they work again.
+	if (!dry) {
+		const old = readJson<{ state?: Record<string, Problem> }>(P.health, {}).state ?? {};
+		const next = trackHealth(old, failed.filter((f, i, a) => a.findIndex(x => x.source === f.source) === i), fine, new Date().toISOString());
+		const problems = healthSummary(next);
+		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);
+		writeFileSync(P.health, JSON.stringify({ state: next, problems }, null, 2));
 	}
 	// "On it" loops untouched for 6 h come back to brook: no loop sits silently in "Pi is on it".
 	if (!dry) for (const it of staleOnit(parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : ""), Date.now())) {

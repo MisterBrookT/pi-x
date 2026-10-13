@@ -178,3 +178,19 @@ test("regression: ✓ Done and Now work from the phone through the relay", async
 	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(relayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
 	assert.ok(!relayAllowed("/api/foryou/abc123/rm", "POST"));
 });
+
+test("health: a source failing 3 checks in a row shows in For you; one success clears it", async () => {
+	const { trackHealth, healthSummary, problemText } = await import("../src/proactive.ts");
+	const { forYouView } = await import("../src/proactive-store.ts");
+	assert.equal(problemText('error: {"type":"authentication","subtype":"token_invalid"}'), "login expired");
+	let st = {};
+	for (let i = 0; i < 2; i++) st = trackHealth(st, [{ source: "黄恩浩", error: "token_invalid" }, { source: "Knight", error: "token_invalid" }], [], `t${i}`);
+	assert.deepEqual(healthSummary(st), [], "a blip is not shown");
+	st = trackHealth(st, [{ source: "黄恩浩", error: "token_invalid" }, { source: "Knight", error: "token_invalid" }], [], "t2");
+	assert.deepEqual(healthSummary(st), [{ text: "Feishu: login expired (2 chats)", since: "t0" }]);
+	st = trackHealth(st, [], ["黄恩浩", "Knight"], "t3");
+	assert.deepEqual(healthSummary(st), []);
+	const d = tmp();
+	writeFileSync(join(d, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (2 chats)", since: "t0" }] }));
+	assert.deepEqual(forYouView(d).problems, [{ text: "Feishu: login expired (2 chats)", since: "t0" }]);
+});
