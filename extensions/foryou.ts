@@ -45,9 +45,9 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 	} catch { return "nohub"; }
 }
 
-export const CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
+export const CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
-export const choiceLabel = (c: { label: string; run: string; name?: string }) => c.run === "here" || c.run === "discuss" ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
+export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -97,12 +97,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		try {
 			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
 			const labels = it.choices.map(choiceLabel);
-			const pick = await ctx.ui.select(title, [...labels, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
+			const pick = await ctx.ui.select(title, [...labels, CARD_ELSE], { signal: close.signal });
 			if (!pick) return;
 			const text = pick === CARD_ELSE ? await ctx.ui.input("What should For you do instead?", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			const index = labels.indexOf(pick);
-			const answer: CardAnswer = index >= 0 ? "choice" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
+			const answer: CardAnswer = index >= 0 ? "choice" : "else";
 			const choice = index >= 0 ? index : undefined;
 			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, choice, text });
 			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
 import { answerCard, cardChoices, currentCard, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_ELSE, CARD_LATER, CARD_NO, choiceLabel } from "../extensions/foryou.ts";
+import register, { CARD_ELSE, choiceLabel } from "../extensions/foryou.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -151,14 +151,14 @@ test("card: For you shows the oldest loop that needs brook, one at a time", () =
 });
 
 test("card buttons: the judge writes them; a closed session becomes a new one; no buttons falls back to Do it here", () => {
-	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "Fix wallet", for: "me", evidence: "x", choices: [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Bad", run: "../x" }, { label: "Discuss", run: "discuss" }, { label: "Too many", run: "here" }] }] }));
-	assert.deepEqual(v.alerts[0].choices, [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Discuss", run: "discuss" }], "valid ones only, at most 3");
-	assert.match(judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [], now: "n" }), /"choices" are the 2-3 main buttons/);
+	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "Fix wallet", for: "me", evidence: "x", choices: [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Bad", run: "../x" }, { label: "Discuss", run: "discuss" }, { label: "Not now", run: "later" }, { label: "Too many", run: "here" }] }] }));
+	assert.deepEqual(v.alerts[0].choices, [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Discuss", run: "discuss" }, { label: "Not now", run: "later" }], "valid ones only, at most 4");
+	assert.match(judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [], now: "n" }), /"choices" are the buttons on his card: the 2-4 moves/);
 	const it = loop("a", { project: "/w", choices: v.alerts[0].choices });
-	assert.deepEqual(cardChoices(it, live).map(c => [c.label, c.run, c.name]), [["Fix in minara", "s2", "minara"], ["Ask Lowes", "here", undefined], ["Discuss", "discuss", undefined]]);
-	assert.deepEqual(cardChoices(it, []).map(c => c.run), ["new", "here", "discuss"], "session gone: a new session in the project");
-	assert.deepEqual(cardChoices(loop("b"), live).map(c => c.label), ["Do it here", "Discuss"]);
-	assert.deepEqual(cardChoices(loop("b", { suggest: { session: "s1", at: "" } }), live).map(c => c.label), ["Do it here", "Send to backtest", "Discuss"]);
+	assert.deepEqual(cardChoices(it, live).map(c => [c.label, c.run, c.name]), [["Fix in minara", "s2", "minara"], ["Ask Lowes", "here", undefined], ["Discuss", "discuss", undefined], ["Not now", "later", undefined]]);
+	assert.deepEqual(cardChoices(it, []).map(c => c.run), ["new", "here", "discuss", "later"], "session gone: a new session in the project");
+	assert.deepEqual(cardChoices(loop("b"), live).map(c => c.label), ["Do it here", "Discuss", "Later"]);
+	assert.deepEqual(cardChoices(loop("b", { suggest: { session: "s1", at: "" } }), live).map(c => c.label), ["Do it here", "Send to backtest", "Discuss", "Later"]);
 });
 
 test("card answers: a here button runs in For you with its prompt; a session button hands off; first answer wins; all logged", () => {
@@ -178,11 +178,12 @@ test("card answers: a here button runs in For you with its prompt; a session but
 	assert.deepEqual(log.map(l => [l.id, l.answer, l.label]), [["a", "choice", "Ask Lowes"], ["b", "choice", "Talk"], ["c", "choice", "Fix in minara"], ["e", "else", undefined]]);
 });
 
-test("card: Later comes back in 2 days in the morning; No closes the loop", () => {
-	const d = tmp(loop("a"), loop("b"));
-	assert.ok(answerCard("a", "later", { dir: d, now: new Date("2026-10-13T05:00:00") }));
+test("card: a Later button comes back in 2 days in the morning; a No button closes the loop", () => {
+	const ch = [{ label: "Not now", run: "later" }, { label: "Skip", run: "no" }];
+	const d = tmp(loop("a", { choices: ch }), loop("b", { choices: ch }));
+	assert.ok(answerCard("a", "choice", { choice: 0, dir: d, now: new Date("2026-10-13T05:00:00") }));
 	assert.equal(inbox(d).find(i => i.id === "a").wakeAt, new Date("2026-10-15T09:00:00").toISOString());
-	assert.ok(answerCard("b", "no", { dir: d }));
+	assert.ok(answerCard("b", "choice", { choice: 1, dir: d }));
 	assert.equal(inbox(d).find(i => i.id === "b").status, "dismissed");
 });
 
@@ -197,7 +198,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	const fix = choiceLabel({ label: "Fix in backtest", run: "s1", name: "backtest" });
 	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [fix], shown));
 	await new Promise(r => setTimeout(r, 20));
-	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_LATER, CARD_NO, CARD_ELSE]);
+	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
 });
 

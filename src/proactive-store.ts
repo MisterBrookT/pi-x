@@ -163,11 +163,11 @@ export interface Card { id: string; title: string; why: string; action: string; 
  */
 export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prompt?: string })[] {
 	const others = live.filter(s => s.id !== forYouSession.id);
-	const fix = (c: Choice) => c.run === "here" || c.run === "discuss" || c.run === "new" ? c : others.some(s => s.id === c.run) ? { ...c, name: others.find(s => s.id === c.run)!.name } : { ...c, run: "new" };
+	const fix = (c: Choice) => ["here", "discuss", "new", "later", "no"].includes(c.run) ? c : others.some(s => s.id === c.run) ? { ...c, name: others.find(s => s.id === c.run)!.name } : { ...c, run: "new" };
 	const own = (it.choices ?? []).map(fix).filter(c => c.run !== "new" || it.project);
 	if (own.length) return own;
 	const pick = it.suggest && others.find(s => s.id === it.suggest!.session);
-	return [{ label: "Do it here", run: "here" }, ...(pick ? [{ label: `Send to ${pick.name}`, run: pick.id, name: pick.name }] : []), { label: "Discuss", run: "discuss" }];
+	return [{ label: "Do it here", run: "here" }, ...(pick ? [{ label: `Send to ${pick.name}`, run: pick.id, name: pick.name }] : []), { label: "Discuss", run: "discuss" }, { label: "Later", run: "later" }];
 }
 
 /** The card For you shows now: the oldest loop that needs brook (undefined when none). */
@@ -191,9 +191,10 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	const c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
 	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
+	if (c?.run === "later" || c?.run === "no") answer = c.run;
 	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
 	if (answer === "no") { write(o.dir, { id, status: "dismissed" }); return { item: it }; }
-	if (c && c.run !== "here" && c.run !== "discuss") {
+	if (c && c.run !== "here" && c.run !== "discuss" && c.run !== "later" && c.run !== "no") {
 		if (c.prompt) write(o.dir, { id, action: c.prompt });
 		return { item: it, into: c.run };
 	}

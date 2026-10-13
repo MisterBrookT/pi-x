@@ -220,9 +220,9 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Switch loader ›In backtest", "Discuss", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "3.Something else…"]);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await card.getByRole("button", { name: /^Switch loader/ }).click();
+  await card.getByRole("button", { name: /Switch loader/ }).click();
   const { prompts } = await next;
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Switch the backtest loader/);
@@ -258,7 +258,7 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const card2 = page.locator('[data-job="k2"]');
   await card2.waitFor({ timeout: 8000 });
-  await card2.getByRole("button", { name: /^Later/ }).click();
+  await card2.getByRole("button", { name: /Later/ }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });
   assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });
