@@ -99,8 +99,12 @@ test("pile check: closes and merges only open loops it names", () => {
 	const p = pilePrompt({ me: "brook", memory: "", open: [loop("a"), loop("b")], now: "n" });
 	assert.match(p, /id=a: Loop a[\s\S]*created 2026-10-09/);
 	const v = parsePile('ok {"close":[{"id":"a","why":"old"},{"id":"zz"}],"merge":[{"keep":"b","drop":"c","why":"same"},{"keep":"b","drop":"b"}]}', open);
-	assert.deepEqual(v, { close: [{ id: "a", why: "old" }], merge: [{ keep: "b", drop: "c", why: "same" }] });
-	assert.deepEqual(parsePile("nonsense", open), { close: [], merge: [] });
+	assert.deepEqual(v, { close: [{ id: "a", why: "old" }], merge: [{ keep: "b", drop: "c", why: "same" }], route: [] });
+	assert.deepEqual(parsePile("nonsense", open), { close: [], merge: [], route: [] });
+	// Existing loops can be routed to a live session (card), but never a closed one or an unknown session.
+	const r = parsePile('{"close":[{"id":"a"}],"route":[{"id":"b","to":"s1"},{"id":"a","to":"s1"},{"id":"c","to":"zz"}]}', open, new Set(["s1"]));
+	assert.deepEqual(r.route, [{ id: "b", to: "s1", why: "" }]);
+	assert.match(pilePrompt({ me: "b", memory: "", open: [loop("a")], now: "n", work: [{ id: "s1", name: "minara", cwd: "/m" }] }), /id=s1 "minara" in \/m[\s\S]*"route"/);
 });
 
 function fakePi() {

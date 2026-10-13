@@ -261,13 +261,18 @@ export function updateLine(it: Item, u: LoopUpdate, now = Date.now()): Record<st
  * The daily pile check: every open loop, with age and brief, and the judge says which are finished,
  * stale (nothing will happen and nobody waits), or duplicates of another loop. Most loops stay.
  */
-export function pilePrompt(o: { me: string; memory: string; open: Item[]; now: string }): string {
+export function pilePrompt(o: { me: string; memory: string; open: Item[]; now: string; work?: WorkSession[] }): string {
 	return `You keep ${o.me}'s list of open loops (things unfinished between him and someone else) short and true. Now: ${o.now}.
 Look at every loop below and decide which ones should leave the list:
 - "close": finished, answered, cancelled, or stale (older than ~2 weeks, past due with no sign anyone still waits, or no longer relevant)
 - "merge": two loops about the same thing; keep the better one, close the other
 - a loop whose latest progress line says the work is finished, submitted, or confirmed: close it
 Leave a loop when unsure. Do not close a loop that is still in progress or has a future due date.
+Also, for loops that need ${o.me} now: if one open Pi session below works in that loop's project (same folder or
+clearly the same work), put it in "route": ${o.me} gets a card in that session asking whether it should do the next step.
+
+## Open Pi sessions
+${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.todo ? `; doing: ${w.todo}` : ""}${w.preview ? `; last: ${w.preview.replace(/\s+/g, " ").slice(0, 120)}` : ""}`).join("\n") || "(none)"}
 
 ## Memory
 ${o.memory || "(empty)"}
@@ -275,17 +280,19 @@ ${o.memory || "(empty)"}
 ## Open loops
 ${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}${i.note ? `\n  latest progress: ${i.note.split("\n").at(-1)!.slice(0, 400)}` : ""}`).join("\n")}
 
-Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}]}`;
+Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}], "route": [{"id": "loop id", "to": "session id", "why": "<=80 chars"}]}`;
 }
 
-export function parsePile(raw: string, open: Set<string>): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[] } {
+export function parsePile(raw: string, open: Set<string>, sessions: Set<string> = new Set()): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[]; route: { id: string; to: string; why: string }[] } {
 	try {
 		const v = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
 		const why = (x: unknown) => String(x ?? "").slice(0, 120);
 		const close = (Array.isArray(v.close) ? v.close : []).filter((c: any) => open.has(c?.id)).map((c: any) => ({ id: c.id, why: why(c.why) }));
 		const merge = (Array.isArray(v.merge) ? v.merge : []).filter((m: any) => open.has(m?.keep) && open.has(m?.drop) && m.keep !== m.drop).map((m: any) => ({ keep: m.keep, drop: m.drop, why: why(m.why) }));
-		return { close, merge };
-	} catch { return { close: [], merge: [] }; }
+		const gone = new Set([...close.map((c: any) => c.id), ...merge.map((m: any) => m.drop)]);
+		const route = (Array.isArray(v.route) ? v.route : []).filter((r: any) => open.has(r?.id) && !gone.has(r.id) && sessions.has(r?.to)).map((r: any) => ({ id: r.id, to: r.to, why: why(r.why) }));
+		return { close, merge, route };
+	} catch { return { close: [], merge: [], route: [] }; }
 }
 
 /**

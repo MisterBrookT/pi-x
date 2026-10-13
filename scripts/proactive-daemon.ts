@@ -66,23 +66,24 @@ const DAY = 86_400_000;
  * Once a day: ask the judge which open loops are finished, stale, or duplicates, and close them.
  * Once a week: tidy long memory cards (merge duplicates, drop outdated lines). Both are logged.
  */
-async function housekeeping(cfg: Config, state: Record<string, string>) {
+async function housekeeping(cfg: Config, state: Record<string, string>, work: WorkSession[]) {
 	const now = Date.now();
 	if (now - Date.parse(state["@pile"] ?? "0") > DAY) {
 		const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 		const open = items.filter(isOpen);
 		if (open.length) {
 			try {
-				const prompt = pilePrompt({ me: cfg.me, memory: existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : "", open, now: new Date().toString() });
+				const prompt = pilePrompt({ me: cfg.me, memory: existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : "", open, now: new Date().toString(), work });
 				const raw = await ask(prompt, cfg.model);
-				const v = parsePile(raw, new Set(open.map(i => i.id)));
+				const v = parsePile(raw, new Set(open.map(i => i.id)), new Set(work.map(w => w.id)));
 				const stamp = new Date().toISOString();
 				if (!dry) {
 					for (const c of v.close) appendFileSync(P.inbox, JSON.stringify({ id: c.id, status: "resolved", at_status: stamp, closedWhy: c.why }) + "\n");
+					for (const r of v.route) { const it = open.find(i => i.id === r.id)!; if (it.status === "pending" && !it.suggest) suggestItem(r.id, { id: r.to, name: work.find(w => w.id === r.to)?.name }); }
 					for (const m of v.merge) appendFileSync(P.inbox, JSON.stringify({ id: m.drop, status: "resolved", at_status: stamp, closedWhy: `merged into ${m.keep}: ${m.why}` }) + "\n");
 				}
-				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), raw, close: v.close, merge: v.merge });
-				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}`);
+				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), work: work.map(w => w.id), raw, close: v.close, merge: v.merge, route: v.route });
+				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}, cards ${v.route.length}`);
 			} catch (e) { log(`pile: error ${(e as Error).message}`); judged({ kind: "error", source: "pile", error: (e as Error).message }); }
 		}
 		state["@pile"] = new Date(now).toISOString();
@@ -175,7 +176,7 @@ async function tick(cfg: Config) {
 		judged({ kind: "stale", id: it.id, title: it.title, session: it.session });
 		log(`stale: ${it.id} back to brook`);
 	}
-	await housekeeping(cfg, state);
+	await housekeeping(cfg, state, work);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
 }
