@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { actPrompt, addNote, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
+import { actPrompt, addNote, type Choice, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
 import { memoryAll, memoryDir } from "./proactive-memory.ts";
@@ -150,51 +150,58 @@ export function suggestItem(id: string, session: { id: string; name?: string }, 
 	return true;
 }
 
-export type CardAnswer = "do" | "send" | "discuss" | "else" | "later" | "no";
+export type CardAnswer = "choice" | "else" | "later" | "no";
 export const cardLaterDays = 2;
-export interface Card { id: string; title: string; why: string; action: string; source: string; due?: string; left: number; targets: { id: string; name: string }[] }
+/** A button as the card shows it: the judge's label, and where it runs (session name for display). */
+export interface CardChoice { label: string; run: string; name?: string }
+export interface Card { id: string; title: string; why: string; action: string; source: string; due?: string; left: number; choices: CardChoice[] }
 
-/** Up to two sessions to offer: the judge's pick first, then live sessions in the loop's project folder. */
-export function cardTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string }[] {
+/**
+ * The card's main buttons: what the judge wrote for this loop. A button for a session that is not
+ * open becomes "new" (a session in the project); no buttons (or none valid) falls back to "Do it here"
+ * and, when the judge suggested a live session, "Send to <it>".
+ */
+export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prompt?: string })[] {
 	const others = live.filter(s => s.id !== forYouSession.id);
-	const out: { id: string; name: string }[] = [];
+	const fix = (c: Choice) => c.run === "here" || c.run === "discuss" || c.run === "new" ? c : others.some(s => s.id === c.run) ? { ...c, name: others.find(s => s.id === c.run)!.name } : { ...c, run: "new" };
+	const own = (it.choices ?? []).map(fix).filter(c => c.run !== "new" || it.project);
+	if (own.length) return own;
 	const pick = it.suggest && others.find(s => s.id === it.suggest!.session);
-	if (pick) out.push({ id: pick.id, name: pick.name });
-	if (it.project) {
-		const dir = expandHome(it.project, home);
-		for (const s of others) if (out.length < 2 && !out.some(o => o.id === s.id) && s.cwd && (s.cwd === dir || dir.startsWith(s.cwd + "/") || s.cwd.startsWith(dir + "/"))) out.push({ id: s.id, name: s.name });
-	}
-	return out;
+	return [{ label: "Do it here", run: "here" }, ...(pick ? [{ label: `Send to ${pick.name}`, run: pick.id, name: pick.name }] : []), { label: "Discuss", run: "discuss" }];
 }
 
 /** The card For you shows now: the oldest loop that needs brook (undefined when none). */
-export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.now(), home = homedir()): Card | undefined {
+export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.now()): Card | undefined {
 	const waiting = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 	const it = waiting[0];
 	if (!it) return undefined;
-	return { id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), left: waiting.length - 1, targets: cardTargets(it, live, home) };
+	return { id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt: _p, ...c }) => c) };
 }
 
 /**
- * Record brook's answer and change the loop. Returns what should run in the For you session
- * (`here`), or where to hand it (`into`); undefined when the card is gone (answered already, or
- * a bad answer). Every answer is logged.
+ * Record brook's answer and change the loop. `choice` is the index of the button he tapped.
+ * Returns what to tell the For you session (`here`), or where to hand the loop (`into`, with
+ * `prompt`); undefined when the card is gone or the answer is bad. Every answer is logged.
  */
-export function answerCard(id: string, answer: CardAnswer, o: { to?: string; text?: string; by?: string; dir?: string; now?: Date } = {}): { item: Item; here?: string; into?: string } | undefined {
+export function answerCard(id: string, answer: CardAnswer, o: { choice?: number; text?: string; by?: string; dir?: string; live?: LiveSession[]; now?: Date } = {}): { item: Item; here?: string; into?: string } | undefined {
 	const at = o.now ?? new Date();
 	const it = readAll(o.dir).find(i => i.id === id && needsYou(i, at.getTime()));
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
-	if (!it || !["do", "send", "discuss", "else", "later", "no"].includes(answer) || (answer === "else" && !text)) return undefined;
-	if (answer === "send" && !(o.to && /^[\w.-]{1,80}$/.test(o.to))) return undefined;
-	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(o.to ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
+	if (!it || !["choice", "else", "later", "no"].includes(answer) || (answer === "else" && !text)) return undefined;
+	const c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
+	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
+	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
 	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
 	if (answer === "no") { write(o.dir, { id, status: "dismissed" }); return { item: it }; }
-	if (answer === "send") return { item: it, into: o.to };
+	if (c && c.run !== "here" && c.run !== "discuss") {
+		if (c.prompt) write(o.dir, { id, action: c.prompt });
+		return { item: it, into: c.run };
+	}
 	takeItem(id, forYouSession.id, o.dir, forYouFolder());
-	const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
-	const here = answer === "discuss" ? `brook tapped "Discuss" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`
+	const base = actPrompt({ ...it, ...(c?.prompt ? { action: c.prompt } : {}), session: undefined }, paths(o.dir).dir);
+	const here = c?.run === "discuss" ? `brook tapped "${c.label}" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`
 		: answer === "else" ? `brook answered loop ${id} with his own instruction. Do this instead of the suggested step:\n${text}\n\n(The loop, for context:)\n${base}`
-		: `brook tapped "Do it" on loop ${id}. Do the next step here.\n\n${base}`;
+		: `brook tapped "${c!.label}" on loop ${id}. Do it here.\n\n${base}`;
 	return { item: it, here };
 }
 
@@ -278,12 +285,18 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
 use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
 Only change a loop (drop, later, handoff) when brook asks or a loop was just tapped; a question is not a request to act.
+He can also just chat with you about a card ("why this?", "send it to pix", "merge with the other one"): answer, and use
+the loops tool when he asks for a change.
 
 ### Memory
 ${memory}
 
 ### Open loops
 ${open.map(loop).join("\n") || "(none)"}
+
+### The card on brook's screen now
+${(() => { const c = currentCard(dir, live, now); return c ? `id=${c.id} "${c.title}" (${c.left} more after it). When he talks about "this" or "the card", he means this loop.
+Its buttons: ${c.choices.map(x => `"${x.label}" -> ${x.run}`).join(", ")}; plus Later, No, Something else.` : "(none)"; })()}
 
 ### Pi sessions open now
 ${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}`;

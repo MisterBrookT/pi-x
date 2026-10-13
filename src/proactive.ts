@@ -31,8 +31,23 @@ export interface MemoryEdit { add: string[]; remove: string[] }
  * next step ("Draft reply"); `due` is a date when something is owed.
  */
 export interface Alert { title: string; why: string; action: string; refs: string[]; button?: string; due?: string; project?: string;
-	/** A live Pi session the judge thinks should do the next step; brook still confirms it there (a job card). */
-	to?: string }
+	/** A live Pi session the judge thinks should do the next step (offered on the card). */
+	to?: string;
+	/** The card's main buttons, written by the judge for this loop. */
+	choices?: Choice[] }
+/**
+ * One button on a card. `run` says where the work goes: "here" = the For you session does it,
+ * "discuss" = For you talks it through first, a live session id, or "new" (a session in the project).
+ * `prompt` is what that session is told to do (default: the loop's next step).
+ */
+export interface Choice { label: string; run: string; prompt?: string }
+/** Keep only well-formed buttons: short label, a known kind of target, at most 3. */
+export function cleanChoices(x: unknown): Choice[] | undefined {
+	if (!Array.isArray(x)) return undefined;
+	const out = x.filter((c: any) => c && typeof c.label === "string" && c.label.trim() && typeof c.run === "string" && /^[\w.-]{1,80}$/.test(c.run))
+		.slice(0, 3).map((c: any) => ({ label: c.label.trim().slice(0, 40), run: c.run, ...(typeof c.prompt === "string" && c.prompt.trim() ? { prompt: c.prompt.trim().slice(0, 600) } : {}) }));
+	return out.length ? out : undefined;
+}
 /** One Pi session open right now, as the judge sees it: what brook is working on. */
 export interface WorkSession { id: string; name: string; cwd: string; busy?: boolean; todo?: string; preview?: string }
 /** Where a loop stands, as the judge sees it. needs = needs brook now; waiting = others owe him; later = he owes it, not yet due. */
@@ -161,12 +176,18 @@ Most of the time, change nothing.`}
 
 "button" is 1-3 words: the outcome ${o.me} wants, as a verb, in the language of the loop. Name the result, not the preparation;
 never start with "Draft" or "Prepare". Good: "Reply to 杨奕辉", "Send wallet address", "Start Databento test", "Check backtest", "Ask 黄恩浩".
+"choices" are the 2-3 main buttons on his card, the most useful moves for THIS loop, best first. Each has "label"
+(<=4 words, in the loop's language), "run" (where it happens: "here" = his For you assistant does it, "discuss" =
+talk it through with him first, an open Pi session id from above when that session is the right place, or "new" =
+a fresh session in the project), and optionally "prompt" (one line: what to do, when it differs from "action").
+Later, No, and "Something else" are always added; do not include them. Example: [{"label": "Fix in minara", "run": "<session id>"},
+{"label": "Ask Lowes for steps", "run": "here", "prompt": "Draft a reply asking Lowes for repro steps"}, {"label": "Discuss", "run": "discuss"}].
 "due" is YYYY-MM-DD when there is a deadline, else omit.
 "project" is the folder of the project this loop belongs to, taken from memory (e.g. "~/workspace/minara/newsdecision"); omit if none is clear.
 Every alert needs "for" and "evidence": "me" = addressed to him, "project" = changes his project (memory), "promise" = he owes or is owed it.
 If you cannot fill "evidence", it is not his loop: leave it out.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit"}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "..."}], "close": ["open loop id"], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit", "choices": [{"label": "...", "run": "here|discuss|<session id>|new", "prompt": "optional"}]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "...", "choices": [...]}], "close": ["open loop id"], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -188,8 +209,8 @@ export function parseVerdict(raw: string): Verdict | null {
 		// Recipient guard: an alert the judge says is for someone else, or with no evidence it is his, is dropped.
 		// A verdict without "for" (older shape) is kept.
 		const unaddressed = (a: any) => a.for !== undefined && (!["me", "project", "promise"].includes(String(a.for)) || !str(a.evidence, 200));
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined }));
-		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project) }));
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined, choices: cleanChoices(a.choices) }));
+		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project), choices: cleanChoices(u.choices) }));
 		const cards = (Array.isArray(v.cards) ? v.cards : []).filter((c: any) => c && typeof c.card === "string").slice(0, 8).map((c: any) => ({ card: c.card.trim().slice(0, 80), add: lines(c.add), remove: lines(c.remove) })).filter((c: any) => c.add.length || c.remove.length);
 		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) }, cards };
 	} catch { return null; }

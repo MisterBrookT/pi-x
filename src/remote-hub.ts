@@ -338,12 +338,12 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
       // A card answer (phone or Mac): first answer wins. Do it / Discuss / Something else run in For you;
-      // Send hands the loop to the chosen session (live: queued there; "new": a session in its project).
+      // a session button hands the loop to that session (live: queued there; "new": a session in its project).
       const cardMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/card$/);
       if (req.method === "POST" && cardMatch) {
         const input = await body(req).catch(() => ({})) as any;
         const answer = String(input?.answer ?? "") as CardAnswer;
-        const r = answerCard(cardMatch[1], answer, { to: typeof input?.to === "string" ? input.to : undefined, text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
+        const r = answerCard(cardMatch[1], answer, { choice: typeof input?.choice === "number" ? input.choice : undefined, live: liveSessions(), text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
         if (!r) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
         const queue = (sid: string, text: string) => {
           const live = sessions.get(sid);

@@ -37,7 +37,7 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number }
 
 /** Answer through the hub when it runs (it queues work into sessions and updates the phone). */
-async function answerViaHub(id: string, body: { answer: CardAnswer; to?: string; text?: string }): Promise<"ok" | "gone" | "nohub"> {
+async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: number; text?: string }): Promise<"ok" | "gone" | "nohub"> {
 	try {
 		const token = readFileSync(remoteTokenPath, "utf8").trim();
 		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/foryou/${encodeURIComponent(id)}/card`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ ...body, by: "mac" }), signal: AbortSignal.timeout(8000) });
@@ -45,8 +45,9 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; to?: string;
 	} catch { return "nohub"; }
 }
 
-export const CARD_DO = "Do it here", CARD_NEW = "New session in its project", CARD_DISCUSS = "Discuss with me first", CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
-export const cardSend = (name: string) => `Send to ${name} ›`;
+export const CARD_LATER = "Later (remind me in 2 days)", CARD_NO = "No, not doing this", CARD_ELSE = "Something else…";
+/** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
+export const choiceLabel = (c: { label: string; run: string; name?: string }) => c.run === "here" || c.run === "discuss" ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -95,19 +96,19 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		showing = it.id; close = new AbortController();
 		try {
 			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
-			const sends = it.targets.map(t => ({ label: cardSend(t.name), to: t.id }));
-			const pick = await ctx.ui.select(title, [CARD_DO, ...sends.map(x => x.label), CARD_NEW, CARD_DISCUSS, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
+			const labels = it.choices.map(choiceLabel);
+			const pick = await ctx.ui.select(title, [...labels, CARD_LATER, CARD_NO, CARD_ELSE], { signal: close.signal });
 			if (!pick) return;
 			const text = pick === CARD_ELSE ? await ctx.ui.input("What should For you do instead?", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
-			const send = sends.find(x => x.label === pick);
-			const answer: CardAnswer = pick === CARD_DO ? "do" : send || pick === CARD_NEW ? "send" : pick === CARD_DISCUSS ? "discuss" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
-			const to = send?.to ?? (pick === CARD_NEW ? "new" : undefined);
-			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, to, text });
+			const index = labels.indexOf(pick);
+			const answer: CardAnswer = index >= 0 ? "choice" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : "else";
+			const choice = index >= 0 ? index : undefined;
+			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, choice, text });
 			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }
 			if (via === "ok") return;
 			// No hub: answer here directly.
-			const r = answerCard(it.id, answer, { to, text, by: "mac", dir: deps.dir });
+			const r = answerCard(it.id, answer, { choice, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
 			if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
 			if (r.here) pi.sendUserMessage(r.here);
 			if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);

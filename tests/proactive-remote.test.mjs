@@ -194,11 +194,9 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   assert.deepEqual(errors, []);
 });
 
-test("phone card: lives in the For you session; the bell opens it; Send to hands the loop to that session", async t => {
-  const { suggestItem } = await import("../src/proactive-store.ts");
+test("phone card: lives in the For you session; the bell opens it; the judge's session button hands the loop there", async t => {
   const dir = await folder(t);
-  writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader" })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  suggestItem("j1", { id: "s1", name: "backtest" }, dir);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader", choices: [{ label: "Switch loader", run: "s1" }, { label: "Discuss", run: "discuss" }] })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
@@ -222,9 +220,9 @@ test("phone card: lives in the For you session; the bell opens it; Send to hands
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Do it here", "Send to backtest ›", "New session In its project", "Discuss Talk it through first", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["Switch loader ›In backtest", "Discuss", "Later Remind me in 2 days", "No Not doing this", "Something else…"]);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await card.getByRole("button", { name: "Send to backtest ›" }).click();
+  await card.getByRole("button", { name: /^Switch loader/ }).click();
   const { prompts } = await next;
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Switch the backtest loader/);
