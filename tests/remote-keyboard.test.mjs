@@ -20,7 +20,14 @@ test("a hardware keyboard on a touch phone sends with Return; the on-screen keyb
     window.fakeKeyboard = 0; Object.defineProperty(window.visualViewport, "height", { get: () => innerHeight - window.fakeKeyboard });
   });
   const input = page.getByPlaceholder("Message Pi");
-  await input.fill("hello");
+  // Voice input: text arrives with no typed keys, then a line break. It must never send.
+  await input.fill("half of a dictated");
+  await page.evaluate(() => { const el = document.getElementById("input");
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 13, bubbles: true, cancelable: true }));
+    el.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertParagraph", bubbles: true, cancelable: true })); });
+  assert.equal(await page.evaluate(() => submits), 0, "a line break from dictation does not send");
+  await input.fill("");
+  await input.pressSequentially("hello");
   await input.press("Enter");
   assert.equal(await page.evaluate(() => submits), 1, "Return sends when no on-screen keyboard is showing");
   await input.fill("one");
@@ -34,7 +41,7 @@ test("a hardware keyboard on a touch phone sends with Return; the on-screen keyb
   assert.equal(await page.evaluate(() => submits), 2, "⌘Return always sends");
   // iOS with a system IME can report keyCode 229 for Return; the line break must still send, not insert.
   await page.evaluate(() => { window.fakeKeyboard = 0; });
-  await input.fill("ios");
+  await input.fill("ios"); await input.press("s"); await input.fill("ios");
   await page.evaluate(() => { const el = document.getElementById("input");
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", keyCode: 229, bubbles: true, cancelable: true }));
     el.dispatchEvent(new InputEvent("beforeinput", { inputType: "insertLineBreak", bubbles: true, cancelable: true })); });

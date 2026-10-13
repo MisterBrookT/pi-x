@@ -42,11 +42,11 @@ export interface Alert { title: string; why: string; action: string; refs: strin
  * `prompt` is what that session is told to do (default: the loop's next step).
  */
 export interface Choice { label: string; run: string; prompt?: string }
-/** Keep only well-formed buttons: short label, a known kind of target, at most 4. */
+/** Keep only well-formed buttons: short label, a known kind of target, at most 3. */
 export function cleanChoices(x: unknown): Choice[] | undefined {
 	if (!Array.isArray(x)) return undefined;
 	const out = x.filter((c: any) => c && typeof c.label === "string" && c.label.trim() && typeof c.run === "string" && /^[\w.-]{1,80}$/.test(c.run))
-		.slice(0, 4).map((c: any) => ({ label: c.label.trim().slice(0, 40), run: c.run, ...(typeof c.prompt === "string" && c.prompt.trim() ? { prompt: c.prompt.trim().slice(0, 600) } : {}) }));
+		.slice(0, 3).map((c: any) => ({ label: c.label.trim().slice(0, 40), run: c.run, ...(typeof c.prompt === "string" && c.prompt.trim() ? { prompt: c.prompt.trim().slice(0, 600) } : {}) }));
 	return out.length ? out : undefined;
 }
 /** One Pi session open right now, as the judge sees it: what brook is working on. */
@@ -177,12 +177,12 @@ Most of the time, change nothing.`}
 
 "button" is 1-3 words: the outcome ${o.me} wants, as a verb, in the language of the loop. Name the result, not the preparation;
 never start with "Draft" or "Prepare". Good: "Reply to 杨奕辉", "Send wallet address", "Start Databento test", "Check backtest", "Ask 黄恩浩".
-"choices" are the buttons on his card: the 2-4 moves that fit THIS loop best, best first (as many as make sense).
+"choices" are the buttons on his card: the 1-3 moves that fit THIS loop best, best first (as many as make sense).
 Each has "label" (<=4 words, in the loop's language), "run" (what happens: "here" = his For you assistant does it,
 "discuss" = talk it through with him first, an open Pi session id from above when that session is the right place,
-"new" = a fresh session in the project, "later" = remind him in 2 days, "no" = drop it), and optionally "prompt"
-(one line: what to do, when it differs from "action"). "Something else" (he writes his own) is always added last;
-do not include it. Example: [{"label": "Fix in minara", "run": "<session id>"}, {"label": "Ask Lowes for steps",
+"new" = a fresh session in the project, "later" = remind him in 2 days), and optionally "prompt"
+(one line: what to do, when it differs from "action"). Three buttons are always added after yours, do not repeat
+them: "Not important" (drop it), "Send to a session" (he picks any open session), "Something else" (he writes his own). Example: [{"label": "Fix in minara", "run": "<session id>"}, {"label": "Ask Lowes for steps",
 "run": "here", "prompt": "Draft a reply asking Lowes for repro steps"}, {"label": "Not now", "run": "later"}].
 "due" is YYYY-MM-DD when there is a deadline, else omit.
 "project" is the folder of the project this loop belongs to, taken from memory (e.g. "~/workspace/minara/newsdecision"); omit if none is clear.

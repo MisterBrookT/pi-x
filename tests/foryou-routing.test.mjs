@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
-import { answerCard, cardChoices, currentCard, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_ELSE, choiceLabel } from "../extensions/foryou.ts";
+import { answerCard, cardChoices, currentCard, sendTargets, suggestItem } from "../src/proactive-store.ts";
+import register, { CARD_ELSE, CARD_NO, CARD_SEND, choiceLabel } from "../extensions/foryou.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -84,7 +84,7 @@ function fakePi() {
 	return { handlers, sent, registerTool() {}, getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
 }
 const macCtx = (id, picks, notes = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
-	ui: { select: async (title, options) => (notes.push({ title, options }), picks.shift()), input: async () => picks.shift(), notify: m => notes.push(m) } });
+	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m) } });
 
 
 
@@ -152,13 +152,12 @@ test("card: For you shows the oldest loop that needs brook, one at a time", () =
 
 test("card buttons: the judge writes them; a closed session becomes a new one; no buttons falls back to Do it here", () => {
 	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "Fix wallet", for: "me", evidence: "x", choices: [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Bad", run: "../x" }, { label: "Discuss", run: "discuss" }, { label: "Not now", run: "later" }, { label: "Too many", run: "here" }] }] }));
-	assert.deepEqual(v.alerts[0].choices, [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Discuss", run: "discuss" }, { label: "Not now", run: "later" }], "valid ones only, at most 4");
-	assert.match(judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [], now: "n" }), /"choices" are the buttons on his card: the 2-4 moves/);
-	const it = loop("a", { project: "/w", choices: v.alerts[0].choices });
+	assert.deepEqual(v.alerts[0].choices, [{ label: "Fix in minara", run: "s2" }, { label: "Ask Lowes", run: "here", prompt: "Ask Lowes for steps" }, { label: "Discuss", run: "discuss" }], "valid ones only, at most 3");
+	assert.match(judgePrompt({ me: "b", memory: "", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: [], pending: [], now: "n" }), /"choices" are the buttons on his card: the 1-3 moves/);
+	const it = loop("a", { project: "/w", choices: [...v.alerts[0].choices, { label: "Not now", run: "later" }] });
 	assert.deepEqual(cardChoices(it, live).map(c => [c.label, c.run, c.name]), [["Fix in minara", "s2", "minara"], ["Ask Lowes", "here", undefined], ["Discuss", "discuss", undefined], ["Not now", "later", undefined]]);
 	assert.deepEqual(cardChoices(it, []).map(c => c.run), ["new", "here", "discuss", "later"], "session gone: a new session in the project");
 	assert.deepEqual(cardChoices(loop("b"), live).map(c => c.label), ["Do it here", "Discuss", "Later"]);
-	assert.deepEqual(cardChoices(loop("b", { suggest: { session: "s1", at: "" } }), live).map(c => c.label), ["Do it here", "Send to backtest", "Discuss", "Later"]);
 });
 
 test("card answers: a here button runs in For you with its prompt; a session button hands off; first answer wins; all logged", () => {
@@ -198,7 +197,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	const fix = choiceLabel({ label: "Fix in backtest", run: "s1", name: "backtest" });
 	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [fix], shown));
 	await new Promise(r => setTimeout(r, 20));
-	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE]);
+	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_NO, CARD_SEND, CARD_ELSE]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
 });
 
@@ -221,4 +220,28 @@ test("chat: the For you session knows which card brook is looking at, so he can 
 	assert.match(ctx, /The card on brook's screen now\nid=a "Loop a" \(0 more after it\)/);
 	assert.match(ctx, /"Fix it" -> s1/);
 	assert.match(ctx, /chat with you about a card/);
+});
+
+test("every card can be dropped as not important, or sent to any open session (likeliest first, or a new one)", async () => {
+	const it = loop("a", { project: "/w/minara", suggest: { session: "s1", at: "" } });
+	const ses = [{ id: "s9", name: "other", cwd: "/x" }, { id: "s2", name: "minara", cwd: "/w/minara" }, ...live.filter(s => s.id === "s1"), { id: "pix-foryou", name: "For you", cwd: "/f" }];
+	assert.deepEqual(sendTargets(it, ses, "/h").map(s => s.id), ["s1", "s2", "s9", "new"], "judge's pick, then same project, then the rest; never For you");
+	const d = tmp(loop("a", { project: "/w" }), loop("b"), loop("c"));
+	assert.equal(answerCard("a", "send", { to: "s9", dir: d }).into, "s9");
+	assert.equal(answerCard("b", "send", { to: "new", dir: d }), undefined, "no project: no new session");
+	assert.equal(answerCard("b", "send", { to: "../x", dir: d }), undefined);
+	assert.ok(answerCard("c", "no", { dir: d }));
+	assert.equal(inbox(d).find(i => i.id === "c").status, "dismissed");
+	const log = readFileSync(join(d, "judgments.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
+	assert.deepEqual(log.map(l => [l.id, l.answer, l.to]), [["a", "send", "s9"], ["c", "no", undefined]]);
+});
+
+test("Mac: Send to a session… asks which one, then hands it there", async () => {
+	const d = tmp(loop("a"));
+	const pi = fakePi(), answers = [], shown = [];
+	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
+	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
+	await new Promise(r => setTimeout(r, 20));
+	assert.equal(shown[1].title, "Send to which session?");
+	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });

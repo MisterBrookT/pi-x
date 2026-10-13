@@ -220,7 +220,12 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Next: Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "3.Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "3.Not important Forget it", "4.Send to a session ›", "5.Something else…"]);
+  // Send to a session… opens the list of open sessions under the card; it never includes For you.
+  await card.getByRole("button", { name: /Send to a session/ }).click();
+  assert.deepEqual(await card.locator(".job-to b").allTextContents(), ["backtest"]);
+  await card.getByRole("button", { name: /Send to a session/ }).click();
+  assert.equal(await card.locator(".job-sessions").isHidden(), true, "tapping again closes it");
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: /Switch loader/ }).click();
   const { prompts } = await next;

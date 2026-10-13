@@ -37,7 +37,7 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number }
 
 /** Answer through the hub when it runs (it queues work into sessions and updates the phone). */
-async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: number; text?: string }): Promise<"ok" | "gone" | "nohub"> {
+async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: number; to?: string; text?: string }): Promise<"ok" | "gone" | "nohub"> {
 	try {
 		const token = readFileSync(remoteTokenPath, "utf8").trim();
 		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/foryou/${encodeURIComponent(id)}/card`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ ...body, by: "mac" }), signal: AbortSignal.timeout(8000) });
@@ -45,7 +45,7 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 	} catch { return "nohub"; }
 }
 
-export const CARD_ELSE = "Something else…";
+export const CARD_NO = "Not important, forget it", CARD_SEND = "Send to a session…", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
@@ -97,18 +97,25 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		try {
 			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
 			const labels = it.choices.map(choiceLabel);
-			const pick = await ctx.ui.select(title, [...labels, CARD_ELSE], { signal: close.signal });
+			const pick = await ctx.ui.select(title, [...labels, CARD_NO, ...(it.sessions.length ? [CARD_SEND] : []), CARD_ELSE], { signal: close.signal });
 			if (!pick) return;
 			const text = pick === CARD_ELSE ? await ctx.ui.input("What should For you do instead?", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
+			let to: string | undefined;
+			if (pick === CARD_SEND) {
+				const names = it.sessions.map(s => s.id === "new" ? `New session in ${s.cwd}` : `${s.name}  ${s.cwd ?? ""}`.trim());
+				const where = await ctx.ui.select("Send to which session?", names, { signal: close.signal });
+				if (!where) return;
+				to = it.sessions[names.indexOf(where)]?.id;
+			}
 			const index = labels.indexOf(pick);
-			const answer: CardAnswer = index >= 0 ? "choice" : "else";
+			const answer: CardAnswer = index >= 0 ? "choice" : pick === CARD_NO ? "no" : to ? "send" : "else";
 			const choice = index >= 0 ? index : undefined;
-			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, choice, text });
+			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, choice, ...(to ? { to } : {}), text });
 			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }
 			if (via === "ok") return;
 			// No hub: answer here directly.
-			const r = answerCard(it.id, answer, { choice, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
+			const r = answerCard(it.id, answer, { choice, to, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
 			if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
 			if (r.here) pi.sendUserMessage(r.here);
 			if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);

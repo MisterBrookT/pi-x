@@ -343,7 +343,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (req.method === "POST" && cardMatch) {
         const input = await body(req).catch(() => ({})) as any;
         const answer = String(input?.answer ?? "") as CardAnswer;
-        const r = answerCard(cardMatch[1], answer, { choice: typeof input?.choice === "number" ? input.choice : undefined, live: liveSessions(), text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
+        const r = answerCard(cardMatch[1], answer, { choice: typeof input?.choice === "number" ? input.choice : undefined, to: typeof input?.to === "string" ? input.to : undefined, live: liveSessions(), text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
         if (!r) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
         const queue = (sid: string, text: string) => {
           const live = sessions.get(sid);
