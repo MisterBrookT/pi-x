@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Msg, Source } from "./proactive.ts";
 import { fetchGmailImap } from "./imap.ts";
+import { readDingTalk, type DingChat } from "./dingtalk-local.ts";
 
 const run = promisify(execFile);
 
@@ -192,7 +193,24 @@ const gmail: Adapter = {
 	howToRead: (src, refs) => `Gmail ${String(src.account ?? "yinghaotang2001@gmail.com")}, item ids ${refs.join(", ") || "n/a"} (IMAP UIDs in INBOX if numeric, else Gmail API ids). Easiest: search with the gmail MCP tool search_emails using the subject, then read_email.`,
 };
 
-export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command };
+/** One immutable local snapshot per expansion; each chat reads from the same batch. */
+export function dingAdapters(load: (root?: string, account?: string) => DingChat[] = readDingTalk): { all: Adapter; chat: Adapter } {
+	let snapshot: DingChat[] = [];
+	const howToRead = (_src: Source, _refs: string[]) => "DingTalk local Mac cache. Read with readDingTalk from src/dingtalk-local.ts; open DingTalk to sync. Attachments are not downloaded.";
+	return {
+		all: { fetch: async () => [], howToRead, expand: async src => {
+			snapshot = load(typeof src.root === "string" ? src.root : undefined, typeof src.account === "string" ? src.account : undefined);
+			return snapshot.map(c => ({ kind: "dingtalk", id: c.id, name: `DingTalk: ${c.name}`, me: c.me }));
+		} },
+		chat: { howToRead, fetch: async src => {
+			const chat = snapshot.find(c => c.id === src.id);
+			if (!chat) throw new Error("DingTalk chat snapshot unavailable; expand dingtalk-all first");
+			return chat.messages;
+		} },
+	};
+}
+const dingtalk = dingAdapters();
+export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat };
 
 /** Config sources with any "many chats" entries expanded. Explicit entries win (they may carry a project). */
 export async function expandSources(sources: Source[]): Promise<Source[]> {

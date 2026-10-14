@@ -102,8 +102,9 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   pushes.length = 0;
 
   // A new item appears on the Mac side: the phone list updates and a push goes out.
-  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b")) + "\n");
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b", { source: "DingTalk: Research", sourceKey: "dingtalk:research" })) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
+  assert.ok(await page.locator('[data-fy="b"]').getByText("DingTalk: Research", { exact: true }).isVisible(), "DingTalk jobs use the same phone view and dismissal route");
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
   assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
   assert.ok(await page.getByText("Draft a reply").first().isVisible(), "card shows what Pi will do");
