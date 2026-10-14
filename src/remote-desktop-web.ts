@@ -34,8 +34,10 @@ async function desktopConnect(){const gen=++desktopGen;desktopPending=true;$("de
     let savedTried=false,autoAttempt=false;
     const askCredentials=types=>{$("desktopUsername").hidden=!types.includes("username");$("desktopCredentials").hidden=false;desktopStatus("Mac sign-in required");($("desktopUsername").hidden?$("desktopPassword"):$("desktopUsername")).focus()};
     rfb.addEventListener("credentialsrequired",async e=>{if(desktopRfb!==rfb)return;const types=e.detail?.types||["password"];
-      if(savedTried||desktopSkipSaved){desktopSkipSaved=false;return askCredentials(types)}
-      savedTried=true;desktopStatus("Checking saved login…");const forgetGen=desktopForgetGen;let saved=null;try{saved=await api("/api/desktop/"+id+"/credentials")}catch{}
+      // noVNC re-emits credentialsrequired as ARD challenge fragments arrive; answer only the first per connection.
+      if(savedTried)return;savedTried=true;
+      if(desktopSkipSaved){desktopSkipSaved=false;return askCredentials(types)}
+      desktopStatus("Checking saved login…");const forgetGen=desktopForgetGen;let saved=null;try{saved=await api("/api/desktop/"+id+"/credentials")}catch{}
       if(desktopRfb!==rfb)return;
       if(forgetGen===desktopForgetGen&&saved?.saved&&typeof saved.password==="string"){autoAttempt=true;desktopStatus("Signing in with saved login…");const creds={password:saved.password};if(types.includes("username"))creds.username=saved.username||"";rfb.sendCredentials(creds)}else askCredentials(types)});
     rfb.addEventListener("connect",()=>{if(desktopRfb!==rfb)return;const save=desktopToSave;desktopClearCredentials();desktopSkipSaved=false;if(save)api("/api/desktop/"+id+"/credentials",{method:"POST",body:JSON.stringify(save)}).then(()=>{if(desktopRfb===rfb)desktopStatus("Connected · full control · login saved on Mac")},()=>{if(desktopRfb===rfb)desktopStatus("Connected · full control · could not save login")});$("desktopKeys").hidden=false;$("desktopFit").hidden=false;desktopStatus("Connected · full control")});
