@@ -107,31 +107,62 @@ test('Mac screen asks for explicit Connect, reaches noVNC sign-in, and clears it
   assert.deepEqual(errors, []);
 });
 
-test('Mac screen connects, sends typed text and control keys, and survives a transient read error', async t => {
-  const { page, rfb, errors } = await setup(t, [1], { failReads: 1 });
+test('Mac screen types live from the iPhone keyboard, with no Send step', async t => {
+  const { page, rfb, errors, logs } = await setup(t, [1], { failReads: 1 });
   await page.locator('#desktopConnect').click();
   await page.locator('#desktopKeys').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#desktopStatus').textContent(), 'Connected · full control');
-  await page.locator('#desktopText').fill('a€');
-  await page.locator('#desktopKeys').getByRole('button', { name: 'Send' }).click();
+  assert.equal(await page.locator('#desktopView').getByRole('button', { name: 'Send' }).count(), 0, 'no staged Send button');
+  await page.locator('#desktopKeyboard').click();
+  assert.equal(await page.locator('#desktopKeyboard').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'desktopText', 'keyboard focuses the live input');
+  assert.ok(await page.getByText('Tap a Mac field, then type.').isVisible());
+  const keys = async n => { for (let i = 0; i < 60 && rfb.keys().length < n; i++) await page.waitForTimeout(50); return rfb.keys(); };
+  // Each character goes out at once, and the input never holds it.
+  await page.keyboard.type('a');
+  assert.deepEqual(await keys(1), [0x61]);
   assert.equal(await page.locator('#desktopText').inputValue(), '');
-  for (const name of ['Enter', 'Backspace', 'Escape']) await page.locator('#desktopKeys').getByRole('button', { name, exact: true }).click();
-  for (let i = 0; i < 40 && rfb.keys().length < 5; i++) await page.waitForTimeout(50);
-  assert.deepEqual(rfb.keys(), [0x61, 0x010020ac, 0xff0d, 0xff08, 0xff1b]);
+  await page.keyboard.insertText('€');
+  // Backspace and Return still reach the Mac with an empty input.
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Enter');
+  // IME: composition updates are not sent; the committed text is sent once.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
+  await cdp.send('Input.imeSetComposition', { text: 'nih', selectionStart: 3, selectionEnd: 3 });
+  await cdp.send('Input.insertText', { text: '你' });
+  // Panel keys.
+  await page.locator('#desktopKeys').getByRole('button', { name: 'Esc' }).click();
+  await page.locator('#desktopKeys').getByRole('button', { name: 'Return' }).click();
+  await page.waitForTimeout(300);
+  assert.deepEqual(await keys(7), [0x61, 0x010020ac, 0xff08, 0xff0d, 0x01004f60, 0xff1b, 0xff0d], 'each key once, IME commit only');
+  assert.equal(await page.locator('#desktopText').inputValue(), '');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'desktopText', 'toolbar taps keep the keyboard up');
+  assert.doesNotMatch(logs.join('\n') + await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })), /€|你/);
+  await page.locator('#desktopKeyboard').click();
+  assert.equal(await page.locator('#desktopKeyPanel').isHidden(), true);
+  // Zoom uses noVNC's public viewport props; Fit restores them.
+  const props = () => page.evaluate(() => { const r = desktopRfb; return [r.scaleViewport, r.clipViewport, r.dragViewport]; });
+  assert.deepEqual(await props(), [true, false, false]);
   await page.locator('#desktopFit').click();
-  assert.equal(await page.locator('#desktopFit').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('#desktopFit').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(await props(), [false, true, true]);
+  // A tap on the zoomed screen still clicks: real pointer-event packets (type 5, button 1 then 0).
+  const before = rfb.received.length;
+  const box = await page.locator('#desktopScreen canvas').boundingBox();
+  await page.touchscreen.tap(box.x + 10, box.y + 10);
+  let ptr = [];
+  for (let i = 0; i < 40; i++) { const b = rfb.received.subarray(before); ptr = []; for (let j = 0; j + 6 <= b.length; j++) if (b[j] === 5 && b[j + 1] <= 1) ptr.push(b[j + 1]); if (ptr.includes(1) && ptr.at(-1) === 0) break; await page.waitForTimeout(50); }
+  assert.ok(ptr.includes(1) && ptr.at(-1) === 0, 'tap sends button down then up');
+  await page.locator('#desktopFit').click();
+  assert.deepEqual(await props(), [true, false, false]);
   // The Mac side ending the link returns the view to its Connect state.
   rfb.closed = true;
   await page.locator('#desktopIntro').waitFor({ state: 'visible' });
   assert.match(await page.locator('#desktopStatus').textContent(), /Disconnected|Connection lost/);
-  // The channel already closed itself, but the hub link must still be released.
   for (let i = 0; i < 20 && !rfb.closeCalls; i++) await page.waitForTimeout(50);
   assert.equal(rfb.closeCalls, 1);
-  // A fresh connection starts fitted again.
-  Object.assign(rfb, { out: [Buffer.from('RFB 003.008\n')], received: Buffer.alloc(0), stage: 'version', readSeq: 0, writeSeq: 0, delivered: null, closed: false });
-  await page.locator('#desktopConnect').click();
-  await page.waitForFunction(() => document.querySelector('#desktopIntro').hidden);
-  assert.equal(await page.locator('#desktopFit').getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#desktopKeys').isHidden(), true);
   assert.deepEqual(errors, []);
 });
 
@@ -240,6 +271,7 @@ test('Mac screen falls back to the form after a stale saved login fails or the K
   await page.locator('#desktopClose').click();
   await page.locator('#menu').click();
   await page.locator('#desktopOpen').click();
+  await page.locator("#desktopMore").click();
   await page.locator('#desktopForget').click();
   await page.getByText('Saved Mac login forgotten').waitFor();
   assert.equal(keychain.deletes, 1);
@@ -277,6 +309,7 @@ test('Mac screen Forget during a saved-login load neither uses nor re-saves it',
   rfb.acceptAuth = true;
   await page.locator('#desktopConnect').click();
   for (let i = 0; i < 40 && !keychain.gets; i++) await page.waitForTimeout(50);
+  await page.locator("#desktopMore").click();
   await page.locator('#desktopForget').click();
   await page.getByText('Saved Mac login forgotten').waitFor();
   release();
@@ -296,6 +329,7 @@ test('Mac screen Forget while a remembered sign-in is pending cancels the save',
   // Hold the auth verdict until Forget has been pressed.
   rfb.holdAuth = true;
   await page.locator('#desktopCredentials').getByRole('button', { name: 'Sign in' }).click();
+  await page.locator("#desktopMore").click();
   await page.locator('#desktopForget').click();
   await page.getByText('Saved Mac login forgotten').waitFor();
   rfb.holdAuth = false; rfb.acceptAuth = true; rfb.feed(Buffer.alloc(0));
@@ -305,16 +339,23 @@ test('Mac screen Forget while a remembered sign-in is pending cancels the save',
   assert.deepEqual(errors, []);
 });
 
-test('Mac screen header keeps every control on screen at iPhone width', async t => {
+for (const [label, viewport] of [['portrait', { width: 390, height: 844 }], ['landscape', { width: 844, height: 390 }]]) test(`Mac screen keeps a compact header and toolbar on screen (${label})`, async t => {
   const { page, errors } = await setup(t, [1]);
+  await page.setViewportSize(viewport);
   await page.locator('#desktopConnect').click();
-  await page.locator('#desktopFit').waitFor({ state: 'visible' });
-  const boxes = await page.evaluate(() => ['desktopTitle', 'desktopFit', 'desktopForget', 'desktopClose'].map(id => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width }; }));
-  for (const b of boxes) { assert.ok(b.left >= 0 && b.right <= 390, `${b.id} inside the screen`); assert.ok(b.w > 0, `${b.id} has width`); }
-  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-    const a = boxes[i], b = boxes[j];
-    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.id} and ${b.id} do not overlap`);
-  }
-  assert.equal(await page.locator('#desktopRemember').isChecked(), false);
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.locator('#desktopKeyboard').click();
+  assert.equal(await page.locator('#desktopForget').isHidden(), true, 'Forget lives behind the menu');
+  await page.locator('#desktopMore').click();
+  await page.locator('#desktopForget').waitFor({ state: 'visible' });
+  const ids = ['desktopClose', 'desktopTitle', 'desktopMore', 'desktopForget', 'desktopKeyboard', 'desktopFit', 'desktopKeyPanel'];
+  const boxes = await page.evaluate(ids => ids.map(id => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width, h: r.height }; }), ids);
+  for (const b of boxes) assert.ok(b.left >= 0 && b.right <= viewport.width && b.bottom <= viewport.height && b.w > 0, `${b.id} inside the screen`);
+  for (const id of ['desktopClose', 'desktopMore', 'desktopKeyboard', 'desktopFit']) assert.ok(boxes.find(b => b.id === id).h >= 44, `${id} is a 44pt target`);
+  assert.ok(await page.evaluate(() => document.querySelector('#desktopView header').getBoundingClientRect().height) <= 64, 'single-line header');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth) <= viewport.width, 'no horizontal overflow');
+  const screen = await page.locator('#desktopScreen').boundingBox();
+  assert.ok(screen.height >= viewport.height - 64 - 110 - 60, 'screen takes most of the height');
+  if (label === 'portrait') await page.screenshot({ path: '/tmp/pix-desktop-mobile.png' });
   assert.deepEqual(errors, []);
 });

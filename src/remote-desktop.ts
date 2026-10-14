@@ -15,6 +15,9 @@ import { connect as netConnect, type Socket } from "node:net";
 export const desktopHost = "127.0.0.1";
 export const desktopPort = 5900;
 export const desktopChunkLimit = 64 * 1024;
+// Screen updates are much larger than input. Batch them to avoid a relay round trip per 64 KiB.
+// 512 KiB still fits below the relay's 2 MiB frame limit after both base64 layers and encryption.
+export const desktopReadChunkLimit = 512 * 1024;
 export const desktopQueueLimit = 4 * 1024 * 1024;
 export const desktopMaxSessions = 2;
 export const desktopIdleMs = 60_000;
@@ -112,8 +115,8 @@ export function createDesktopBroker(options: DesktopBrokerOptions = {}) {
       s.lastActive = Date.now();
       if (!s.queue.length) return { status: 200, body: { seq, data: "", closed: s.closed } };
       const parts: Buffer[] = []; let size = 0;
-      while (s.queue.length && size < desktopChunkLimit) {
-        const head = s.queue[0], take = Math.min(head.length, desktopChunkLimit - size);
+      while (s.queue.length && size < desktopReadChunkLimit) {
+        const head = s.queue[0], take = Math.min(head.length, desktopReadChunkLimit - size);
         parts.push(head.subarray(0, take)); size += take;
         if (take === head.length) s.queue.shift(); else s.queue[0] = head.subarray(take);
       }

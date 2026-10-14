@@ -30,7 +30,8 @@ try {
  assert.ok(await page.locator('#desktopUsername').isVisible());
  assert.ok(await page.locator('#desktopRemember').isVisible());
  assert.equal(await page.locator('#desktopRemember').isChecked(), false);
- assert.ok(await page.locator('#desktopForget').isVisible());
+ await page.locator("#desktopMore").click();
+assert.ok(await page.locator('#desktopForget').isVisible());
  await page.locator('#desktopClose').click();
  assert.ok(await page.locator('#desktopPassword').isHidden());
  assert.deepEqual(errors,[]);

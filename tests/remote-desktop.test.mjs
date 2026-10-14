@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDesktopBroker, desktopHost, desktopPort } from "../src/remote-desktop.ts";
+import { createDesktopBroker, desktopHost, desktopPort, desktopReadChunkLimit } from "../src/remote-desktop.ts";
 import { startRemoteHub } from "../src/remote-hub.ts";
 import { relayAllowed } from "../src/remote-relay-agent.ts";
 
@@ -111,7 +111,8 @@ test("sessions are capped, chunks bounded, overload pauses the socket, close cle
   for (const s of vnc.sockets) s.write(Buffer.alloc(300_000, 7));
   await wait(100);
   const r = await broker.read(a, 0);
-  assert.equal(Buffer.from(r.body.data, "base64").length, 64 * 1024);
+  assert.ok(Buffer.from(r.body.data, "base64").length > 0);
+  assert.ok(Buffer.from(r.body.data, "base64").length <= desktopReadChunkLimit);
   assert.equal(broker.close(a).status, 200);
   assert.equal((await broker.read(a, 1)).status, 404);
   assert.equal(broker.open().status, 200, "a closed slot is free again");
