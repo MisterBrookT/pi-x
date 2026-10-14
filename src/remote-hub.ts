@@ -13,6 +13,7 @@ import { launchableFolder, listFolders, pastSessions, resumableSession, listMemo
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, saveUpload, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { previewRemoteDocument } from "./remote-document-preview.ts";
+import { createDesktopBroker, desktopIdPattern } from "./remote-desktop.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
@@ -232,6 +233,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const sessions = new Map<string, Registered>();
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();
   const phones = new Set<ServerResponse>();
+  // Phone VNC to this Mac's Screen Sharing; the destination is fixed inside remote-desktop.ts.
+  const desktop = createDesktopBroker();
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -334,6 +337,14 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         phones.add(res);
         req.on("close", () => phones.delete(res));
         return;
+      }
+      if (req.method === "POST" && path === "/api/desktop/open") { await body(req); const r = desktop.open(); return send(res, r.status, r.body); }
+      const desktopMatch = path.match(new RegExp(`^/api/desktop/(${desktopIdPattern})/(read|write|close)$`));
+      if (desktopMatch) {
+        const [, id, verb] = desktopMatch;
+        if (verb === "read" && req.method === "GET") { const r = await desktop.read(id, url.searchParams.get("seq")); return res.destroyed ? undefined : send(res, r.status, r.body); }
+        if (verb === "write" && req.method === "POST") { const r = desktop.write(id, await body(req)); return send(res, r.status, r.body); }
+        if (verb === "close" && req.method === "POST") { const r = desktop.close(id); return send(res, r.status, r.body); }
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
@@ -592,6 +603,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       unwatchFile(proactiveFile, onProactive);
       unwatchFile(healthFile, onProactive);
       clearInterval(wake);
+      desktop.dispose();
       for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);
       for (const phone of phones) phone.end();

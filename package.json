@@ -24,6 +24,7 @@
   "scripts": {
     "bench": "node scripts/bench.mjs",
     "deploy:relay": "node scripts/deploy-relay.mjs",
+    "build:desktop": "node scripts/build-desktop-vendor.mjs",
     "prepare": "git config core.hooksPath scripts/git-hooks || true",
     "check": "node --test && npm run prompt:snapshot",
     "test:tui": "node --test tests/tui-*.test.mjs",
@@ -38,6 +39,7 @@
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "@narumitw/pi-lsp": "0.49.6",
+    "@novnc/novnc": "1.7.0",
     "jsonc-parser": "3.3.1",
     "linkedom": "^0.16.11",
     "lovely-mermaid": "^0.3.3",
@@ -120,6 +122,7 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "^0.99.1",
     "@earendil-works/pi-tui": "^0.99.1",
+    "esbuild": "0.28.2",
     "playwright": "^1.63.0"
   }
 }

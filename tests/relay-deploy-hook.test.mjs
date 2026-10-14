@@ -8,7 +8,7 @@ test("post-commit relay deploy watches every file the relay bundles", () => {
   const pattern = new RegExp(hook.match(/grep -qE '([^']+)'/)[1]);
   const imports = [...readFileSync(new URL("../relay/src/index.ts", import.meta.url), "utf8").matchAll(/from "\.\.\/\.\.\/(src\/[^"]+)"/g)].map(m => m[1]);
   assert.ok(imports.length >= 3);
-  for (const file of [...imports, "relay/src/index.ts", "relay/wrangler.jsonc"]) {
+  for (const file of [...imports, "relay/src/index.ts", "relay/wrangler.jsonc", "src/remote-desktop-web.ts", "src/remote-desktop-vendor.ts"]) {
     assert.match(file, pattern, `${file} change deploys the relay`);
     for (const dep of readFileSync(new URL("../" + file, import.meta.url), "utf8").matchAll(/from "\.\/([^"]+)"/g))
       assert.match("src/" + dep[1], pattern, `${file} imports ${dep[1]}, which must also trigger a deploy`);

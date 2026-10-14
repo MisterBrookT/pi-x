@@ -1,0 +1,5 @@
+Pix bundles noVNC 1.7.0 (@novnc/novnc), licensed under MPL-2.0.
+Upstream source: https://github.com/novnc/noVNC/tree/v1.7.0
+Exact npm source archive: https://registry.npmjs.org/@novnc/novnc/-/novnc-1.7.0.tgz
+The upstream library is unmodified. Reproduce the bundle with npm ci and npm run build:desktop.
+The MPL-2.0 license is included in novnc.txt. Upstream source files carry their authorship and third-party notices; build:desktop preserves legal comments in the generated bundle.
