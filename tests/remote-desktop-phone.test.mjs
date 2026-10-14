@@ -14,7 +14,13 @@ function rfbFixture({ securityTypes }) {
     if (s.stage === 'version' && s.received.length >= 12) { s.received = s.received.subarray(12); s.stage = 'security'; s.out.push(Buffer.from([securityTypes.length, ...securityTypes])); }
     if (s.stage === 'security' && s.received.length >= 1) {
       const type = s.received[0]; s.received = s.received.subarray(1); s.chosen = type;
-      if (type === 1) { s.stage = 'init'; s.out.push(Buffer.from([0, 0, 0, 0])); } else s.stage = 'auth';
+      if (type === 1) { s.stage = 'init'; s.out.push(Buffer.from([0, 0, 0, 0])); } else if (type === 2) { s.stage = 'vncauth'; s.out.push(Buffer.alloc(16, 7)); } else s.stage = 'auth';
+    }
+    // VNC password auth: the test decides the verdict via s.acceptAuth; a rejection ends the link like a real server.
+    if (s.stage === 'vncauth' && !s.holdAuth && s.received.length >= 16) {
+      s.received = s.received.subarray(16); s.authAttempts = (s.authAttempts || 0) + 1;
+      if (s.acceptAuth) { s.stage = 'init'; s.out.push(Buffer.from([0, 0, 0, 0])); }
+      else { const why = Buffer.from('bad password'), len = Buffer.alloc(4); len.writeUInt32BE(why.length); s.out.push(Buffer.from([0, 0, 0, 1]), len, why); s.stage = 'failed'; setTimeout(() => { s.closed = true; }, 300); }
     }
     if (s.stage === 'init' && s.received.length >= 1) {
       s.received = s.received.subarray(1); s.stage = 'normal';
@@ -29,7 +35,7 @@ function rfbFixture({ securityTypes }) {
   return s;
 }
 
-async function setup(t, securityTypes, { failReads = 0 } = {}) {
+async function setup(t, securityTypes, { failReads = 0, keychain } = {}) {
   const home = await mkdtemp(join(tmpdir(), 'pix-desktop-'));
   const token = 'fixture-token-not-real';
   const hub = await startRemoteHub({ token, port: 0, home, sessionsDir: join(home, 'sessions'), memoryRoot: join(home, 'memory') });
@@ -66,6 +72,9 @@ async function setup(t, securityTypes, { failReads = 0 } = {}) {
       rfb.writes.push(body); rfb.writeSeq++; rfb.feed(bytes);
       return json(route, 200, { ack: rfb.writeSeq });
     }
+    if (keychain && url.pathname === `/api/desktop/${id}/credentials` && req.method() === 'GET') { keychain.gets++; if (keychain.gate) await keychain.gate; if (keychain.getError) return json(route, 500, { error: 'keychain locked' }); return json(route, 200, keychain.saved ? { saved: true, ...keychain.saved } : { saved: false }); }
+    if (keychain && url.pathname === `/api/desktop/${id}/credentials` && req.method() === 'POST') { keychain.saved = JSON.parse(req.postData()); keychain.posts++; return json(route, 200, { ok: true }); }
+    if (keychain && url.pathname === '/api/desktop/credentials' && req.method() === 'DELETE') { keychain.saved = null; keychain.deletes++; return json(route, 200, { ok: true }); }
     if (url.pathname === `/api/desktop/${id}/close`) { rfb.closeCalls++; rfb.closed = true; return json(route, 200, { ok: true }); }
     return json(route, 404, { error: 'no' });
   });
@@ -163,5 +172,149 @@ test('Mac screen keeps hardware shortcuts away from the Pix app', async t => {
   }
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('#desktopView').isVisible(), true);
+  assert.deepEqual(errors, []);
+});
+
+const newKeychain = saved => ({ saved, gets: 0, posts: 0, deletes: 0, getError: false, gate: null });
+const resetRfb = rfb => Object.assign(rfb, { out: [Buffer.from('RFB 003.008\n')], received: Buffer.alloc(0), stage: 'version', readSeq: 0, writeSeq: 0, delivered: null, closed: false });
+const noSecretStorage = page => page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
+
+test('Mac screen signs in with the Keychain-saved login without showing the form', async t => {
+  const keychain = newKeychain({ username: '', password: 'saved-pass' });
+  const { page, rfb, errors, logs } = await setup(t, [2], { keychain });
+  rfb.acceptAuth = true;
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  assert.equal(keychain.gets, 1);
+  assert.equal(rfb.authAttempts, 1);
+  assert.equal(await page.locator('#desktopCredentials').isHidden(), true);
+  assert.equal(keychain.posts, 0, 'an already saved login is not re-saved');
+  assert.doesNotMatch(await noSecretStorage(page) + logs.join('\n'), /saved-pass/);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen saves a typed login only with consent and only after sign-in succeeds', async t => {
+  const keychain = newKeychain(null);
+  const { page, rfb, errors, logs } = await setup(t, [2], { keychain });
+  // Rejected attempt with Remember ticked: nothing is saved.
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#desktopCredentials').textContent(), /Mac Keychain/);
+  assert.equal(await page.locator('#desktopRemember').isChecked(), false, 'remember is opt-in');
+  await page.locator('#desktopPassword').fill('wrong-pass');
+  await page.locator('#desktopRemember').check();
+  await page.locator('#desktopCredentials').getByRole('button', { name: 'Sign in' }).click();
+  await page.getByText('Sign-in failed', { exact: false }).waitFor();
+  await page.locator('#desktopIntro').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#desktopStatus').textContent(), /Sign-in failed/);
+  assert.equal(keychain.posts, 0);
+  // Accepted attempt with Remember ticked: saved after connect.
+  resetRfb(rfb); rfb.acceptAuth = true;
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#desktopRemember').isChecked(), false, 'consent does not carry over');
+  await page.locator('#desktopPassword').fill('right-pass');
+  await page.locator('#desktopRemember').check();
+  await page.locator('#desktopCredentials').getByRole('button', { name: 'Sign in' }).click();
+  await page.getByText('login saved on Mac', { exact: false }).waitFor();
+  assert.equal(keychain.posts, 1);
+  assert.deepEqual(keychain.saved, { username: '', password: 'right-pass' });
+  assert.doesNotMatch(await noSecretStorage(page) + logs.join('\n'), /right-pass|wrong-pass/);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen falls back to the form after a stale saved login fails or the Keychain errors, and can forget it', async t => {
+  const keychain = newKeychain({ username: '', password: 'stale-pass' });
+  const { page, rfb, errors } = await setup(t, [2], { keychain });
+  await page.locator('#desktopConnect').click();
+  await page.getByText('Saved login failed', { exact: false }).waitFor();
+  await page.locator('#desktopIntro').waitFor({ state: 'visible' });
+  assert.equal(rfb.authAttempts, 1);
+  // Next attempt asks by hand instead of retrying the stale login.
+  resetRfb(rfb);
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  assert.equal(keychain.gets, 1, 'stale login not fetched again');
+  assert.equal(rfb.authAttempts, 1);
+  // Forget is available while disconnected.
+  await page.locator('#desktopClose').click();
+  await page.locator('#menu').click();
+  await page.locator('#desktopOpen').click();
+  await page.locator('#desktopForget').click();
+  await page.getByText('Saved Mac login forgotten').waitFor();
+  assert.equal(keychain.deletes, 1);
+  assert.equal(keychain.saved, null);
+  // A Keychain error never blocks manual sign-in.
+  resetRfb(rfb); keychain.getError = true;
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#desktopStatus').textContent(), 'Mac sign-in required');
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen ignores a saved login that arrives after Close', async t => {
+  let release;
+  const keychain = newKeychain({ username: '', password: 'late-pass' });
+  keychain.gate = new Promise(r => { release = r; });
+  const { page, rfb, errors } = await setup(t, [2], { keychain });
+  rfb.acceptAuth = true;
+  await page.locator('#desktopConnect').click();
+  for (let i = 0; i < 40 && !keychain.gets; i++) await page.waitForTimeout(50);
+  assert.equal(keychain.gets, 1);
+  await page.locator('#desktopClose').click();
+  release();
+  await page.waitForTimeout(300);
+  assert.equal(rfb.authAttempts ?? 0, 0, 'late saved login is not sent');
+  assert.equal(await page.locator('#desktopKeys').isHidden(), true);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen Forget during a saved-login load neither uses nor re-saves it', async t => {
+  let release;
+  const keychain = newKeychain({ username: '', password: 'forgot-pass' });
+  keychain.gate = new Promise(r => { release = r; });
+  const { page, rfb, errors } = await setup(t, [2], { keychain });
+  rfb.acceptAuth = true;
+  await page.locator('#desktopConnect').click();
+  for (let i = 0; i < 40 && !keychain.gets; i++) await page.waitForTimeout(50);
+  await page.locator('#desktopForget').click();
+  await page.getByText('Saved Mac login forgotten').waitFor();
+  release();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  assert.equal(rfb.authAttempts ?? 0, 0, 'in-flight saved login is ignored after Forget');
+  assert.equal(keychain.posts, 0);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen Forget while a remembered sign-in is pending cancels the save', async t => {
+  const keychain = newKeychain(null);
+  const { page, rfb, errors } = await setup(t, [2], { keychain });
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
+  await page.locator('#desktopPassword').fill('pending-pass');
+  await page.locator('#desktopRemember').check();
+  // Hold the auth verdict until Forget has been pressed.
+  rfb.holdAuth = true;
+  await page.locator('#desktopCredentials').getByRole('button', { name: 'Sign in' }).click();
+  await page.locator('#desktopForget').click();
+  await page.getByText('Saved Mac login forgotten').waitFor();
+  rfb.holdAuth = false; rfb.acceptAuth = true; rfb.feed(Buffer.alloc(0));
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.waitForTimeout(200);
+  assert.equal(keychain.posts, 0, 'no save after Forget');
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen header keeps every control on screen at iPhone width', async t => {
+  const { page, errors } = await setup(t, [1]);
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopFit').waitFor({ state: 'visible' });
+  const boxes = await page.evaluate(() => ['desktopTitle', 'desktopFit', 'desktopForget', 'desktopClose'].map(id => { const r = document.getElementById(id).getBoundingClientRect(); return { id, left: r.left, right: r.right, top: r.top, bottom: r.bottom, w: r.width }; }));
+  for (const b of boxes) { assert.ok(b.left >= 0 && b.right <= 390, `${b.id} inside the screen`); assert.ok(b.w > 0, `${b.id} has width`); }
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const a = boxes[i], b = boxes[j];
+    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.id} and ${b.id} do not overlap`);
+  }
+  assert.equal(await page.locator('#desktopRemember').isChecked(), false);
   assert.deepEqual(errors, []);
 });

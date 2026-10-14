@@ -8,7 +8,12 @@ import { startRemoteRelayAgent, readRelayOrigin } from '../src/remote-relay-agen
 const origin = await readRelayOrigin();
 if (!origin) throw Error('Configure relay origin first');
 const token = randomBytes(32).toString('base64url'), secret = randomBytes(32).toString('base64url');
-const hub = await startRemoteHub({ token, port: 0 });
+// Never load a remembered real login during acceptance: stop at the sign-in form.
+const hub = await startRemoteHub({ token, port: 0, desktopCredentials: {
+ load: async () => undefined,
+ save: async () => { throw Error('Acceptance must not save credentials'); },
+ remove: async () => { throw Error('Acceptance must not delete credentials'); },
+} });
 const relay = startRemoteRelayAgent({ origin, secret, localBase: `http://127.0.0.1:${hub.port}`, localToken: token });
 let browser;
 try {
@@ -23,6 +28,9 @@ try {
  await page.locator('#desktopPassword').waitFor({state:'visible',timeout:30000});
  assert.equal(await page.locator('#desktopPassword').inputValue(),'');
  assert.ok(await page.locator('#desktopUsername').isVisible());
+ assert.ok(await page.locator('#desktopRemember').isVisible());
+ assert.equal(await page.locator('#desktopRemember').isChecked(), false);
+ assert.ok(await page.locator('#desktopForget').isVisible());
  await page.locator('#desktopClose').click();
  assert.ok(await page.locator('#desktopPassword').isHidden());
  assert.deepEqual(errors,[]);

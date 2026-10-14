@@ -50,7 +50,11 @@ export const openRelayFrame = (secret: string, frame: string): any => {
 export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
   || method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path)
   || method === "GET" && (path === "/api/folders" || path === "/api/links" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume")
-  || method === "POST" && path === "/api/desktop/open" || method === "GET" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/read$/.test(path) || method === "POST" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/(write|close)$/.test(path); };
+  || method === "POST" && path === "/api/desktop/open" || method === "GET" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/read$/.test(path) || method === "POST" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/(write|close)$/.test(path)
+  || (method === "GET" || method === "POST") && desktopCredentialPath.test(path) || method === "DELETE" && path === "/api/desktop/credentials"; };
+const desktopCredentialPath = /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/credentials$/;
+/** Credential replies must not linger in the request dedup cache; those operations are idempotent anyway. */
+const uncachedRelayPath = (url: string) => { const path = String(url).split("?")[0]; return path === "/api/desktop/credentials" || desktopCredentialPath.test(path); };
 
 export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
   const { origin, secret, localBase, localToken } = options;
@@ -125,6 +129,15 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.
         if (!relayAllowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }
         if (message.body.length > relayRequestLimit) { send({ kind: "response", id: message.id, status: 413, error: "Message and image are too large to send" }); return; }
+        if (uncachedRelayPath(message.path)) {
+          let reply;
+          try {
+            const response = await local(message.path, message.method, message.body);
+            const body = await response.json() as { error?: string };
+            reply = { kind: "response", id: message.id, status: response.status, body, error: response.ok ? undefined : body.error };
+          } catch { reply = { kind: "response", id: message.id, status: 503, error: "Mac hub unavailable" }; }
+          send(reply); return;
+        }
         if (!requests.has(message.id)) {
           requests.set(message.id, (async () => {
             try {

@@ -71,6 +71,8 @@ export function createDesktopBroker(options: DesktopBrokerOptions = {}) {
 
   return {
     get size() { return sessions.size; },
+    /** Open and its Screen Sharing connection still up. */
+    has(id: string) { const s = sessions.get(id); return !!s && !s.closed; },
     open(): DesktopResult {
       if (sessions.size >= maxSessions) return { status: 429, body: { error: "too many desktop sessions" } };
       const id = randomBytes(18).toString("base64url");

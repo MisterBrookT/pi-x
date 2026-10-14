@@ -13,7 +13,8 @@ import { launchableFolder, listFolders, pastSessions, resumableSession, listMemo
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, saveUpload, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { previewRemoteDocument } from "./remote-document-preview.ts";
-import { createDesktopBroker, desktopIdPattern } from "./remote-desktop.ts";
+import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "./remote-desktop.ts";
+import { createDesktopCredentialStore, type DesktopCredentialStore } from "./remote-desktop-credentials.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
@@ -172,6 +173,10 @@ export interface RemoteHubOptions {
   version?: string;
   /** Called when a newer session takes the hub over; the host stops serving. */
   onRetire?: () => void;
+  /** Remembered desktop login; tests inject a store with a fake security runner. */
+  desktopCredentials?: DesktopCredentialStore;
+  /** Tests only: a broker wired to a fake VNC server; production always uses the fixed 127.0.0.1:5900 broker. */
+  desktopBroker?: DesktopBroker;
   /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
   proactiveDir?: string;
   proactiveStart?: (prompt: string) => Promise<unknown>;
@@ -234,7 +239,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();
   const phones = new Set<ServerResponse>();
   // Phone VNC to this Mac's Screen Sharing; the destination is fixed inside remote-desktop.ts.
-  const desktop = createDesktopBroker();
+  const desktop = options.desktopBroker ?? createDesktopBroker();
+  const desktopCredentials = options.desktopCredentials ?? createDesktopCredentialStore();
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -339,6 +345,21 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         return;
       }
       if (req.method === "POST" && path === "/api/desktop/open") { await body(req); const r = desktop.open(); return send(res, r.status, r.body); }
+      if (path === "/api/desktop/credentials" && req.method === "DELETE") {
+        try { await desktopCredentials.remove(); return send(res, 200, { ok: true }); } catch { return send(res, 500, { error: "could not forget desktop login" }); }
+      }
+      const credentialMatch = path.match(new RegExp(`^/api/desktop/(${desktopIdPattern})/credentials$`));
+      if (credentialMatch && (req.method === "GET" || req.method === "POST")) {
+        if (!desktop.has(credentialMatch[1])) return send(res, 404, { error: "desktop session ended" });
+        if (req.method === "GET") {
+          try { const saved = await desktopCredentials.load(); return send(res, 200, saved ? { saved: true, ...saved } : { saved: false }); }
+          catch { return send(res, 500, { error: "could not read desktop login" }); }
+        }
+        let input: unknown;
+        try { input = await body(req); } catch { return send(res, 400, { error: "invalid desktop login" }); }
+        try { await desktopCredentials.save(input); return send(res, 200, { ok: true }); }
+        catch { return send(res, 400, { error: "could not save desktop login" }); }
+      }
       const desktopMatch = path.match(new RegExp(`^/api/desktop/(${desktopIdPattern})/(read|write|close)$`));
       if (desktopMatch) {
         const [, id, verb] = desktopMatch;
