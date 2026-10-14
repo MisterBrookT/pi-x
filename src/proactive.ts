@@ -295,6 +295,12 @@ Leave a loop when unsure. Do not close a loop that is still in progress or has a
 Also, for loops that need ${o.me} now: if one open Pi session below works in that loop's project (same folder or
 clearly the same work), put it in "route": his card in For you will offer "Send to <that session>".
 When several sessions share a folder, pick the one he is actively using (it has "doing", or the most recent "last").
+Finally, for every loop marked "needs him" that has no buttons yet (no "choices:" in its line), or whose buttons no longer fit,
+write its "choices": the 1-3 moves that fit THIS loop best, best first, specific to it (never a generic set like
+"Do it here / Discuss"). Each: "label" (<=4 words, the loop's language), "run" ("here" = his For you assistant does it,
+"discuss" = talk it through first, an open session id from above, "new" = a fresh session in the project,
+"later" = remind him in 2 days), optional "prompt" (one line). "Not important", "Send to a session", and
+"Something else" are always added; do not repeat them.
 
 ## Open Pi sessions
 ${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.todo ? `; doing: ${w.todo}` : ""}${w.preview ? `; last: ${w.preview.replace(/\s+/g, " ").slice(0, 120)}` : ""}`).join("\n") || "(none)"}
@@ -303,12 +309,12 @@ ${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.todo ? `; doi
 ${o.memory || "(empty)"}
 
 ## Open loops
-${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}${i.note ? `\n  latest progress: ${i.note.split("\n").at(-1)!.slice(0, 400)}` : ""}`).join("\n")}
+${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}${i.why ? `\n  why: ${i.why}` : ""}${i.action ? `\n  next: ${i.action}` : ""}${i.choices?.length ? `\n  choices: ${i.choices.map(c => `${c.label} (${c.run})`).join(", ")}` : ""}${i.note ? `\n  latest progress: ${i.note.split("\n").at(-1)!.slice(0, 400)}` : ""}`).join("\n")}
 
-Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}], "route": [{"id": "loop id", "to": "session id", "why": "<=80 chars"}]}`;
+Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}], "route": [{"id": "loop id", "to": "session id", "why": "<=80 chars"}], "choices": [{"id": "loop id", "choices": [{"label": "...", "run": "...", "prompt": "optional"}]}]}`;
 }
 
-export function parsePile(raw: string, open: Set<string>, sessions: Set<string> = new Set()): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[]; route: { id: string; to: string; why: string }[] } {
+export function parsePile(raw: string, open: Set<string>, sessions: Set<string> = new Set()): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[]; route: { id: string; to: string; why: string }[]; choices: { id: string; choices: Choice[] }[] } {
 	try {
 		const v = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
 		const why = (x: unknown) => String(x ?? "").slice(0, 120);
@@ -316,8 +322,9 @@ export function parsePile(raw: string, open: Set<string>, sessions: Set<string> 
 		const merge = (Array.isArray(v.merge) ? v.merge : []).filter((m: any) => open.has(m?.keep) && open.has(m?.drop) && m.keep !== m.drop).map((m: any) => ({ keep: m.keep, drop: m.drop, why: why(m.why) }));
 		const gone = new Set([...close.map((c: any) => c.id), ...merge.map((m: any) => m.drop)]);
 		const route = (Array.isArray(v.route) ? v.route : []).filter((r: any) => open.has(r?.id) && !gone.has(r.id) && sessions.has(r?.to)).map((r: any) => ({ id: r.id, to: r.to, why: why(r.why) }));
-		return { close, merge, route };
-	} catch { return { close: [], merge: [], route: [] }; }
+		const choices = (Array.isArray(v.choices) ? v.choices : []).filter((c: any) => open.has(c?.id) && !gone.has(c.id)).map((c: any) => ({ id: c.id, choices: cleanChoices(c.choices) })).filter((c: any): c is { id: string; choices: Choice[] } => !!c.choices);
+		return { close, merge, route, choices };
+	} catch { return { close: [], merge: [], route: [], choices: [] }; }
 }
 
 /**

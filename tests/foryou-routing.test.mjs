@@ -71,8 +71,8 @@ test("pile check: closes and merges only open loops it names", () => {
 	const p = pilePrompt({ me: "brook", memory: "", open: [loop("a"), loop("b")], now: "n" });
 	assert.match(p, /id=a: Loop a[\s\S]*created 2026-10-09/);
 	const v = parsePile('ok {"close":[{"id":"a","why":"old"},{"id":"zz"}],"merge":[{"keep":"b","drop":"c","why":"same"},{"keep":"b","drop":"b"}]}', open);
-	assert.deepEqual(v, { close: [{ id: "a", why: "old" }], merge: [{ keep: "b", drop: "c", why: "same" }], route: [] });
-	assert.deepEqual(parsePile("nonsense", open), { close: [], merge: [], route: [] });
+	assert.deepEqual(v, { close: [{ id: "a", why: "old" }], merge: [{ keep: "b", drop: "c", why: "same" }], route: [], choices: [] });
+	assert.deepEqual(parsePile("nonsense", open), { close: [], merge: [], route: [], choices: [] });
 	// Existing loops can be routed to a live session (card), but never a closed one or an unknown session.
 	const r = parsePile('{"close":[{"id":"a"}],"route":[{"id":"b","to":"s1"},{"id":"a","to":"s1"},{"id":"c","to":"zz"}]}', open, new Set(["s1"]));
 	assert.deepEqual(r.route, [{ id: "b", to: "s1", why: "" }]);
@@ -244,4 +244,13 @@ test("Mac: Send to a session… asks which one, then hands it there", async () =
 	await new Promise(r => setTimeout(r, 20));
 	assert.equal(shown[1].title, "Send to which session?");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
+});
+
+test("pile check writes specific buttons for old loops that have none, and the prompt shows what each loop is about", async () => {
+	const { pilePrompt, parsePile } = await import("../src/proactive.ts");
+	const p = pilePrompt({ me: "b", memory: "", now: "n", open: [loop("a", { why: "fake coins", action: "ask 王", choices: [{ label: "X", run: "here" }] }), loop("b")] });
+	assert.match(p, /why: fake coins\n  next: ask 王\n  choices: X \(here\)/);
+	assert.match(p, /never a generic set/);
+	const v = parsePile(JSON.stringify({ choices: [{ id: "b", choices: [{ label: "Ask 王", run: "here" }, { label: "bad", run: "../" }] }, { id: "zz", choices: [{ label: "x", run: "here" }] }] }), new Set(["a", "b"]));
+	assert.deepEqual(v.choices, [{ id: "b", choices: [{ label: "Ask 王", run: "here" }] }]);
 });

@@ -81,10 +81,11 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 				if (!dry) {
 					for (const c of v.close) appendFileSync(P.inbox, JSON.stringify({ id: c.id, status: "resolved", at_status: stamp, closedWhy: c.why }) + "\n");
 					for (const r of v.route) { const it = open.find(i => i.id === r.id)!; if (it.status === "pending" && !it.suggest) suggestItem(r.id, { id: r.to, name: work.find(w => w.id === r.to)?.name }); }
+					for (const c of v.choices) appendFileSync(P.inbox, JSON.stringify({ id: c.id, choices: c.choices, at_status: stamp }) + "\n");
 					for (const m of v.merge) appendFileSync(P.inbox, JSON.stringify({ id: m.drop, status: "resolved", at_status: stamp, closedWhy: `merged into ${m.keep}: ${m.why}` }) + "\n");
 				}
-				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), work: work.map(w => w.id), raw, close: v.close, merge: v.merge, route: v.route });
-				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}, cards ${v.route.length}`);
+				judged({ kind: "pile", open: open.map(i => ({ id: i.id, title: i.title, at: i.at, status: i.status })), work: work.map(w => w.id), raw, close: v.close, merge: v.merge, route: v.route, choices: v.choices });
+				log(`pile: ${open.length} open -> closed ${v.close.length}, merged ${v.merge.length}, cards ${v.route.length}, buttons ${v.choices.length}`);
 			} catch (e) { log(`pile: error ${(e as Error).message}`); judged({ kind: "error", source: "pile", error: (e as Error).message }); }
 		}
 		state["@pile"] = new Date(now).toISOString();
