@@ -139,6 +139,11 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('.fy[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
 
+  // A parked loop can be deleted straight from Later (✕), no need to bring it back first.
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("p", { status: "later", wakeAt: "2099-01-01T00:00:00Z" })) + "\n");
+  await page.locator('.fy-q[data-fy="p"] [data-fy-act="dismiss"]').click({ timeout: 8000 });
+  await page.locator('.fy-q[data-fy="p"] [data-fy-act]').first().waitFor({ state: "detached", timeout: 8000 });
+  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "p").status, "dismissed");
   // Quiet rows act too: Now brings a parked loop back; ✓ Done closes one.
   await page.locator('.fy-q[data-fy="c"] [data-fy-act="now"]').click();
   await page.locator('.fy[data-fy="c"] [data-fy-act="act"]').waitFor({ timeout: 8000 });
@@ -220,11 +225,11 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "Not important", "Send to…", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "Not important", "Send to a session…", "Something else…"]);
   // Send to a session… opens the list of open sessions under the card; it never includes For you.
-  await card.getByRole("button", { name: /Send to…/ }).click();
-  assert.deepEqual(await card.locator(".job-to b").allTextContents(), ["backtest"]);
-  await card.getByRole("button", { name: /Send to…/ }).click();
+  await card.getByRole("button", { name: /Send to a session/ }).click();
+  assert.deepEqual(await card.locator(".job-to b").allTextContents(), ["backtest (open)"]);
+  await card.getByRole("button", { name: /Send to a session/ }).click();
   assert.equal(await card.locator(".job-sessions").isHidden(), true, "tapping again closes it");
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: /Switch loader/ }).click();

@@ -103,8 +103,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			let to: string | undefined;
 			if (pick === CARD_SEND) {
-				const names = it.sessions.map(s => s.id === "new" ? `New session in ${s.cwd}` : `${s.name}  ${s.cwd ?? ""}`.trim());
-				const where = await ctx.ui.select("Send to which session?", names, { signal: close.signal });
+				const names = it.sessions.map(s => s.id === "new" ? `＋ New session in ${s.cwd}` : `${s.name} (open)  ${s.cwd ?? ""}`.trim());
+				const where = await ctx.ui.select("Hand this job to:", names, { signal: close.signal });
 				if (!where) return;
 				to = it.sessions[names.indexOf(where)]?.id;
 			}

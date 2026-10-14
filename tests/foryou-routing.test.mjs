@@ -242,7 +242,7 @@ test("Mac: Send to a session… asks which one, then hands it there", async () =
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
 	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
 	await new Promise(r => setTimeout(r, 20));
-	assert.equal(shown[1].title, "Send to which session?");
+	assert.equal(shown[1].title, "Hand this job to:");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
 
