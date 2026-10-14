@@ -60,3 +60,25 @@ test('messages preserve 64-bit IDs, resolve senders, exclude recalled messages a
  assert.match(dingText('{"contentType":1200}'),/Unsupported/);
  }finally{db.close();}
 });
+import { readDingTalkIsolated } from '../src/dingtalk-worker.ts';
+import { existsSync, writeFileSync } from 'node:fs';
+test('isolated DingTalk reader kills a blocked worker on timeout, keeps the event loop responsive and removes its temp dir',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'pix-ding-hang-')); t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const hang=join(dir,'hang.mjs'), seen=join(dir,'seen');
+ writeFileSync(hang,`import {writeFileSync} from 'node:fs'; const d=process.argv[3]; writeFileSync(d+'/snapshot.db','x'); writeFileSync(${JSON.stringify(seen)},d); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);`);
+ let ticks=0; const iv=setInterval(()=>ticks++,10);
+ try { await assert.rejects(readDingTalkIsolated(undefined,undefined,{timeoutMs:500,workerPath:hang}),/timed out after 500ms/); } finally { clearInterval(iv); }
+ assert.ok(ticks>=10,`event loop ticked ${ticks}`);
+ const workerTmp=readFileSync(seen,'utf8'); assert.equal(existsSync(workerTmp),false);
+});
+test('isolated DingTalk reader surfaces the real reader error message only',async()=>{
+ await assert.rejects(readDingTalkIsolated(join(tmpdir(),'pix-ding-missing-root'),undefined,{timeoutMs:20000}),e=>/ENOENT/.test(e.message)&&!/\n/.test(e.message));
+});
+test('DingTalk adapters share one in-flight load across concurrent expansions',async()=>{
+ let calls=0,release; const gate=new Promise(r=>release=r);
+ const a=dingAdapters(async()=>{calls++;await gate;return [{id:'c',name:'R',me:'b',messages:[]}];});
+ const src={kind:'dingtalk-all',id:'all',name:'DingTalk'};
+ const p=Promise.all([a.all.expand(src),a.all.expand(src)]); release();
+ assert.equal((await p)[1].length,1); assert.equal(calls,1);
+ await a.all.expand(src); assert.equal(calls,2);
+});

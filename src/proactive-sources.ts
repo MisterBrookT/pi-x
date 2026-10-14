@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Msg, Source } from "./proactive.ts";
 import { fetchGmailImap } from "./imap.ts";
-import { readDingTalk, type DingChat } from "./dingtalk-local.ts";
+import type { DingChat } from "./dingtalk-local.ts";
+import { readDingTalkIsolated } from "./dingtalk-worker.ts";
 
 const run = promisify(execFile);
 
@@ -194,12 +195,20 @@ const gmail: Adapter = {
 };
 
 /** One immutable local snapshot per expansion; each chat reads from the same batch. */
-export function dingAdapters(load: (root?: string, account?: string) => DingChat[] = readDingTalk): { all: Adapter; chat: Adapter } {
+export function dingAdapters(load: (root?: string, account?: string) => DingChat[] | Promise<DingChat[]> = readDingTalkIsolated): { all: Adapter; chat: Adapter } {
 	let snapshot: DingChat[] = [];
+	const inFlight = new Map<string, Promise<DingChat[]>>();
 	const howToRead = (_src: Source, _refs: string[]) => "DingTalk local Mac cache. Read with readDingTalk from src/dingtalk-local.ts; open DingTalk to sync. Attachments are not downloaded.";
 	return {
 		all: { fetch: async () => [], howToRead, expand: async src => {
-			snapshot = load(typeof src.root === "string" ? src.root : undefined, typeof src.account === "string" ? src.account : undefined);
+			const root = typeof src.root === "string" ? src.root : undefined, account = typeof src.account === "string" ? src.account : undefined;
+			const key = JSON.stringify([root, account]);
+			let pending = inFlight.get(key);
+			if (!pending) {
+				pending = Promise.resolve().then(() => load(root, account)).finally(() => inFlight.delete(key));
+				inFlight.set(key, pending);
+			}
+			snapshot = await pending;
 			return snapshot.map(c => ({ kind: "dingtalk", id: c.id, name: `DingTalk: ${c.name}`, me: c.me }));
 		} },
 		chat: { howToRead, fetch: async src => {
@@ -212,12 +221,18 @@ export function dingAdapters(load: (root?: string, account?: string) => DingChat
 const dingtalk = dingAdapters();
 export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat };
 
-/** Config sources with any "many chats" entries expanded. Explicit entries win (they may carry a project). */
-export async function expandSources(sources: Source[]): Promise<Source[]> {
+export interface ExpandHooks { onError?: (src: Source, error: Error) => void; onSuccess?: (src: Source) => void }
+/**
+ * Config sources with any "many chats" entries expanded. Explicit entries win (they may carry a project).
+ * One failing expansion (e.g. DingTalk without Mac permission) is reported via `onError` and skipped; the rest still run.
+ */
+export async function expandSources(sources: Source[], hooks: ExpandHooks = {}): Promise<Source[]> {
 	const out: Source[] = [];
 	for (const src of sources) {
 		const a = adapterFor(src);
-		out.push(...(a.expand ? await a.expand(src) : [src]));
+		if (!a.expand) { out.push(src); continue; }
+		try { out.push(...await a.expand(src)); hooks.onSuccess?.(src); }
+		catch (e) { const err = e instanceof Error ? e : new Error(String(e)); if (!hooks.onError) throw err; hooks.onError(src, err); }
 	}
 	const explicit = new Map(sources.filter(s => !adapterFor(s).expand).map(s => [`${s.kind}:${s.id}`, s]));
 	const seen = new Set<string>();

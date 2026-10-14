@@ -338,9 +338,11 @@ export function staleOnit(items: Item[], now: number, hours = 6): Item[] {
 	return items.filter(i => i.status === "onit" && now - Date.parse(i.at_status ?? i.at) > hours * 3_600_000);
 }
 
+const PERMISSION = "Mac permission required";
 export interface Problem { source: string; since: string; times: number; error: string }
 /** Plain words for a fetch error: a login that expired reads differently from a flaky network. */
 export function problemText(error: string): string {
+	if (/Full Disk Access|App Data|SystemPolicyAppData|\bEPERM\b|\bEACCES\b|operation not permitted/i.test(error)) return PERMISSION;
 	if (/token_invalid|authentication|auth.*expired|not logged in|login/i.test(error)) return "login expired";
 	if (/timed? ?out|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(error)) return "network";
 	if (/pi exited/i.test(error)) return "model call failed";
@@ -356,11 +358,14 @@ export function trackHealth(old: Record<string, Problem>, failed: { source: stri
 	for (const f of failed) next[f.source] = { source: f.source, since: old[f.source]?.since ?? now, times: (old[f.source]?.times ?? 0) + 1, error: problemText(f.error) };
 	return next;
 }
-/** What brook sees: problems that lasted 3+ checks, grouped by kind ("Feishu: login expired, 12 chats"). */
+/**
+ * What brook sees: problems that lasted 3+ checks, grouped by kind ("Feishu: login expired, 12 chats").
+ * A missing Mac permission will not fix itself, so it shows on the first failure.
+ */
 export function healthSummary(state: Record<string, Problem>, after = 3): { text: string; since: string }[] {
 	const groups = new Map<string, Problem[]>();
-	for (const p of Object.values(state)) if (p.times >= after) { const kind = p.source.startsWith("WeChat") ? "WeChat" : p.source === "Gmail" ? "Gmail" : /model|pile|tidy/.test(p.source) ? "For you" : "Feishu"; const k = `${kind}: ${p.error}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
-	return [...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^WeChat: /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }));
+	for (const p of Object.values(state)) if (p.times >= (p.error === PERMISSION ? 1 : after)) { const kind = p.source.startsWith("WeChat") ? "WeChat" : p.source.startsWith("DingTalk") ? "DingTalk" : p.source === "Gmail" ? "Gmail" : /model|pile|tidy/.test(p.source) ? "For you" : "Feishu"; const k = `${kind}: ${p.error}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
+	return [...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^(WeChat|DingTalk): /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }));
 }
 
 /** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */

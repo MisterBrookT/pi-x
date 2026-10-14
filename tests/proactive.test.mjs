@@ -160,3 +160,31 @@ test("direct chats judge his own promises; the pile check never closes a loop du
 	const v = parsePile(JSON.stringify({ close: [{ id: "due", why: "stale" }, { id: "old", why: "stale" }] }), new Set(["due", "old"]), new Set(), new Set(["due"]));
 	assert.deepEqual(v.close.map(c => c.id), ["old"]);
 });
+
+test("regression: one failing expansion (DingTalk) keeps the other expansions and explicit projects", async () => {
+  const { expandSources } = await import("../src/proactive-sources.ts");
+  const orig = { f: adapters["feishu-all"].expand, d: adapters["dingtalk-all"].expand };
+  adapters["feishu-all"].expand = async () => [{ kind: "feishu", id: "oc_1", name: "A" }, { kind: "feishu", id: "oc_2", name: "B" }];
+  adapters["dingtalk-all"].expand = async () => { throw new Error("DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk"); };
+  try {
+    const errors = [], ok = [];
+    const out = await expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }, { kind: "feishu", id: "oc_2", name: "B", project: "~/p" }, { kind: "feishu-all", id: "all", name: "Feishu" }], { onError: (s, e) => errors.push([s.name, e.message]), onSuccess: s => ok.push(s.name) });
+    assert.deepEqual(out.map(s => [s.id, s.project]), [["oc_2", "~/p"], ["oc_1", undefined]]);
+    assert.deepEqual(errors.map(e => e[0]), ["DingTalk"]);
+    assert.deepEqual(ok, ["Feishu"]);
+    await assert.rejects(expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }]), /timed out/, "without hooks errors still throw");
+  } finally { adapters["feishu-all"].expand = orig.f; adapters["dingtalk-all"].expand = orig.d; }
+});
+
+test("health: DingTalk permission shows at once with its own label and clears on success; network still waits 3 ticks", async () => {
+  const { trackHealth, healthSummary, problemText } = await import("../src/proactive.ts");
+  const err = "DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk";
+  assert.equal(problemText(err), "Mac permission required");
+  assert.notEqual(problemText("Gmail API permission denied"), "Mac permission required", "remote service permissions are not Mac privacy settings");
+  assert.equal(problemText("fetch timed out"), "network");
+  let s = trackHealth({}, [{ source: "DingTalk", error: err }, { source: "WeChat: X", error: "ETIMEDOUT" }], ["Feishu"], "t1");
+  assert.deepEqual(healthSummary(s), [{ text: "DingTalk: Mac permission required (DingTalk)", since: "t1" }]);
+  s = trackHealth(s, [], ["DingTalk", "WeChat: X"], "t2");
+  assert.deepEqual(healthSummary(s), []);
+  assert.deepEqual(s, {});
+});

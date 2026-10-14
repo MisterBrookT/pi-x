@@ -115,7 +115,12 @@ async function tick(cfg: Config) {
 	const work = await workSessions();
 	const failed: { source: string; error: string }[] = [], fine: string[] = [];
 	let sources = cfg.sources;
-	try { sources = await expandSources(cfg.sources); } catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
+	try {
+		sources = await expandSources(cfg.sources, {
+			onSuccess: src => fine.push(src.name),
+			onError: (src, e) => { failed.push({ source: src.name, error: e.message }); log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },
+		});
+	} catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
 		try {
 			const adapter = adapterFor(src);

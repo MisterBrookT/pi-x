@@ -86,6 +86,14 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   // A source that keeps failing shows as one calm line at the top of For you.
   writeFileSync(join(dir, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (3 chats)", since: "x" }] }));
   await page.getByText("Can't read Feishu: login expired (3 chats)").waitFor({ timeout: 12000 });
+  // DingTalk without Mac permission shows its own line; it disappears once DingTalk reads again.
+  const { trackHealth, healthSummary } = await import("../src/proactive.ts");
+  const ding = trackHealth({}, [{ source: "DingTalk", error: "DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk" }], [], "x");
+  writeFileSync(join(dir, "health.json"), JSON.stringify({ state: ding, problems: healthSummary(ding) }));
+  await page.getByText("Can't read DingTalk: Mac permission required (DingTalk)").waitFor({ timeout: 12000 });
+  const healed = trackHealth(ding, [], ["DingTalk"], "y");
+  writeFileSync(join(dir, "health.json"), JSON.stringify({ state: healed, problems: healthSummary(healed) }));
+  await page.getByText("Can't read DingTalk", { exact: false }).waitFor({ state: "detached", timeout: 12000 });
   // Regression: the dot means "new since you looked". Opening For you calms it; it stays calm after
   // closing (and after a reload) until something new arrives.
   await page.locator("#closeForYou").click();

@@ -87,7 +87,7 @@ export function dingReadTables(db: DatabaseSync, uid: string, limit = 100): Ding
 }
 function fingerprint(path: string): string { try { const s = statSync(path, { bigint: true }); return `${s.ino}:${s.size}:${s.mtimeNs}`; } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return "missing"; throw e; } }
 /** Account must be explicit if multiple profiles exist. Never silently mix accounts. */
-export function readDingTalk(root = dingRoot, account?: string): DingChat[] {
+export function readDingTalk(root = dingRoot, account?: string, tmpParent?: string): DingChat[] {
 	const profiles = readdirSync(root).filter(n => n.endsWith("_v3"));
 	if (!account && profiles.length !== 1) throw new Error("Choose one DingTalk local account");
 	const selected = account ?? profiles[0];
@@ -110,7 +110,7 @@ export function readDingTalk(root = dingRoot, account?: string): DingChat[] {
 				const snapshot = dingSnapshot(data, wal, key);
 				// Standalone copy: no WAL recovery or writes needed in SQLite.
 				snapshot[18] = snapshot[19] = 1;
-				const dir = mkdtempSync(join(tmpdir(), "pix-dingtalk-"));
+				const dir = mkdtempSync(join(tmpParent ?? tmpdir(), "pix-dingtalk-"));
 				try {
 					const file = join(dir, "snapshot.db"); writeFileSync(file, snapshot, { mode: 0o600 });
 					const db = new DatabaseSync(file, { readOnly: true });
