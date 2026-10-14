@@ -103,11 +103,12 @@ export function newSince(msgs: Msg[], lastId?: string, lastTime?: string): Msg[]
  * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
  * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.
  */
-export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number, lastTime?: string): { fresh: Msg[]; context: Msg[]; judge: boolean } {
+export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number, lastTime?: string, direct = false): { fresh: Msg[]; context: Msg[]; judge: boolean } {
 	const fresh = newSince(msgs, lastId, lastTime);
 	const context = msgs.slice(0, msgs.length - fresh.length).slice(-15);
 	const fromOthers = fresh.some(m => m.sender.trim() !== me);
-	return { fresh, context, judge: fromOthers || (fresh.length > 0 && openHere > 0) };
+	// In a direct chat his own words are often a promise ("我今天光速搞一下"): always judge them.
+	return { fresh, context, judge: fromOthers || (fresh.length > 0 && (openHere > 0 || direct)) };
 }
 
 const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}${p.project ? ` project=${p.project}` : ""}${p.note ? `\n  progress: ${p.note.split("\n").at(-1)}` : ""}`;
@@ -293,7 +294,7 @@ Look at every loop below and decide which ones should leave the list:
 - "close": finished, answered, cancelled, or stale (older than ~2 weeks, past due with no sign anyone still waits, or no longer relevant)
 - "merge": two loops about the same thing; keep the better one, close the other
 - a loop whose latest progress line says the work is finished, submitted, or confirmed: close it
-Leave a loop when unsure. Do not close a loop that is still in progress or has a future due date.
+Leave a loop when unsure. Do not close a loop that is still in progress or due today or later.
 Also, for loops that need ${o.me} now: if one open Pi session below works in that loop's project (same folder or
 clearly the same work), put it in "route": his card in For you will offer "Send to <that session>".
 When several sessions share a folder, pick the one he is actively using (it has "doing", or the most recent "last").
@@ -316,11 +317,11 @@ ${o.open.map(i => `${loopLine(i)} created ${i.at.slice(0, 10)}${i.why ? `\n  why
 Reply with JSON only: {"close": [{"id": "...", "why": "<=80 chars"}], "merge": [{"keep": "id", "drop": "id", "why": "<=80 chars"}], "route": [{"id": "loop id", "to": "session id", "why": "<=80 chars"}], "choices": [{"id": "loop id", "choices": [{"label": "...", "run": "...", "prompt": "optional"}]}]}`;
 }
 
-export function parsePile(raw: string, open: Set<string>, sessions: Set<string> = new Set()): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[]; route: { id: string; to: string; why: string }[]; choices: { id: string; choices: Choice[] }[] } {
+export function parsePile(raw: string, open: Set<string>, sessions: Set<string> = new Set(), keep: Set<string> = new Set()): { close: { id: string; why: string }[]; merge: { keep: string; drop: string; why: string }[]; route: { id: string; to: string; why: string }[]; choices: { id: string; choices: Choice[] }[] } {
 	try {
 		const v = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
 		const why = (x: unknown) => String(x ?? "").slice(0, 120);
-		const close = (Array.isArray(v.close) ? v.close : []).filter((c: any) => open.has(c?.id)).map((c: any) => ({ id: c.id, why: why(c.why) }));
+		const close = (Array.isArray(v.close) ? v.close : []).filter((c: any) => open.has(c?.id) && !keep.has(c.id)).map((c: any) => ({ id: c.id, why: why(c.why) }));
 		const merge = (Array.isArray(v.merge) ? v.merge : []).filter((m: any) => open.has(m?.keep) && open.has(m?.drop) && m.keep !== m.drop).map((m: any) => ({ keep: m.keep, drop: m.drop, why: why(m.why) }));
 		const gone = new Set([...close.map((c: any) => c.id), ...merge.map((m: any) => m.drop)]);
 		const route = (Array.isArray(v.route) ? v.route : []).filter((r: any) => open.has(r?.id) && !gone.has(r.id) && sessions.has(r?.to)).map((r: any) => ({ id: r.id, to: r.to, why: why(r.why) }));

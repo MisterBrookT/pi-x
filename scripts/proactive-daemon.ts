@@ -76,7 +76,9 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 			try {
 				const prompt = pilePrompt({ me: cfg.me, memory: existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : "", open, now: new Date().toString(), work });
 				const raw = await ask(prompt, cfg.model);
-				const v = parsePile(raw, new Set(open.map(i => i.id)), new Set(work.map(w => w.id)));
+				// A loop due today or later is never closed as stale (it closed "DataBento 测试" on its due day).
+				const today = new Date().toLocaleDateString("sv");
+				const v = parsePile(raw, new Set(open.map(i => i.id)), new Set(work.map(w => w.id)), new Set(open.filter(i => i.due && i.due >= today).map(i => i.id)));
 				const stamp = new Date().toISOString();
 				if (!dry) {
 					for (const c of v.close) appendFileSync(P.inbox, JSON.stringify({ id: c.id, status: "resolved", at_status: stamp, closedWhy: c.why }) + "\n");
@@ -127,7 +129,7 @@ async function tick(cfg: Config) {
 				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
-			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`]);
+			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); mark(); continue; }
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.

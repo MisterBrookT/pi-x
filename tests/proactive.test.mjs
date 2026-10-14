@@ -149,3 +149,14 @@ test("newSince: when the cursor message is gone (old thread reply), only message
 	assert.deepEqual(newSince(msgs, "gone", "2026-10-14 11:00").map(m => m.id), ["b"]);
 	assert.deepEqual(newSince(msgs, "a", "x").map(m => m.id), ["b"]);
 });
+
+test("direct chats judge his own promises; the pile check never closes a loop due today or later", async () => {
+	const { planBatch, parsePile } = await import("../src/proactive.ts");
+	const { parseFeishuChats } = await import("../src/proactive-sources.ts");
+	const msgs = [{ id: "a", time: "1", sender: "x", text: "" }, { id: "b", time: "2", sender: "brook", text: "我今天光速搞一下" }];
+	assert.equal(planBatch(msgs, "a", "brook", 0).judge, false);
+	assert.equal(planBatch(msgs, "a", "brook", 0, undefined, true).judge, true);
+	assert.deepEqual(parseFeishuChats({ data: { chats: [{ chat_id: "p", name: "王", chat_mode: "p2p" }, { chat_id: "g", name: "G", chat_mode: "group" }] } }).map(s => s.chat), ["private", undefined]);
+	const v = parsePile(JSON.stringify({ close: [{ id: "due", why: "stale" }, { id: "old", why: "stale" }] }), new Set(["due", "old"]), new Set(), new Set(["due"]));
+	assert.deepEqual(v.close.map(c => c.id), ["old"]);
+});

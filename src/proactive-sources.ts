@@ -22,7 +22,7 @@ export interface Adapter {
 /** Feishu chat list -> one feishu source per chat. */
 export function parseFeishuChats(json: unknown): Source[] {
 	const list = (json as { data?: { chats?: any[] } })?.data?.chats ?? [];
-	return list.filter(c => c?.chat_id).map(c => ({ kind: "feishu", id: String(c.chat_id), name: String(c.name ?? c.chat_id).trim() }));
+	return list.filter(c => c?.chat_id).map(c => ({ kind: "feishu", id: String(c.chat_id), name: String(c.name ?? c.chat_id).trim(), ...(c.chat_mode === "p2p" ? { chat: "private" } : {}) }));
 }
 
 /** Feishu chat messages -> Msg[], oldest first. */
