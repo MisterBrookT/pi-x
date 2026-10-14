@@ -44,7 +44,8 @@ try {
   page.on('requestfailed', request => { if (!(request.url().startsWith('blob:') && request.failure()?.errorText === 'net::ERR_ABORTED')) errors.push(`${request.url()}: ${request.failure()?.errorText}`); });
   await page.goto(viaRelay ? origin + '/#key=' + secret : base);
   if (!viaRelay) { await page.getByPlaceholder('Access token').fill(token); await page.getByRole('button', { name: 'Connect' }).click(); }
-  else { await page.locator('#messages').getByText('Synthetic document fixture').waitFor({ timeout: 30000 }); }
+  // Both transports load the selected session asynchronously; Files needs its cwd first.
+  await page.locator('#messages').getByText('Synthetic document fixture').waitFor({ timeout: 30000 });
   await page.getByRole('button', { name: 'Files', exact: true }).click();
   await page.locator('#fileList .file-row').first().waitFor({ timeout: 15000 });
   for (const [name, label, count, ext] of fixtures) {
