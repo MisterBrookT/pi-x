@@ -121,14 +121,15 @@ async function tick(cfg: Config) {
 			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
+			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; } };
 			if (!state[key]) { // first run: set cursor, don't flood
-				if (last) state[key] = last;
+				mark();
 				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
-			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length);
+			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`]);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
-			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); if (last) state[key] = last; continue; }
+			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); mark(); continue; }
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.
 			const pending = items.filter(isOpen).slice(-20);
 			const feedback = items.filter(i => !isOpen(i)).slice(-10);
@@ -150,7 +151,7 @@ async function tick(cfg: Config) {
 					log(`memory: +${r.added.length} -${r.removed.length}`);
 				}
 			}
-			if (last) state[key] = last;
+			mark();
 			judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, pending: pending.map(p => p.id), work: work.map(w => w.id), memoryChars: memory.length, prompt, raw, verdict: v, cardChanges: changes, dry });
 			if (!v) { log(`${src.name}: ${fresh.length} new -> bad verdict: ${raw.slice(0, 120)}`); continue; }
 			const open = new Set(pending.map(p => p.id));

@@ -34,12 +34,44 @@ export function parseFeishu(json: unknown): Msg[] {
 		.reverse();
 }
 
+/**
+ * Thread replies, grouped by chat. Feishu's chat history only lists top-level messages, so replies inside
+ * a thread ("话题") were never seen. One search per few minutes covers every chat; each chat takes its own.
+ */
+let threadCache: { at: number; byChat: Map<string, Msg[]> } | undefined;
+export function parseFeishuThreads(json: unknown): Map<string, Msg[]> {
+	const d = (json as { data?: Record<string, unknown> })?.data ?? {};
+	const list = (Object.values(d).find(Array.isArray) ?? []) as any[];
+	const by = new Map<string, Msg[]>();
+	for (const m of list) {
+		if (!m?.thread_id || m.deleted || !m.message_id || !m.chat_id) continue;
+		const msg = { id: String(m.message_id), time: String(m.create_time ?? ""), sender: String(m.sender?.name ?? m.sender?.id ?? "?").trim(), text: "(in a thread) " + String(m.content ?? "").replace(/!\[Image\]\([^)]*\)/g, "[image]").slice(0, 1500) };
+		by.set(m.chat_id, [...(by.get(m.chat_id) ?? []), msg]);
+	}
+	return by;
+}
+async function feishuThreads(now = Date.now()): Promise<Map<string, Msg[]>> {
+	if (threadCache && now - threadCache.at < 4 * 60_000) return threadCache.byChat;
+	const start = new Date(now - 2 * 86_400_000 + 8 * 3_600_000).toISOString().slice(0, 19) + "+08:00";
+	try {
+		const { stdout } = await run("lark-cli", ["im", "+messages-search", "--as", "user", "--start", start, "--page-size", "50", "--page-all", "--page-limit", "8", "--no-reactions"], { maxBuffer: 1 << 24, timeout: 90_000 });
+		threadCache = { at: now, byChat: parseFeishuThreads(JSON.parse(stdout)) };
+	} catch { threadCache = { at: now, byChat: threadCache?.byChat ?? new Map() }; }
+	return threadCache.byChat;
+}
+/** Chat history plus its thread replies, oldest first by time (stable: same-minute order kept). */
+export function withThreads(msgs: Msg[], threads: Msg[] = []): Msg[] {
+	const have = new Set(msgs.map(m => m.id));
+	const all = [...msgs, ...threads.filter(t => !have.has(t.id))];
+	return all.map((m, i) => ({ m, i })).sort((a, b) => a.m.time.localeCompare(b.m.time) || a.i - b.i).map(x => x.m);
+}
+
 const feishu: Adapter = {
 	async fetch(src) {
 		// lark-cli sometimes fails with "token_invalid" while it refreshes the token: retry once.
 		const args = ["im", "+chat-messages-list", "--as", "user", "--chat-id", src.id, "--order", "desc", "--page-size", "30", "--no-reactions"];
 		const { stdout } = await run("lark-cli", args, { maxBuffer: 1 << 24, timeout: 60_000 }).catch(async () => { await new Promise(r => setTimeout(r, 3000)); return run("lark-cli", args, { maxBuffer: 1 << 24, timeout: 60_000 }); });
-		return parseFeishu(JSON.parse(stdout));
+		return withThreads(parseFeishu(JSON.parse(stdout)), (await feishuThreads()).get(src.id));
 	},
 	howToRead: (src, refs) => `Feishu chat ${src.id}. Read with: lark-cli im +messages-mget --as user --message-ids ${refs.join(",") || "<ids>"} (or +chat-messages-list --chat-id ${src.id}).`,
 };

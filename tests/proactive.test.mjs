@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
-import { adapterFor, adapters, parseFeishu } from "../src/proactive-sources.ts";
+import { adapterFor, adapters, parseFeishu, parseFeishuThreads, withThreads } from "../src/proactive-sources.ts";
 
 const raw = { data: { messages: [
 	{ message_id: "m3", create_time: "18:42", sender: { name: "Knight  " }, content: "doc ready ![Image](img_x)" },
@@ -128,4 +128,24 @@ test("regression: the user's own reply re-judges a chat with pending alerts so i
 	const prompt = judgePrompt({ me: "brook", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: p.context, fresh: p.fresh, pending: [], now: "" });
 	assert.match(prompt, /brook \(me\): 收到/);
 	assert.doesNotMatch(prompt, /Knight \(me\)/);
+});
+
+test("Feishu thread replies (missing from chat history) are merged into their chat by time", () => {
+	const by = parseFeishuThreads({ data: { messages: [
+		{ chat_id: "c1", thread_id: "t", message_id: "r1", create_time: "2026-10-14 11:53", sender: { name: "陈凯" }, content: "@王梓萱 先下掉？" },
+		{ chat_id: "c1", message_id: "top", create_time: "2026-10-14 11:00", sender: { name: "x" }, content: "top-level: already in history" },
+		{ chat_id: "c2", thread_id: "t2", message_id: "r2", create_time: "2026-10-14 09:00", sender: { name: "y" }, content: "hi", deleted: true },
+	] } });
+	assert.deepEqual([...by.keys()], ["c1"], "only live thread replies");
+	const chat = [{ id: "a", time: "2026-10-14 11:50", sender: "x", text: "1" }, { id: "b", time: "2026-10-14 12:00", sender: "x", text: "2" }];
+	const all = withThreads(chat, [...by.get("c1"), { id: "a", time: "2026-10-14 11:50", sender: "x", text: "dup" }]);
+	assert.deepEqual(all.map(m => m.id), ["a", "r1", "b"]);
+	assert.match(all[1].text, /^\(in a thread\) @王梓萱/);
+});
+
+test("newSince: when the cursor message is gone (old thread reply), only messages after its time count", async () => {
+	const { newSince } = await import("../src/proactive.ts");
+	const msgs = [{ id: "a", time: "2026-10-14 10:00" }, { id: "b", time: "2026-10-14 12:00" }];
+	assert.deepEqual(newSince(msgs, "gone", "2026-10-14 11:00").map(m => m.id), ["b"]);
+	assert.deepEqual(newSince(msgs, "a", "x").map(m => m.id), ["b"]);
 });

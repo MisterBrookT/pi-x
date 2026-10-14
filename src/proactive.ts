@@ -90,10 +90,12 @@ export function wakeTime(due: string | undefined, now: number, fallbackDays: num
 export const sourceKey = (s: Source) => `${s.kind}:${s.id}`;
 
 /** Messages after the last seen id. If the cursor is gone, treat everything as new. */
-export function newSince(msgs: Msg[], lastId?: string): Msg[] {
+export function newSince(msgs: Msg[], lastId?: string, lastTime?: string): Msg[] {
 	if (!lastId) return msgs;
 	const i = msgs.findIndex(m => m.id === lastId);
-	return i < 0 ? msgs : msgs.slice(i + 1);
+	// The cursor message can drop out of view (an old thread reply); then only take messages after its time.
+	if (i < 0) return lastTime ? msgs.filter(m => m.time > lastTime) : msgs;
+	return msgs.slice(i + 1);
 }
 
 /**
@@ -101,8 +103,8 @@ export function newSince(msgs: Msg[], lastId?: string): Msg[] {
  * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
  * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.
  */
-export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number): { fresh: Msg[]; context: Msg[]; judge: boolean } {
-	const fresh = newSince(msgs, lastId);
+export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number, lastTime?: string): { fresh: Msg[]; context: Msg[]; judge: boolean } {
+	const fresh = newSince(msgs, lastId, lastTime);
 	const context = msgs.slice(0, msgs.length - fresh.length).slice(-15);
 	const fromOthers = fresh.some(m => m.sender.trim() !== me);
 	return { fresh, context, judge: fromOthers || (fresh.length > 0 && openHere > 0) };
