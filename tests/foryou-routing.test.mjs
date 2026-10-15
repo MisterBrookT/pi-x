@@ -248,7 +248,7 @@ test("Mac: one flat list. Open sessions are options in it (no second picker); th
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
 	await cardCmd(pi, macCtx("pix-foryou", ["Do it in backtest ›"], shown));
 	assert.equal(shown.length, 1, "a single picker");
-	assert.match(shown[0].title, /Task: Switch loader/);
+	assert.match(shown[0].title, /Plan: Switch loader/);
 	assert.deepEqual(shown[0].options, ["Do it here", "Discuss", "Later", "Do it in backtest ›", CARD_ELSE, CARD_NO], "only the session that fits the loop, not every open one");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
@@ -367,4 +367,13 @@ test("transparent decision: every card button says what it would do, in plain wo
 	const c = currentCard(d, live);
 	assert.deepEqual(c.choices.map(x => x.task), ["Patch the loader and rerun", "For you talks it through with you first; changes nothing", "Hide it; back in 2 days", "Close the loop; nothing is done"]);
 	assert.equal(c.task, "Switch loader");
+});
+
+test("Mac: with several cards waiting, Next card → steps to the next one in the same picker", async () => {
+	const d = tmp(loop("a"), { ...loop("b"), at: "2026-10-09T09:00:00Z" });
+	const pi = fakePi(), shown = [];
+	register(pi, { dir: d, sessions: async () => [], answer: async () => "ok", cardPollMs: 60_000 });
+	await cardCmd(pi, macCtx("pix-foryou", ["Next card →", undefined], shown));
+	assert.match(shown[0].title, /^Loop a\nKnight · 1 of 2/);
+	assert.match(shown[1].title, /^Loop b\nKnight · 2 of 2/);
 });

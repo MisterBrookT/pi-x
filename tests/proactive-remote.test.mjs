@@ -231,7 +231,13 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   assert.equal(await page.locator('.row[data-id="s1"] [aria-label="For you card waiting"]').count(), 0);
   await page.keyboard.press("Escape");
   await page.locator("#forYouOpen").click();
-  const card = page.locator('[data-job="j1"]');
+  const quiet = page.locator('.job-min[data-job="j1"]');
+  await quiet.waitFor();
+  assert.equal(await page.locator(".job-card").count(), 0, "quiet by default: one line, no full card");
+  assert.match(await quiet.textContent(), /Use the fmp doc/);
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-min.png") });
+  await quiet.click();
+  const card = page.locator('.job-card[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Switch the backtest loader/);
   assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.DiscussFor you talks it through with you first; changes nothing", "Later", "Not important"], "one level: no Send-to-a-session step");
@@ -272,7 +278,8 @@ test("phone card: a session that fits the loop is one direct button that hands i
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const card = page.locator('[data-job="r1"]');
+  await page.locator('.job-min[data-job="r1"]').click();
+  const card = page.locator('.job-card[data-job="r1"]');
   await card.waitFor();
   assert.equal(await card.locator('.job-to[data-to="s2"]').textContent(), "Do it in minara ›");
   const next = fetch(`${base}/agent/s2/next`, { headers: auth }).then(r => r.json());
@@ -292,7 +299,8 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const card = page.locator('[data-job="k1"]');
+  await page.locator('.job-min[data-job="k1"]').click();
+  const card = page.locator('.job-card[data-job="k1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /1 more/);
   await card.locator("textarea").fill("Only draft a reply");
@@ -301,7 +309,8 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
   // The next card shows once For you is idle again.
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
-  const card2 = page.locator('[data-job="k2"]');
+  await page.locator('.job-min[data-job="k2"]').click();
+  const card2 = page.locator('.job-card[data-job="k2"]');
   await card2.waitFor({ timeout: 8000 });
   await card2.getByRole("button", { name: /Later/ }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });

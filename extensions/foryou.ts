@@ -56,7 +56,7 @@ export function ottyBadge(waiting: boolean, run: (cmd: string, args: string[]) =
 	if (!pane) return;
 	run("otty", ["pane", "badge", pane.startsWith("p_") ? pane : `p_${pane}`, ...(waiting ? ["--kind", "awaiting-input"] : ["--clear"])]);
 }
-export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_ELSE = "Something else…";
+export const CARD_NEXT = "Next card →", CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
@@ -69,15 +69,12 @@ export const cardLines = (it: { title: string; why?: string; source: string; lef
 export const sendLabel = (x: { id: string; name: string; cwd?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
-export const cardTitle = (it: { title: string; why?: string; source: string; left: number; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
-	`For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}`,
+export const cardTitle = (it: { title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
 	it.title,
-	...(it.why ? [it.why] : []),
+	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}` : ""}`,
 	"",
-	...(it.task ? [`Task: ${it.task}`] : []),
-	"",
-	...it.choices.filter(c => c.task && c.task !== it.task).map(c => `${choiceLabel(c)}: ${c.task}`),
-	"Nothing is sent to anyone without your OK.",
+	...(it.why ? [it.why, ""] : []),
+	...(it.task ?? it.action ? [`Plan: ${it.task ?? it.action}`] : []),
 ].join("\n");
 
 /** A short reply in the For you editor that answers the waiting card: a button number or later/no/done. */
@@ -144,8 +141,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (showing && showing !== it?.id) close?.abort();
 		widget(ctx, it);
 	};
-	const answer = async (ctx: any) => {
-		const it = currentCard(deps.dir, await sessions().catch(() => []));
+	const answer = async (ctx: any, skip = 0): Promise<void> => {
+		const it = currentCard(deps.dir, await sessions().catch(() => []), Date.now(), skip);
 		if (!it) { ctx.ui.notify("No card waiting.", "info"); return; }
 		if (showing) return;
 		showing = it.id; close = new AbortController();
@@ -156,8 +153,9 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			const taken = new Set(it.choices.map(c => c.run));
 			const targets = it.sessions.filter(x => x.fits && !taken.has(x.id)).slice(0, 2);
 			const sendLabels = targets.map(sendLabel);
-			const pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO], { signal: close.signal });
+			const pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO, ...(it.left ? [CARD_NEXT] : [])], { signal: close.signal });
 			if (!pick) return;
+			if (pick === CARD_NEXT) { showing = undefined; return void (await answer(ctx, skip + 1)); }
 			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			const to = targets[sendLabels.indexOf(pick)]?.id;
