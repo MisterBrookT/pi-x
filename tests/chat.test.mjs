@@ -4,26 +4,43 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJiti } from "jiti";
-const chat = await createJiti(import.meta.url).import("../src/chat.ts");
+const jiti = createJiti(import.meta.url);
+const chat = await jiti.import("../src/chat.ts");
+const { format } = await jiti.import("../extensions/chat.ts");
+const wait = async (f) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((r) => setTimeout(r, 20)); };
+const peer = (name, extra = {}) => ({ name, cwd: "/x", pid: process.pid, at: 0, status: "idle", doing: "", claims: [], ...extra });
 
-test("two sessions find each other, send, reply; dead ones disappear", async () => {
+test("board, names, claims, kinds, hop limit, and mail that waits for a restart", async () => {
   const root = mkdtempSync(join(tmpdir(), "chat-"));
-  const got = { a: [], b: [] };
-  const a = { id: "aaaa1111", name: "bench", cwd: "/x", pid: process.pid, at: 0 };
-  const b = { id: "bbbb2222", name: "pix", cwd: "/y", pid: process.pid, at: 0 };
-  const ra = chat.join_(a, (n) => got.a.push(n), root), rb = chat.join_(b, (n) => got.b.push(n), root);
-  assert.deepEqual(chat.peers(root).map((p) => p.name), ["bench", "pix"]);
-  assert.equal(chat.find("be", root, b.id).id, a.id, "unique prefix");
-  assert.match(chat.find("zzz", root), /no live session/);
-  const q = chat.send(b, chat.find("bench", root, b.id), "status?", undefined, root);
-  for (let i = 0; i < 50 && !got.a.length; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(got.a[0].text, "status?"); assert.equal(got.a[0].fromName, "pix");
-  chat.send(a, chat.find(got.a[0].from, root, a.id), "running", q.id, root);
-  for (let i = 0; i < 50 && !got.b.length; i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(got.b[0].replyTo, q.id);
-  ra.close();
-  assert.deepEqual(chat.peers(root).map((p) => p.name), ["pix"]);
-  chat.join_({ ...a, pid: 999999 }, () => {}, root);  // a crashed session
-  assert.deepEqual(chat.peers(root).map((p) => p.name), ["pix"], "dead pid swept");
-  rb.close();
+  const got = { bench: [], book: [] };
+  const rb = chat.join_(peer("bench", { doing: "rescore", claims: ["/r/kbench.py", "a800c"] }), (n) => got.bench.push(n), root);
+  const rk = chat.join_(peer("book"), (n) => got.book.push(n), root);
+  assert.deepEqual(chat.board(root).map((p) => p.name), ["bench", "book"]);
+  assert.equal(chat.claimName("bench", 999999, root), "bench-2", "live name is not reused");
+  assert.equal(chat.owner("/r/kbench.py", "book", root)?.name, "bench");
+  assert.equal(chat.owner("A800C", "book", root)?.name, "bench", "claims match case-insensitively");
+  assert.equal(chat.owner("/r/kbench.py", "bench", root), undefined, "own claims do not block");
+  assert.equal(chat.find("be", root, "book"), "bench");
+
+  const ask = chat.send("book", "bench", "ask", "OK to merge?", {}, root);
+  await wait(() => got.bench.length);
+  assert.equal(got.bench[0].kind, "ask"); assert.equal(chat.wakes(got.bench[0]), true);
+  chat.send("bench", "book", "reply", "yes", { thread: ask.thread, hop: 1 }, root);
+  await wait(() => got.book.length);
+  assert.equal(got.book[0].thread, ask.thread);
+  assert.equal(chat.wakes({ kind: "note", hop: 0 }), false, "notes never wake");
+  assert.equal(chat.wakes({ kind: "reply", hop: chat.MAX_HOPS }), false, "hop limit stops waking");
+  assert.match(format({ kind: "reply", from: "x", thread: "t", hop: chat.MAX_HOPS, text: "hi" }), /reply limit/);
+
+  rb.close();  // bench restarts: off the board, claims gone, mail waits
+  assert.deepEqual(chat.board(root).map((p) => p.name), ["book"]);
+  assert.equal(chat.owner("/r/kbench.py", "book", root), undefined);
+  assert.equal(chat.find("bench", root, "book"), "bench", "a gone session is still addressable");
+  chat.send("book", "bench", "note", "while you were away", {}, root);
+  assert.equal(chat.claimName("bench", 4242, root), "bench", "a restart gets its name back");
+  const again = [];
+  const rb2 = chat.join_(peer("bench"), (n) => again.push(n), root);
+  await wait(() => again.length);
+  assert.equal(again[0].text, "while you were away");
+  rb2.close(); rk.close();
 });
