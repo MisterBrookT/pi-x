@@ -218,6 +218,9 @@ export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prom
 }
 
 /** The card For you shows now: the oldest loop that needs brook (undefined when none). */
+/** Is this loop still waiting for brook (anywhere in the queue, not only first)? */
+export function stillWaiting(id: string, dir?: string, now = Date.now()) { return readAll(dir).some(i => i.id === id && needsYou(i, now)); }
+
 export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.now(), skip = 0): Card | undefined {
 	const waiting = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 	const at = waiting.length ? skip % waiting.length : 0;

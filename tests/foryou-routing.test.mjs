@@ -390,3 +390,29 @@ test("Mac: with several cards waiting, ← / → flip between them in the picker
 	assert.match(shown[0].title, /1 of 2 {3}← → more cards/);
 	assert.equal(keys, undefined, "key listener removed when the picker closes");
 });
+
+test("Mac regression: the 4s card refresh does not close a picker showing card 2; it closes only when that card is answered elsewhere; every step is logged", async () => {
+	const d = tmp(loop("a"), { ...loop("b"), at: "2026-10-09T09:00:00Z" });
+	const pi = fakePi(), shown = [];
+	register(pi, { dir: d, sessions: async () => [], answer: async () => "ok", cardPollMs: 60_000, badge: () => {} });
+	const ctx = macCtx("pix-foryou", [], shown);
+	let keys, aborted = [];
+	ctx.ui.onTerminalInput = h => { keys = h; return () => {}; };
+	let release;
+	ctx.ui.select = (title, options, o) => new Promise(res => {
+		shown.push(title.split("\n")[0]);
+		o.signal.addEventListener("abort", () => { aborted.push(title.split("\n")[0]); res(undefined); });
+		if (shown.length === 1) keys("\x1b[C"); else release = res;
+	});
+	const run = cardCmd(pi, ctx);
+	await new Promise(r => setTimeout(r, 20));
+	assert.deepEqual(shown, ["Loop a", "Loop b"]);
+	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20)); // the periodic refresh
+	assert.deepEqual(aborted, ["Loop a"], "card 2 stays open through a refresh");
+	writeFileSync(join(d, "inbox.jsonl"), JSON.stringify(loop("a")) + "\n"); // b answered on the phone
+	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20));
+	assert.deepEqual(aborted, ["Loop a", "Loop b"], "closes once its card is gone");
+	await run;
+	const log = readFileSync(join(d, "card-ui.log"), "utf8").trim().split("\n").map(l => JSON.parse(l).event);
+	for (const e of ["picker open", "key →", "picker closed: card answered or gone"]) assert.ok(log.includes(e), `${e} logged: ${log}`);
+});

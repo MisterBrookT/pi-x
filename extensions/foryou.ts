@@ -9,10 +9,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../src/remote-state.ts";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { actItem, finishedItem, answerCard, currentCard, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
@@ -53,6 +55,11 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 export const CARD_KEY = "super+shift+y";
 
 /** The hand icon on the For you tab in Otty's sidebar while a card waits (like the phone). */
+/** One line per card UI event in ~/.pix/proactive/card-ui.log, so a misbehaving card can be traced later. */
+export function cardLog(dir: string | undefined, event: string, data: Record<string, unknown> = {}) {
+	try { appendFileSync(join(dir ?? join(homedir(), ".pix", "proactive"), "card-ui.log"), JSON.stringify({ at: new Date().toISOString(), pid: process.pid, event, ...data }) + "\n"); } catch { /* logging never breaks the card */ }
+}
+
 export function ottyBadge(waiting: boolean, run: (cmd: string, args: string[]) => void = (c, a) => { try { execFile(c, a, () => {}); } catch { /* no otty */ } }, pane = process.env.OTTY_PANE_ID) {
 	if (!pane) return;
 	run("otty", ["pane", "badge", pane.startsWith("p_") ? pane : `p_${pane}`, ...(waiting ? ["--kind", "awaiting-input"] : ["--clear"])]);
@@ -134,18 +141,22 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (key === shown) return;
 		if (!!key !== badged) { badged = !!key; (deps.badge ?? ottyBadge)(badged); }
 		shown = key;
+		cardLog(deps.dir, "widget", { id: it?.id ?? null, left: it?.left });
 		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
 	};
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
 		const it = currentCard(deps.dir, await sessions().catch(() => []));
-		if (showing && showing !== it?.id) close?.abort();
+		// Close the open picker only when its card was answered elsewhere (phone) or went away,
+		// not because another card is first in line (the picker may show card 2 of 3).
+		if (showing && !stillWaiting(showing, deps.dir)) { cardLog(deps.dir, "picker closed: card answered or gone", { id: showing }); close?.abort(); }
 		widget(ctx, it);
 	};
 	const answer = async (ctx: any, skip = 0): Promise<void> => {
 		const it = currentCard(deps.dir, await sessions().catch(() => []), Date.now(), skip);
-		if (!it) { ctx.ui.notify("No card waiting.", "info"); return; }
-		if (showing) return;
+		if (!it) { cardLog(deps.dir, "shortcut: no card"); ctx.ui.notify("No card waiting.", "info"); return; }
+		if (showing) { cardLog(deps.dir, "shortcut ignored: picker already open", { showing }); return; }
+		cardLog(deps.dir, "picker open", { id: it.id, at: it.at, of: it.left + 1, skip });
 		showing = it.id; close = new AbortController();
 		try {
 			const title = cardTitle(it);
@@ -159,14 +170,15 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			const flip = (it.left && ctx.ui.onTerminalInput) ? ctx.ui.onTerminalInput((data: string) => {
 				const d = matchesKey(data, "right") ? 1 : matchesKey(data, "left") ? -1 : 0;
 				if (!d) return undefined;
-				step = d; close?.abort();
+				step = d; cardLog(deps.dir, d > 0 ? "key →" : "key ←", { id: it.id }); close?.abort();
 				return { consume: true };
 			}) : undefined;
 			let pick: string | undefined;
 			try { pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO], { signal: close.signal }); }
 			finally { flip?.(); }
 			if (step) { showing = undefined; return void (await answer(ctx, skip + step + it.left + 1)); }
-			if (!pick) return;
+			if (!pick) { cardLog(deps.dir, close?.signal.aborted ? "picker closed by code" : "picker closed: esc", { id: it.id }); return; }
+			cardLog(deps.dir, "pick", { id: it.id, pick });
 			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			const to = targets[sendLabels.indexOf(pick)]?.id;
@@ -174,6 +186,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			const kind: CardAnswer = index >= 0 ? "choice" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : to ? "send" : "else";
 			const choice = index >= 0 ? index : undefined;
 			const via = await (deps.answer ?? answerViaHub)(it.id, { answer: kind, choice, ...(to ? { to } : {}), text });
+			cardLog(deps.dir, "answer", { id: it.id, kind, choice, to, via, text });
 			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }
 			if (via !== "ok") {
 				// No hub: answer here directly.
@@ -182,7 +195,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				if (r.here) pi.sendUserMessage(r.here, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 				if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);
 			}
-		} finally { showing = undefined; close = undefined; await check(ctx).catch(() => {}); }
+		} catch (e) { cardLog(deps.dir, "error", { id: it.id, error: String((e as Error)?.stack ?? e) }); throw e; }
+		finally { showing = undefined; close = undefined; await check(ctx).catch(() => {}); }
 	};
 	pi.registerShortcut(CARD_KEY, { description: "Answer the waiting For you card", handler: async (ctx) => { if (isCoordinator(ctx)) await answer(ctx); } });
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
