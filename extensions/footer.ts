@@ -7,6 +7,7 @@ import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type Sett
 import { fastModeActiveFor } from "../src/fast-mode.js";
 import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../src/subagent-spinner.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "../src/footer.js";
+import { readRemoteLinks } from "../src/remote-hub.js";
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
 const labels: Record<keyof FooterOptions, string> = {
@@ -31,6 +32,8 @@ export default function (pi: ExtensionAPI) {
   let firstOutputAt: number | undefined;
   let latestSpeed: number | undefined;
   let installFooter: ((ctx: ExtensionContext) => void) | undefined;
+  // Same bookmarks as the phone sidebar (~/.pi/agent/pix-remote/links.json), as clickable terminal links (OSC 8).
+  let links: { label: string; url: string }[] = [];
 
   pi.on("message_start", (event) => {
     if (event.message.role === "assistant") firstOutputAt = undefined;
@@ -47,6 +50,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     options = await loadOptions();
+    links = await readRemoteLinks();
     installFooter?.(ctx);
   });
 
@@ -99,7 +103,11 @@ export default function (pi: ExtensionAPI) {
         const rest = room >= 2 ? metrics + " ".repeat(room) + right : truncateToWidth(`${metrics}  ${right}`, Math.max(0, width - visibleWidth(running)));
         const stats = (running ? theme.fg("accent", running) : "") + theme.fg("dim", rest);
         const branch = footerData.getGitBranch();
-        const status = [statuses.get("pix-remote"), statuses.get("pix-goal")].filter(Boolean).join(" · ") || undefined;
+        const core = [statuses.get("pix-remote"), statuses.get("pix-goal")].filter(Boolean).join(" · ");
+        const linkText = links.map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        // Links only when they fit beside a usable path; remote/goal status always wins the space.
+        const withLinks = [core, linkText].filter(Boolean).join(" · ");
+        const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
