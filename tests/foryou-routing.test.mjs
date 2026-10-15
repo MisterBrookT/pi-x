@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
 import { answerCard, cardChoices, currentCard, sendTargets, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_ELSE, CARD_NO, CARD_SEND, choiceLabel } from "../extensions/foryou.ts";
+import register, { CARD_ELSE, CARD_NO, choiceLabel } from "../extensions/foryou.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -205,7 +205,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	assert.equal(widgets[0][0], "foryou-card");
 	assert.deepEqual(widgets[0][1], ["● Loop a   ⌘⇧Y"], "one quiet line; details are behind the shortcut");
 	await cardCmd(pi, fy);
-	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_SEND]);
+	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
 });
 
@@ -242,12 +242,14 @@ test("every card can be dropped as not important, or sent to any open session (l
 	assert.deepEqual(log.map(l => [l.id, l.answer, l.to]), [["a", "send", "s9"], ["c", "no", undefined]]);
 });
 
-test("Mac: Send to a session… asks which one, then hands it there", async () => {
-	const d = tmp(loop("a"));
+test("Mac: one flat list. Open sessions are options in it (no second picker); the task shows once at the top", async () => {
+	const d = tmp(loop("a", { project: "/w/nd" }));
 	const pi = fakePi(), answers = [], shown = [];
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
-	await cardCmd(pi, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
-	assert.equal(shown[1].title, "Hand this task to a session:\n  \"Switch loader\"", "he sees what is handed over, not only where");
+	await cardCmd(pi, macCtx("pix-foryou", ["Do it in backtest ›"], shown));
+	assert.equal(shown.length, 1, "a single picker");
+	assert.match(shown[0].title, /Task: Switch loader/);
+	assert.deepEqual(shown[0].options, ["Do it here", "Discuss", "Later", "Do it in backtest ›", CARD_ELSE, CARD_NO], "only the session that fits the loop, not every open one");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
 

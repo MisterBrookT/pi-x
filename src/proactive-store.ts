@@ -190,16 +190,16 @@ export function choiceTask(it: Item, c: { run: string; prompt?: string }): strin
 }
 export interface Card { id: string; title: string; why: string; action: string; source: string; due?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
-	sessions: { id: string; name: string; cwd?: string }[];
+	sessions: { id: string; name: string; cwd?: string; fits?: boolean }[];
 	/** What "Send to a session…" hands over. */
 	task?: string }
 
 /** Open sessions to hand a loop to: the judge's pick, then ones in the loop's project, then the rest; "new" when it has a project. */
-export function sendTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string; cwd?: string }[] {
+export function sendTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string; cwd?: string; fits?: boolean }[] {
 	const dir = it.project ? expandHome(it.project, home) : "";
 	const near = (s: LiveSession) => it.suggest?.session === s.id ? 0 : dir && s.cwd && (s.cwd === dir || dir.startsWith(s.cwd + "/") || s.cwd.startsWith(dir + "/")) ? 1 : 2;
-	const out = live.filter(s => s.id !== forYouSession.id).sort((a, b) => near(a) - near(b)).slice(0, 8).map(s => ({ id: s.id, name: s.name, cwd: s.cwd.replace(home, "~") }));
-	return it.project ? [...out, { id: "new", name: "New session", cwd: it.project }] : out;
+	const out = live.filter(s => s.id !== forYouSession.id).sort((a, b) => near(a) - near(b)).slice(0, 8).map(s => ({ id: s.id, name: s.name, cwd: s.cwd.replace(home, "~"), ...(near(s) < 2 ? { fits: true } : {}) }));
+	return it.project ? [...out, { id: "new", name: "New session", cwd: it.project, ...(out.some(s => s.fits) ? {} : { fits: true }) }] : out;
 }
 
 /**

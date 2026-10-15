@@ -56,7 +56,7 @@ export function ottyBadge(waiting: boolean, run: (cmd: string, args: string[]) =
 	if (!pane) return;
 	run("otty", ["pane", "badge", pane.startsWith("p_") ? pane : `p_${pane}`, ...(waiting ? ["--kind", "awaiting-input"] : ["--clear"])]);
 }
-export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_SEND = "Send to a session…", CARD_ELSE = "Something else…";
+export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
@@ -65,14 +65,18 @@ export const cardLines = (it: { title: string; why?: string; source: string; lef
 	`● ${it.title.length > 60 ? `${it.title.slice(0, 59)}…` : it.title}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
 ];
 
+/** A session to hand the task to, as one option in the card's list. */
+export const sendLabel = (x: { id: string; name: string; cwd?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name} ›`;
+
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
-export const cardTitle = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
+export const cardTitle = (it: { title: string; why?: string; source: string; left: number; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
 	`For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}`,
 	it.title,
 	...(it.why ? [it.why] : []),
 	"",
-	...it.choices.map(c => `${choiceLabel(c)}\n    → ${c.task ?? ""}`),
+	...(it.task ? [`Task: ${it.task}`] : []),
 	"",
+	...it.choices.filter(c => c.task && c.task !== it.task).map(c => `${choiceLabel(c)}: ${c.task}`),
 	"Nothing is sent to anyone without your OK.",
 ].join("\n");
 
@@ -148,17 +152,15 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		try {
 			const title = cardTitle(it);
 			const labels = it.choices.map(choiceLabel);
-			const pick = await ctx.ui.select(title, [...labels, CARD_ELSE, ...(it.choices.some(c => c.run === "later") ? [] : [CARD_LATER]), CARD_NO, ...(it.sessions.length ? [CARD_SEND] : [])], { signal: close.signal });
+			// One flat list: no second picker. Only sessions that fit this loop (same project, or the suggested one) are offered; anything else, type it.
+			const taken = new Set(it.choices.map(c => c.run));
+			const targets = it.sessions.filter(x => x.fits && !taken.has(x.id)).slice(0, 2);
+			const sendLabels = targets.map(sendLabel);
+			const pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO], { signal: close.signal });
 			if (!pick) return;
 			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
-			let to: string | undefined;
-			if (pick === CARD_SEND) {
-				const names = it.sessions.map(s => s.id === "new" ? `＋ New session in ${s.cwd}` : `${s.name} (open)  ${s.cwd ?? ""}`.trim());
-				const where = await ctx.ui.select(`Hand this task to a session:\n  "${it.task ?? it.action}"`, names, { signal: close.signal });
-				if (!where) return;
-				to = it.sessions[names.indexOf(where)]?.id;
-			}
+			const to = targets[sendLabels.indexOf(pick)]?.id;
 			const index = labels.indexOf(pick);
 			const kind: CardAnswer = index >= 0 ? "choice" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : to ? "send" : "else";
 			const choice = index >= 0 ? index : undefined;
