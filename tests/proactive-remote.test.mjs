@@ -234,12 +234,18 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest · Switch the backtest loader", "2.DiscussFor you talks it through with you first; changes nothing", "Later", "Not important"], "one level: no Send-to-a-session step");
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.DiscussFor you talks it through with you first; changes nothing", "Later", "Not important"], "one level: no Send-to-a-session step");
   // A free-text answer is always visible on the card, no extra tap.
   assert.equal(await card.locator(".job-write textarea").isVisible(), true);
   assert.equal(await card.locator(".job-write textarea").getAttribute("placeholder"), "Or tell For you what to do…");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await card.locator(".job-to").count(), 0, "backtest is already the judge's button; no duplicate");
+  assert.equal(await card.getByText("Nothing is sent to anyone").count(), 0, "no generic disclaimer");
+  assert.equal(await card.locator(".job-next").isVisible(), true, "the task is visible: no extra tap to see what he decides");
+  assert.equal(await card.locator("details").count(), 0, "one level: nothing hidden behind a toggle");
+  const box = await card.boundingBox();
+  assert.ok(box.height < 480, `card fits a phone screen (${box.height}px)`);
+  for (const b of await card.locator("button:visible, summary:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: /Switch loader/ }).click();
   const { prompts } = await next;
@@ -251,6 +257,27 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
   assert.equal(it.status, "onit"); assert.equal(it.session, "s1");
   assert.deepEqual(errors, []);
+});
+
+test("phone card: a session that fits the loop is one direct button that hands it over", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("r1", { suggest: { session: "s2" }, choices: [{ label: "Discuss", run: "discuss" }] })) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/s2`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [] }) });
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  const card = page.locator('[data-job="r1"]');
+  await card.waitFor();
+  assert.equal(await card.locator('.job-to[data-to="s2"]').textContent(), "Do it in minara ›");
+  const next = fetch(`${base}/agent/s2/next`, { headers: auth }).then(r => r.json());
+  await card.locator('.job-to[data-to="s2"]').click();
+  assert.equal((await next).prompts.length, 1);
 });
 
 test("phone card: Something else runs brook's words in For you; Later parks the next card", async t => {
