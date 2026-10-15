@@ -75,10 +75,15 @@ export function send(from: string, to: string, kind: Kind, text: string, opts: {
   const note: Note = { id, from, kind, text, thread: opts.thread ?? id, hop: opts.hop ?? 0, at: Date.now(), ...(opts.grant?.length && { grant: opts.grant }) };
   const dir = join(root, to, "inbox");
   mkdirSync(dir, { recursive: true });
-  writeAtomic(join(dir, `${note.at}-${id}.json`), note);
-  // One shared transcript of every message, so brook can read all session-to-session talk in one place.
-  appendFileSync(join(root, "log.md"), `\n### ${new Date(note.at).toLocaleString("sv-SE")} · ${from} → ${to} · ${kind} · thread ${note.thread}\n\n${text}\n`);
+  logLine(root, note, to);
+  writeAtomic(join(dir, `${note.at}-${id}.json`), { ...note, logged: true });
   return note;
+}
+
+/** One shared transcript of every message (~/.pi/agent/chat/log.md), so brook can read all session talk in one place. */
+export const logPath = (root = chatRoot()) => join(root, "log.md");
+function logLine(root: string, n: Note, to: string) {
+  try { appendFileSync(logPath(root), `\n### ${new Date(n.at).toLocaleString("sv-SE")} · ${n.from} → ${to} · ${n.kind} · thread ${n.thread}\n\n${n.text}\n`); } catch {}
 }
 
 /** Does this message wake the receiver? Notes never; anything past the hop limit never. */
@@ -95,7 +100,10 @@ export function join_(me: Peer, onNote: (n: Note) => void, root = chatRoot()) {
     for (const f of fs) {
       const n = readJson<Note>(join(inbox, f));
       rmSync(join(inbox, f), { force: true });
-      if (n) onNote(n);
+      if (!n) continue;
+      // Receiver-side backstop: a sender on older code may not have logged it.
+      if (!(n as Note & { logged?: boolean }).logged) logLine(root, n, me.name);
+      onNote(n);
     }
   };
   let w: FSWatcher | undefined;

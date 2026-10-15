@@ -42,5 +42,12 @@ test("board, names, claims, kinds, hop limit, and mail that waits for a restart"
   const rb2 = chat.join_(peer("bench"), (n) => again.push(n), root);
   await wait(() => again.length);
   assert.equal(again[0].text, "while you were away");
+  const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
+  const log = readFileSync(join(root, "log.md"), "utf8");
+  assert.equal(log.match(/OK to merge\?/g).length, 1, "logged once by the sender");
+  // An unlogged message from an old sender is logged on receipt.
+  writeFileSync(join(root, "bench", "inbox", "1-old.json"), JSON.stringify({ id: "old", from: "legacy", kind: "reply", text: "from old code", thread: "t", hop: 1, at: Date.now() }));
+  await wait(() => again.length > 1);
+  assert.match(readFileSync(join(root, "log.md"), "utf8"), /legacy → bench · reply[\s\S]*from old code/);
   rb2.close(); rk.close();
 });
