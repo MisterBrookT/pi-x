@@ -1,0 +1,68 @@
+/**
+ * Lines of work: brook's few ongoing threads (e.g. "Jev training", "Benchmark"), the map For you thinks in.
+ * Each loop belongs to at most one line; a line has a short state ("where it stands, what's next").
+ * The judge reads the map first, moves a line's state on progress (often with no card), and files loops under lines.
+ * Stored in ~/.pix/proactive/lines.json; brook can edit it by hand.
+ */
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
+
+export interface Line { id: string; name: string; project?: string; state: string; next?: string; updated: string; hidden?: boolean }
+/** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
+export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean }
+
+const file = (dir = PROACTIVE_DIR) => join(dir, "lines.json");
+export const slug = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40);
+
+export function readLines(dir?: string): Line[] {
+	try { const v = JSON.parse(readFileSync(file(dir), "utf8")); return Array.isArray(v) ? v.filter(l => l && typeof l.id === "string" && typeof l.name === "string") : []; } catch { return []; }
+}
+export const liveLines = (dir?: string) => readLines(dir).filter(l => !l.hidden);
+export const writeLines = (lines: Line[], dir?: string) => writeFileSync(file(dir), JSON.stringify(lines, null, 2) + "\n");
+export const haveLines = (dir?: string) => existsSync(file(dir));
+
+export function parseLineEdits(x: unknown): LineEdit[] {
+	if (!Array.isArray(x)) return [];
+	const str = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ").slice(0, n) : undefined);
+	return x.filter(e => e && (str(e.id, 40) || str(e.name, 40))).slice(0, 6).map((e: any) => {
+		const out: LineEdit = { id: slug(str(e.id, 40) ?? str(e.name, 40)!) };
+		const name = str(e.name, 40), state = str(e.state, 160), next = str(e.next, 120), project = str(e.project, 300);
+		if (name) out.name = name;
+		if (state) out.state = state;
+		if (next) out.next = next;
+		if (project && /^(~\/|\/)/.test(project)) out.project = project;
+		if (e.retire === true) out.retire = true;
+		return out;
+	});
+}
+
+/** Apply judge edits: update known lines, add a new one only when it has a name and state, retire = hide. */
+export function applyLineEdits(lines: Line[], edits: LineEdit[], now = new Date().toISOString()): { lines: Line[]; changed: string[] } {
+	const out = lines.map(l => ({ ...l }));
+	const changed: string[] = [];
+	for (const e of edits) {
+		const l = out.find(x => x.id === e.id);
+		if (l) {
+			if (e.retire) l.hidden = true;
+			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; l.hidden = false; }
+			l.updated = now; changed.push(e.id);
+		} else if (!e.retire && e.name && e.state) {
+			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), updated: now });
+			changed.push(e.id);
+		}
+	}
+	return { lines: out, changed };
+}
+
+/** The map, as the judge and the For you session read it. */
+export function linesForPrompt(lines: Line[], loops: { id: string; title: string; line?: string }[] = []): string {
+	const live = lines.filter(l => !l.hidden);
+	if (!live.length) return "(none yet)";
+	return live.map(l => {
+		const mine = loops.filter(i => i.line === l.id);
+		return `- line=${l.id} "${l.name}"${l.project ? ` (${l.project})` : ""}: ${l.state}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
+	}).join("\n");
+}

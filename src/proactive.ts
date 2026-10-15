@@ -4,6 +4,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseLineEdits, type LineEdit } from "./proactive-lines.ts";
 
 export const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
 export const paths = (dir = PROACTIVE_DIR) => ({
@@ -34,7 +35,9 @@ export interface Alert { title: string; why: string; action: string; refs: strin
 	/** A live Pi session the judge thinks should do the next step (offered on the card). */
 	to?: string;
 	/** The card's main buttons, written by the judge for this loop. */
-	choices?: Choice[] }
+	choices?: Choice[];
+	/** The line of work this loop belongs to (proactive-lines.ts id). */
+	line?: string }
 /**
  * One button on a card. `run` says where the work goes: "here" = the For you session does it,
  * "discuss" = For you talks it through first, a live session id, "new" (a session in the project),
@@ -58,7 +61,9 @@ export interface LoopUpdate extends Partial<Omit<Alert, "refs">> { id: string; s
 /** The judge's answer for one batch: new loops, updated loops, finished loops, and memory edits. */
 export interface Verdict { alerts: (Alert & { state?: LoopState })[]; update: LoopUpdate[]; close: string[]; memory: MemoryEdit;
 	/** Card edits (memory/people/*, memory/projects/*, memory/index). */
-	cards: { card: string; add: string[]; remove: string[] }[] }
+	cards: { card: string; add: string[]; remove: string[] }[];
+	/** Edits to the map of lines of work. */
+	lines: LineEdit[] }
 /**
  * Status: pending = needs brook now; onit = a Pi session took it; later/waiting = hidden until `wakeAt`;
  * done/dismissed/resolved = closed. `quiet` = kept but not pushed. `session` = the Pi session on it.
@@ -111,9 +116,9 @@ export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, o
 	return { fresh, context, judge: fromOthers || (fresh.length > 0 && (openHere > 0 || direct)) };
 }
 
-const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}${p.project ? ` project=${p.project}` : ""}${p.note ? `\n  progress: ${p.note.split("\n").at(-1)}` : ""}`;
+const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}${p.project ? ` project=${p.project}` : ""}${p.line ? ` line=${p.line}` : ""}${p.note ? `\n  progress: ${p.note.split("\n").at(-1)}` : ""}`;
 
-export function judgePrompt(o: { me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string; work?: WorkSession[]; cards?: boolean }): string {
+export function judgePrompt(o: { lines?: string; me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string; work?: WorkSession[]; cards?: boolean }): string {
 	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${o.me && m.sender.trim() === o.me ? " (me)" : ""}: ${m.text}`;
 	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and keep track of his open loops:
 things still unfinished between ${o.me} and someone else. He should only see what needs him now.
@@ -134,6 +139,9 @@ Source: ${o.source.name} [${o.source.kind}${o.source.chat ? `, ${o.source.chat} 
 
 ## Memory
 ${o.memory || "(empty)"}
+
+## ${o.me}'s lines of work (the map: read this first)
+${o.lines ?? "(none yet)"}
 
 ## What ${o.me} is working on now (open Pi sessions)
 ${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.busy ? " (busy)" : ""}${w.todo ? `; doing: ${w.todo}` : ""}${w.preview ? `; last: ${w.preview.replace(/\s+/g, " ").slice(0, 120)}` : ""}`).join("\n") || "(none known)"}
@@ -164,7 +172,12 @@ Decide, in this order:
 3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
    Not new: the same ask again (a reminder, "再问一次") when a loop for it is open or was recently done/resolved
    (see reactions below). Update or close that loop instead.
-4. Who should do the next step? If one open Pi session above is clearly already working on this exact thing
+4. The map. Every new or updated loop gets "line": the id of the line it belongs to (omit if none fits).
+   Progress on a line (a result, a delivery, a decision) moves that line's "state" in "lines", often with no alert at all:
+   e.g. Knight posted backtest numbers that need nothing from him -> {"id": "backtest", "state": "NewsLiquid backtest v2 done: +3.1% after fees"}.
+   A new lasting thread of his work (not a one-off ask) may become a new line: {"id": "short-id", "name": "2-4 words", "state": "...", "next": "...", "project": "~/path"}.
+   Retire a line that has ended: {"id": "...", "retire": true}. Most batches change no line. Keep the map short (about 3-8 lines).
+5. Who should do the next step? If one open Pi session above is clearly already working on this exact thing
    (same project folder and its "doing"/"last" matches), set "to" to that session id: his card in For you will offer
    "Send to <that session>". Otherwise omit "to".
 
@@ -195,7 +208,7 @@ them: "Not important" (drop it), "Send to a session" (he picks any open session)
 Every alert needs "for" and "evidence": "me" = addressed to him, "project" = changes his project (memory), "promise" = he owes or is owed it.
 If you cannot fill "evidence", it is not his loop: leave it out.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit", "choices": [{"label": "...", "run": "here|discuss|<session id>|new|later|no", "prompt": "optional"}]}], "update": [{"id": "open loop id", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "...", "choices": [...]}], "close": ["open loop id"], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit", "choices": [{"label": "...", "run": "here|discuss|<session id>|new|later|no", "prompt": "optional"}], "line": "line id or omit"}], "update": [{"id": "open loop id", "line": "line id or omit", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "...", "choices": [...]}], "close": ["open loop id"], "lines": [{"id": "line id", "state": "where it stands now", "next": "optional"}], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -217,10 +230,11 @@ export function parseVerdict(raw: string): Verdict | null {
 		// Recipient guard: an alert the judge says is for someone else, or with no evidence it is his, is dropped.
 		// A verdict without "for" (older shape) is kept.
 		const unaddressed = (a: any) => a.for !== undefined && (!["me", "project", "promise"].includes(String(a.for)) || !str(a.evidence, 200));
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined, choices: cleanChoices(a.choices) }));
-		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project), choices: cleanChoices(u.choices) }));
+		const line = (x: unknown) => { const l = str(x, 40); return l && /^[\p{L}\p{N}-]+$/u.test(l) ? l : undefined; };
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined, choices: cleanChoices(a.choices), line: line(a.line) }));
+		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project), choices: cleanChoices(u.choices), line: line(u.line) }));
 		const cards = (Array.isArray(v.cards) ? v.cards : []).filter((c: any) => c && typeof c.card === "string").slice(0, 8).map((c: any) => ({ card: c.card.trim().slice(0, 80), add: lines(c.add), remove: lines(c.remove) })).filter((c: any) => c.add.length || c.remove.length);
-		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) }, cards };
+		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) }, cards, lines: parseLineEdits(v.lines) };
 	} catch { return null; }
 }
 
@@ -378,7 +392,7 @@ export function pruneLog(text: string, now: number, days = 30): string {
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
+export const publicItem = (i: Item) => ({ line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
 
 /** A note line appended to a loop's brief, keeping the brief short (newest lines win). */
 export function addNote(old: string | undefined, text: string, now = new Date()): string {

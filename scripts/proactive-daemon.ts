@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
+import { applyLineEdits, linesForPrompt, readLines, writeLines } from "../src/proactive-lines.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
 import { actItem, finishedItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "../src/proactive-store.ts";
 
@@ -142,7 +143,7 @@ async function tick(cfg: Config) {
 			const feedback = items.filter(i => !isOpen(i)).slice(-10);
 			const cards = existsSync(memoryDir(P.dir));
 			const memory = cards ? memoryForPrompt(P.dir, { msgs: [...ctx, ...fresh], source: src, extra: pending.map(p => p.title).join("\n") }) : existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
-			const prompt = judgePrompt({ me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString(), work, cards });
+			const prompt = judgePrompt({ lines: linesForPrompt(readLines(P.dir), pending), me: String(src.me ?? cfg.me), memory, source: src, context: ctx, fresh, pending, feedback, now: new Date().toString(), work, cards });
 			let raw = "";
 			try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "judge", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh, context: ctx, prompt, error: (e as Error).message }); throw e; }
 			fine.push("model");
@@ -167,6 +168,10 @@ async function tick(cfg: Config) {
 			log(`${src.name}: ${fresh.length} new -> ${v.alerts.length ? v.alerts.map(a => `ALERT ${a.title}`).join("; ") : "nothing"}${update.length ? `, updated ${update.map(u => `${u.id}${u.state ? `→${u.state}` : ""}`).join(",")}` : ""}${close.length ? `, resolved ${close.join(",")}` : ""}`);
 			if (dry) continue;
 			const now = Date.now(), stamp = new Date(now).toISOString();
+			if (v.lines.length) {
+				const r = applyLineEdits(readLines(P.dir), v.lines);
+				if (r.changed.length) { writeLines(r.lines, P.dir); log(`lines: ${r.changed.join(", ")}`); }
+			}
 			for (const id of close) appendFileSync(P.inbox, JSON.stringify({ id, status: "resolved", at_status: stamp }) + "\n");
 			for (const u of update) appendFileSync(P.inbox, JSON.stringify(updateLine(pending.find(p => p.id === u.id)!, u, now)) + "\n");
 			const listed = [...items];

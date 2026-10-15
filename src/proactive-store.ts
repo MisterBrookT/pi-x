@@ -1,3 +1,4 @@
+import { linesForPrompt, liveLines, readLines } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -39,6 +40,7 @@ export function forYouView(dir?: string, now = Date.now()) {
 		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
+		lines: liveLines(dir).map(({ id, name, state, next, updated }) => ({ id, name, state, next: next ?? "", updated })),
 		watching,
 		problems,
 	};
@@ -369,6 +371,9 @@ own answer or pick Later instead; his answer comes back to you or goes to the se
 Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
 He can also just chat with you about a card ("why this?", "send it to pix", "merge with the other one"): answer, and use
 the loops tool when he asks for a change.
+
+### Lines of work (the map; ~/.pix/proactive/lines.json, edit it when brook asks)
+${linesForPrompt(readLines(dir), open)}
 
 ### Memory
 ${memory}

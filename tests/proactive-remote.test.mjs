@@ -83,6 +83,13 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
   assert.ok(await page.getByText("Why a").isVisible());
+  // Lines of work: the map shows at the top of For you; a line opens to its loops.
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "train", name: "Jev training", state: "Round 1 done", next: "Backtest", updated: "x" }]));
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", line: "train" }) + "\n");
+  await page.getByText("Jev training").waitFor({ timeout: 12000 });
+  assert.ok(await page.getByText("Round 1 done").isVisible(), "line shows where it stands");
+  await page.locator('[data-line="train"] summary').click();
+  assert.ok(await page.locator('[data-line="train"]').getByText("Title a").isVisible(), "a line opens to its loops");
   // A source that keeps failing shows as one calm line at the top of For you.
   writeFileSync(join(dir, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (3 chats)", since: "x" }] }));
   await page.getByText("Can't read Feishu: login expired (3 chats)").waitFor({ timeout: 12000 });

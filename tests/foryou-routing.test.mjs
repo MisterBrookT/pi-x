@@ -436,3 +436,18 @@ test("regression: the judge is told to close a loop brook already answered himse
 	assert.match(p, /same ask again[\s\S]*recently done\/resolved/);
 	assert.match(p, /acted on: 整理44个事件类别 \(2026-10-15: Finished: replied with the list\)/, "the judge sees what was done, so it recognises the repeat");
 });
+
+test("lines of work: the judge reads the map, files loops under lines, and moves a line's state without a card", async () => {
+	const { judgePrompt, parseVerdict } = await import("../src/proactive.ts");
+	const { applyLineEdits, linesForPrompt } = await import("../src/proactive-lines.ts");
+	const lines = [{ id: "train", name: "Jev training", state: "Round 1 done", updated: "x" }];
+	const map = linesForPrompt(lines, [loop("a", { line: "train" })]);
+	assert.match(map, /line=train "Jev training": Round 1 done; open loops: a/);
+	const p = judgePrompt({ lines: map, me: "b", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: [], fresh: [{ id: "1", time: "t", sender: "k", text: "hi" }], pending: [], now: "n" });
+	assert.match(p, /lines of work \(the map: read this first\)\n- line=train/);
+	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "Run bench", why: "w", action: "a", line: "bench", for: "me", evidence: "e" }], update: [{ id: "a", line: "train" }], close: [], lines: [{ id: "train", state: "Backtest +3%" }, { id: "Bench", name: "Benchmark", state: "started" }, { id: "nameless", state: "x" }] }));
+	assert.equal(v.alerts[0].line, "bench"); assert.equal(v.update[0].line, "train");
+	const r = applyLineEdits(lines, v.lines, "now");
+	assert.deepEqual(r.lines.map(l => [l.id, l.state]), [["train", "Backtest +3%"], ["bench", "started"]], "progress moves the line; a new line needs a name");
+	assert.equal(applyLineEdits(r.lines, [{ id: "bench", retire: true }]).lines[1].hidden, true);
+});
