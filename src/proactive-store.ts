@@ -218,6 +218,12 @@ export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prom
 }
 
 /** The card For you shows now: the oldest loop that needs brook (undefined when none). */
+/** All waiting cards, oldest first (the phone flips through them like the Mac's ← →). */
+export function waitingCards(dir?: string, live: LiveSession[] = [], now = Date.now(), max = 12): Card[] {
+	const n = readAll(dir).filter(i => needsYou(i, now)).length;
+	return Array.from({ length: Math.min(n, max) }, (_, k) => currentCard(dir, live, now, k)!).filter(Boolean);
+}
+
 /** Is this loop still waiting for brook (anywhere in the queue, not only first)? */
 export function stillWaiting(id: string, dir?: string, now = Date.now()) { return readAll(dir).some(i => i.id === id && needsYou(i, now)); }
 

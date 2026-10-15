@@ -19,7 +19,7 @@ import { createDesktopInput, createDesktopInputController, type DesktopInputCont
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
-import { actItem, answerCard, startForYou, currentCard, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
+import { actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -268,14 +268,15 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // The card: the oldest loop that needs brook, shown in the For you session (one at a time).
   const cardNow = () => currentCard(options.proactiveDir, liveSessions());
   let card: Card | undefined = cardNow();
+  let cards: Card[] = waitingCards(options.proactiveDir, liveSessions());
   let knownItems = new Set(forYou().pending.map(i => i.id));
   const onProactive = () => {
     const view = forYou(), list = view.pending;
     publish("foryou", view);
     for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: forYouSession.id, tag: `foryou-${it.id}`, foryou: true });
     knownItems = new Set(list.map(i => i.id));
-    const before = card; card = cardNow();
-    if (JSON.stringify(before) !== JSON.stringify(card)) {
+    const before = JSON.stringify(cards); card = cardNow(); cards = waitingCards(options.proactiveDir, liveSessions());
+    if (before !== JSON.stringify(cards)) {
       const fy = sessions.get(forYouSession.id);
       if (fy) publish("session", publicSession(fy));
       publish("sessions", summary());
@@ -298,7 +299,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (keep === a.length && keep === b.length && same(oldMeta, meta)) return null;
     return { ...meta, keep, base: a.length, tail: b.slice(keep) };
   };
-  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...(s.id === forYouSession.id && card ? { card } : {}) });
+  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...(s.id === forYouSession.id && card ? { card, cards } : {}) });
   const drop = (id: string) => {
     const session = sessions.get(id);
     if (!session) return;

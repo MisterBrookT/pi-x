@@ -239,15 +239,17 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   await quiet.click();
   const card = page.locator('.job-card[data-job="j1"]');
   await card.waitFor();
-  assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.DiscussFor you talks it through with you first; changes nothing", "Later", "Not important"], "one level: no Send-to-a-session step");
+  assert.match(await card.textContent(), /Use the fmp doc[\s\S]*Group[\s\S]*Why j1/);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1Switch loaderIn backtest", "2Discuss", "Later", "Not important"], "short: label + where, nothing repeated");
   // A free-text answer is always visible on the card, no extra tap.
   assert.equal(await card.locator(".job-write textarea").isVisible(), true);
-  assert.equal(await card.locator(".job-write textarea").getAttribute("placeholder"), "Or tell For you what to do…");
+  assert.equal(await card.locator(".job-write textarea").getAttribute("placeholder"), "Or tell For you…");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await card.locator(".job-to").count(), 0, "backtest is already the judge's button; no duplicate");
   assert.equal(await card.getByText("Nothing is sent to anyone").count(), 0, "no generic disclaimer");
-  assert.equal(await card.locator(".job-next").isVisible(), true, "the task is visible: no extra tap to see what he decides");
+  // Tapping the title folds it back to one line, like the Mac.
+  await card.locator(".job-title").click();
+  await page.locator('.job-min[data-job="j1"]').click();
   assert.equal(await card.locator("details").count(), 0, "one level: nothing hidden behind a toggle");
   const box = await card.boundingBox();
   assert.ok(box.height < 480, `card fits a phone screen (${box.height}px)`);
@@ -302,14 +304,18 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   await page.locator('.job-min[data-job="k1"]').click();
   const card = page.locator('.job-card[data-job="k1"]');
   await card.waitFor();
-  assert.match(await card.textContent(), /1 more/);
+  assert.match(await card.locator(".job-pos").textContent(), /1\/2/);
+  // ‹ › flip between waiting cards without answering, like ← → on the Mac.
+  await card.getByRole("button", { name: "Next card" }).click();
+  await page.locator('.job-card[data-job="k2"]').waitFor();
+  await page.getByRole("button", { name: "Previous card" }).click();
+  await card.waitFor();
   await card.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Send" }).click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
   // The next card shows once For you is idle again.
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
-  await page.locator('.job-min[data-job="k2"]').click();
   const card2 = page.locator('.job-card[data-job="k2"]');
   await card2.waitFor({ timeout: 8000 });
   await card2.getByRole("button", { name: /Later/ }).click();
