@@ -240,7 +240,8 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('.job-card[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /Use the fmp doc[\s\S]*Group[\s\S]*Why j1/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1Switch loaderIn backtest", "2Discuss", "Later", "Not important"], "short: label + where, nothing repeated");
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["2Discuss", "Later", "Not important"], "short: label only; actions ask where on tap");
+  assert.match(await card.locator("[data-job-where]").textContent(), /Switch loader/);
   // A free-text answer is always visible on the card, no extra tap.
   assert.equal(await card.locator(".job-write textarea").isVisible(), true);
   assert.equal(await card.locator(".job-write textarea").getAttribute("placeholder"), "Or tell For you…");
@@ -254,8 +255,12 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const box = await card.boundingBox();
   assert.ok(box.height < 480, `card fits a phone screen (${box.height}px)`);
   for (const b of await card.locator("button:visible, summary:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
-  const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
+  // Nested choice: an action first, then where. Nothing runs on the first tap.
   await card.getByRole("button", { name: /Switch loader/ }).click();
+  assert.deepEqual(await card.locator(".job-where button").allTextContents(), ["Here, in For you", "In backtest"], "where: here first, then the session that fits");
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-where.png") });
+  const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
+  await card.locator(".job-where button", { hasText: "In backtest" }).click();
   const { prompts } = await next;
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Switch the backtest loader/);
@@ -321,4 +326,23 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   await card2.getByRole("button", { name: /Later/ }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });
   assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
+});
+
+test("phone regression: the other waiting cards stay visible while For you works on the one just answered", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("w1", { at: "2026-10-01T00:00:00Z" }), item("w2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  const put = busy => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy, messages: [{ role: "user", text: "hi" }] }) });
+  await put(false);
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator('.job-min[data-job="w1"]').waitFor();
+  await put(true); // For you starts working
+  await page.waitForTimeout(1500);
+  assert.equal(await page.locator('.job-min[data-job="w1"]').isVisible(), true, "card line does not vanish while busy");
 });

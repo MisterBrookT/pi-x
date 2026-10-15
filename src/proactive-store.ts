@@ -246,7 +246,12 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
 	if (answer === "else") answer = quickAnswer(text) ?? "else";
 	if (!it || !["choice", "send", "else", "later", "no", "done"].includes(answer) || (answer === "else" && !text)) return undefined;
-	const c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
+	let c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
+	// Nested pick: brook chose an action, then where to run it (here = For you, new, or a session id).
+	if (c && o.to && !["later", "no", "discuss"].includes(c.run)) {
+		if (!/^[\w.-]{1,80}$/.test(o.to) || (o.to === "new" && !it.project)) return undefined;
+		c = { ...c, run: o.to === "here" ? "here" : o.to };
+	}
 	if (answer === "send" && !(o.to && /^[\w.-]{1,80}$/.test(o.to) && (o.to !== "new" || it.project))) return undefined;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
 	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(answer === "send" ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");

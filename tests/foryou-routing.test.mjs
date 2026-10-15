@@ -416,3 +416,14 @@ test("Mac regression: the 4s card refresh does not close a picker showing card 2
 	const log = readFileSync(join(d, "card-ui.log"), "utf8").trim().split("\n").map(l => JSON.parse(l).event);
 	for (const e of ["picker open", "key →", "picker closed: card answered or gone"]) assert.ok(log.includes(e), `${e} logged: ${log}`);
 });
+
+test("nested pick: an action can run here, in a new session, or in any session brook picks, not only the judge's", () => {
+	const d = tmp(loop("a", { project: "/w/nd", choices: [{ label: "Fix", run: "s1", prompt: "Patch it" }, { label: "Talk", run: "discuss" }] }));
+	const r = answerCard("a", "choice", { choice: 0, to: "here", dir: d, live });
+	assert.ok(r.here && !r.into, "runs in For you");
+	assert.match(r.here, /Patch it/);
+	const d2 = tmp(loop("a", { project: "/w/nd", choices: [{ label: "Fix", run: "s1", prompt: "Patch it" }] }));
+	assert.equal(answerCard("a", "choice", { choice: 0, to: "new", dir: d2, live }).into, "new");
+	const d3 = tmp(loop("a", { choices: [{ label: "Talk", run: "discuss" }] }));
+	assert.ok(answerCard("a", "choice", { choice: 0, to: "s2", dir: d3, live }).here, "discuss ignores a where");
+});
