@@ -178,10 +178,21 @@ export function quickAnswer(text: string | undefined): "later" | "no" | "done" |
 }
 export const cardLaterDays = 2;
 /** A button as the card shows it: the judge's label, and where it runs (session name for display). */
-export interface CardChoice { label: string; run: string; name?: string }
+export interface CardChoice { label: string; run: string; name?: string;
+	/** What happens when tapped, in plain words: the task the session is given, or what Later/No/Discuss do. */
+	task?: string }
+/** The plain-words outcome of a button, so brook sees what he is deciding, not only where it goes. */
+export function choiceTask(it: Item, c: { run: string; prompt?: string }): string {
+	if (c.run === "later") return `Hide it; back in ${cardLaterDays} days`;
+	if (c.run === "no") return "Close the loop; nothing is done";
+	if (c.run === "discuss") return "For you talks it through with you first; changes nothing";
+	return c.prompt || it.action;
+}
 export interface Card { id: string; title: string; why: string; action: string; source: string; due?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
-	sessions: { id: string; name: string; cwd?: string }[] }
+	sessions: { id: string; name: string; cwd?: string }[];
+	/** What "Send to a session…" hands over. */
+	task?: string }
 
 /** Open sessions to hand a loop to: the judge's pick, then ones in the loop's project, then the rest; "new" when it has a project. */
 export function sendTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string; cwd?: string }[] {
@@ -209,7 +220,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
 	const waiting = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 	const it = waiting[0];
 	if (!it) return undefined;
-	return { id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt: _p, ...c }) => c), sessions: sendTargets(it, live) };
+	return { id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**

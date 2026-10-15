@@ -65,6 +65,17 @@ export const cardLines = (it: { title: string; why?: string; source: string; lef
 	`● ${it.title.length > 60 ? `${it.title.slice(0, 59)}…` : it.title}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
 ];
 
+/** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
+export const cardTitle = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
+	`For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}`,
+	it.title,
+	...(it.why ? [it.why] : []),
+	"",
+	...it.choices.map(c => `${choiceLabel(c)}\n    → ${c.task ?? ""}`),
+	"",
+	"Nothing is sent to anyone without your OK.",
+].join("\n");
+
 /** A short reply in the For you editor that answers the waiting card: a button number or later/no/done. */
 export function cardReply(text: string, buttons: number): { answer: CardAnswer; choice?: number; text?: string } | undefined {
 	const t = text.trim();
@@ -135,7 +146,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (showing) return;
 		showing = it.id; close = new AbortController();
 		try {
-			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
+			const title = cardTitle(it);
 			const labels = it.choices.map(choiceLabel);
 			const pick = await ctx.ui.select(title, [...labels, CARD_ELSE, ...(it.choices.some(c => c.run === "later") ? [] : [CARD_LATER]), CARD_NO, ...(it.sessions.length ? [CARD_SEND] : [])], { signal: close.signal });
 			if (!pick) return;
@@ -144,7 +155,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			let to: string | undefined;
 			if (pick === CARD_SEND) {
 				const names = it.sessions.map(s => s.id === "new" ? `＋ New session in ${s.cwd}` : `${s.name} (open)  ${s.cwd ?? ""}`.trim());
-				const where = await ctx.ui.select("Hand this job to:", names, { signal: close.signal });
+				const where = await ctx.ui.select(`Hand this task to a session:\n  "${it.task ?? it.action}"`, names, { signal: close.signal });
 				if (!where) return;
 				to = it.sessions[names.indexOf(where)]?.id;
 			}

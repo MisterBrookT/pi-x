@@ -247,7 +247,7 @@ test("Mac: Send to a session… asks which one, then hands it there", async () =
 	const pi = fakePi(), answers = [], shown = [];
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
 	await cardCmd(pi, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
-	assert.equal(shown[1].title, "Hand this job to:");
+	assert.equal(shown[1].title, "Hand this task to a session:\n  \"Switch loader\"", "he sees what is handed over, not only where");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
 
@@ -358,4 +358,11 @@ test("Otty sidebar: the For you tab shows the hand icon while a card waits, and 
 	const { ottyBadge } = await import("../extensions/foryou.ts");
 	const calls = []; ottyBadge(true, (c, a) => calls.push([c, ...a]), "1a2b"); ottyBadge(false, (c, a) => calls.push([c, ...a]), "p_1a2b");
 	assert.deepEqual(calls, [["otty", "pane", "badge", "p_1a2b", "--kind", "awaiting-input"], ["otty", "pane", "badge", "p_1a2b", "--clear"]]);
+});
+
+test("transparent decision: every card button says what it would do, in plain words", () => {
+	const d = tmp(loop("a", { choices: [{ label: "Fix in backtest", run: "s1", prompt: "Patch the loader and rerun" }, { label: "Talk", run: "discuss" }, { label: "Not now", run: "later" }, { label: "Skip", run: "no" }] }));
+	const c = currentCard(d, live);
+	assert.deepEqual(c.choices.map(x => x.task), ["Patch the loader and rerun", "For you talks it through with you first; changes nothing", "Hide it; back in 2 days", "Close the loop; nothing is done"]);
+	assert.equal(c.task, "Switch loader");
 });
