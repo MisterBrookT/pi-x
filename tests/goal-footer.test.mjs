@@ -177,3 +177,9 @@ test("footer repaints periodically only while background work runs", async (t) =
 	await sleep(300);
 	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
 });
+
+test("footer never exceeds a narrow pane, even with a background job label", async (t) => {
+	const h = await harness(t);
+	h.data.setExtensionStatus("pix-background", "1 job running · look 18:00 · /jobs");
+	for (const w of [10, 22, 40]) for (const line of h.render(w)) assert.ok(visibleWidth(line) <= w, `width ${w}: ${line}`);
+});

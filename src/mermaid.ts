@@ -289,7 +289,7 @@ function compactSequence(src: string, width: number): MermaidArt | null {
       continue;
     }
     const m = SEQ_MESSAGE.exec(line);
-    if (!m || m[1] === m[3]) return null;
+    if (!m) return null;
     see(m[1] as string);
     see(m[3] as string);
     messages.push({ from: m[1] as string, op: m[2] as string, to: m[3] as string, text: decodeLabel(m[4] as string) });
@@ -327,9 +327,24 @@ function compactSequence(src: string, width: number): MermaidArt | null {
     const style = SEQ_ARROWS.find(([op]) => op === msg.op)?.[1] as { line: string; head: string };
     const a = center[order.indexOf(msg.from)] as number;
     const b = center[order.indexOf(msg.to)] as number;
+    rows.push(lifelines());
+    if (a === b) {  // self-message: a small loop to the right of the lifeline, text beside it
+      const room = Math.max(width, total) - a - 4;  // the loop text may run past the last column, up to the pane
+      if (room < 6) return null;
+      const text = wrapText(msg.text || " ", room);
+      text.forEach((l, k) => {
+        const row = lifelines();
+        put(row, a, k === 0 ? "├─╮" : "│ │");
+        put(row, a + 4, l);
+        rows.push(row);
+      });
+      const row = lifelines();
+      put(row, a + 1, `${style.head ? LEFT_HEAD[style.head] || "─" : "─"}╯`);
+      rows.push(row);
+      continue;
+    }
     const lo = Math.min(a, b);
     const hi = Math.max(a, b);
-    rows.push(lifelines());
     if (msg.text) {
       for (const l of wrapText(msg.text, hi - lo - 3)) {
         const row = lifelines();

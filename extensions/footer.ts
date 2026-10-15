@@ -101,7 +101,8 @@ export default function (pi: ExtensionAPI) {
         const metrics = parts.join(" ");
         const room = width - visibleWidth(running) - visibleWidth(metrics) - visibleWidth(right);
         const rest = room >= 2 ? metrics + " ".repeat(room) + right : truncateToWidth(`${metrics}  ${right}`, Math.max(0, width - visibleWidth(running)));
-        const stats = (running ? theme.fg("accent", running) : "") + theme.fg("dim", rest);
+        // Narrow panes: the jobs label alone can be wider than the screen (crash 2026-10-15 at width 22).
+        const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal")].filter(Boolean).join(" · ");
         const linkText = links.map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
@@ -111,7 +112,7 @@ export default function (pi: ExtensionAPI) {
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
-        return [theme.fg("dim", location), stats];
+        return [truncateToWidth(theme.fg("dim", location), width), stats];
       },
     };
   });

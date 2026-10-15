@@ -308,3 +308,10 @@ test("renderFitted: a wide top-down flowchart with a subgraph and long labels st
   assert.equal(flattenSubgraphs("flowchart TB\n  subgraph X[y]\n    A\n  end\n  A --> B"), "flowchart TB\n    A\n  A --> B");
   assert.equal(dropEdgeLabels("A -->|x| B\nC -- y --> D"), "A --> B\nC --> D");
 });
+
+test("a sequence diagram with a self-message still renders when it must be compacted", () => {
+  const md = "```mermaid\nsequenceDiagram\n  participant A as Session A\n  participant FS as ~/.pi/agent/chat/\n  participant B as Session B\n  A->>FS: on start, write A/me.json {name, cwd, pid}\n  FS-->>B: file watcher sees the new file (checked again every 5 s)\n  B->>B: read it, delete it, add it to B's chat\n```";
+  const out = transformMermaidBlocks(md, 60);
+  assert.doesNotMatch(out, /```mermaid/);
+  assert.match(out, /╯/);
+});
