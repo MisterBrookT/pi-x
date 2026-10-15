@@ -45,6 +45,7 @@
     "lovely-mermaid": "^0.3.3",
     "marked": "18.0.11",
     "open": "^10.2.0",
+    "pi-intercom": "0.17.1",
     "pi-subagents": "0.63.0",
     "recheck": "^4.5.0",
     "remend": "^1.4.0",
@@ -90,7 +91,8 @@
       "./extensions/todo.ts",
       "./extensions/upstream-tools.ts",
       "./extensions/tool.ts",
-      "./extensions/foryou.ts"
+      "./extensions/foryou.ts",
+      "./node_modules/pi-intercom/index.ts"
     ]
   },
   "engines": {
