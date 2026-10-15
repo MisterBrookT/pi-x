@@ -105,13 +105,14 @@ test("regression: a loop Pi finished does not sit silently in 'Pi is on it'", as
 	const old = loop("o", { status: "onit", session: "s", at_status: "2026-10-10T00:00:00Z" });
 	const fresh = loop("f", { status: "onit", session: "s", at_status: "2026-10-12T19:00:00Z" });
 	assert.deepEqual(staleOnit([old, fresh, loop("p")], now).map(i => i.id), ["o"], "untouched for 6 h comes back");
-	// A session that finishes says so: the loop returns to brook with a Check button.
+	// A session that finishes says so: the loop closes quietly with the result in its brief (no new card).
 	const d = tmp(old);
 	assert.equal(finishedItem("o", "  ", d), false);
 	assert.ok(finishedItem("o", "Form filled, screenshot confirmed", d));
 	const [it] = parseInbox(readFileSync(join(d, "inbox.jsonl"), "utf8"));
-	assert.equal(it.status, "pending"); assert.equal(it.button, "Check result");
+	assert.equal(it.status, "done", "finished work never re-notifies brook");
 	assert.match(it.note, /Finished: Form filled/);
+	assert.equal(currentCard(d), undefined, "no card for it");
 });
 
 test("regression: the pile check sees each loop's latest progress, so it can close finished ones", () => {
@@ -426,4 +427,12 @@ test("nested pick: an action can run here, in a new session, or in any session b
 	assert.equal(answerCard("a", "choice", { choice: 0, to: "new", dir: d2, live }).into, "new");
 	const d3 = tmp(loop("a", { choices: [{ label: "Talk", run: "discuss" }] }));
 	assert.ok(answerCard("a", "choice", { choice: 0, to: "s2", dir: d3, live }).here, "discuss ignores a where");
+});
+
+test("regression: the judge is told to close a loop brook already answered himself, and not to re-alert a repeat ask", async () => {
+	const { judgePrompt } = await import("../src/proactive.ts");
+	const p = judgePrompt({ me: "唐英豪", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: [], fresh: [{ id: "1", time: "t", sender: "欧阳宗谦", text: "再问一次：44个类别？" }], pending: [], feedback: [loop("d", { status: "done", title: "整理44个事件类别", note: "- 2026-10-15: Finished: replied with the list" })], now: "n" });
+	assert.match(p, /\(me\) that answers or delivers what a loop asks[\s\S]*close it/);
+	assert.match(p, /same ask again[\s\S]*recently done\/resolved/);
+	assert.match(p, /acted on: 整理44个事件类别 \(2026-10-15: Finished: replied with the list\)/, "the judge sees what was done, so it recognises the repeat");
 });

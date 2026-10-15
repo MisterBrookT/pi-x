@@ -142,7 +142,7 @@ ${(o.work ?? []).map(w => `- id=${w.id} "${w.name}" in ${w.cwd}${w.busy ? " (bus
 ${o.pending.map(loopLine).join("\n") || "(none)"}
 
 ## How ${o.me} reacted to recent loops
-${(o.feedback ?? []).map(f => `- ${f.status === "done" || f.status === "onit" ? "acted on" : f.status === "resolved" ? "resolved" : "dismissed"}: ${f.title}`).join("\n") || "(none yet)"}
+${(o.feedback ?? []).map(f => `- ${f.status === "done" || f.status === "onit" ? "acted on" : f.status === "resolved" ? "resolved" : "dismissed"}: ${f.title}${f.note ? ` (${f.note.split("\n").at(-1)!.replace(/^- /, "").slice(0, 140)})` : ""}`).join("\n") || "(none yet)"}
 
 ## Earlier messages (context only)
 ${o.context.map(fmt).join("\n") || "(none)"}
@@ -157,10 +157,13 @@ Decide, in this order:
    A task card or mail about the same thing as an open loop is the same loop: update it.
    When a step is finished and the loop moves on, give the next step's "button" and "action"
    (e.g. the test is done -> "button": "Send results to Amber", "state": "needs").
-   If ${o.me} already did it himself, close it.
+   If ${o.me} already did it himself, close it. A message marked (me) that answers or delivers what a loop asks
+   (e.g. he posted the list someone asked for) means it is done: close it, never alert it again.
    state: "needs" = needs him now; "waiting" = he is waiting on someone else; "later" = he owes it, not due yet.
 2. Is a loop finished (done, answered, cancelled, no longer needed)? Put its id in "close".
 3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
+   Not new: the same ask again (a reminder, "再问一次") when a loop for it is open or was recently done/resolved
+   (see reactions below). Update or close that loop instead.
 4. Who should do the next step? If one open Pi session above is clearly already working on this exact thing
    (same project folder and its "doing"/"last" matches), set "to" to that session id: his card in For you will offer
    "Send to <that session>". Otherwise omit "to".

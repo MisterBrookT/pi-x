@@ -60,10 +60,16 @@ export function doneItem(id: string, dir?: string): boolean {
 	return true;
 }
 
-/** A work session says the whole loop is done: it comes back once so brook can check and close it (✓). */
+/**
+ * A work session says the whole loop is done: it closes, with the result in its brief (shown under Done).
+ * It does not come back as a new card: brook said finished work re-notifying him is noise.
+ */
 export function finishedItem(id: string, summary: string, dir?: string): boolean {
 	const text = summary.replace(/\s+/g, " ").trim();
-	return !!text && nextItem(id, { button: "Check result", action: `Finished: ${text.slice(0, 180)}. Check it, then ✓ to close.`, note: `Finished: ${text}` }, dir);
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	if (!text || !it) return false;
+	write(dir, { id, status: "done", wakeAt: null, note: addNote(it.note, `Finished: ${text}`) });
+	return true;
 }
 
 /** Now: bring a parked or "on it" loop back to "needs you" at once. */

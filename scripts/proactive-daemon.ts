@@ -193,7 +193,8 @@ async function tick(cfg: Config) {
 	}
 	// "On it" loops untouched for 6 h come back to brook: no loop sits silently in "Pi is on it".
 	if (!dry) for (const it of staleOnit(parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : ""), Date.now())) {
-		nextItem(it.id, { button: "Check result", action: "The Pi session stopped working on this. Check where it stands: ✓ if done, or tap to continue.", note: "No progress for 6 h; back to brook" });
+		// Silent: it goes back to the list (not a pushed card). The pile check closes it if the work is done.
+		appendFileSync(P.inbox, JSON.stringify({ id: it.id, status: "later", wakeAt: null, quiet: true, note: `${it.note ? `${it.note}\n` : ""}- ${new Date().toISOString().slice(0, 10)}: no progress for 6 h; parked` , at_status: new Date().toISOString() }) + "\n");
 		judged({ kind: "stale", id: it.id, title: it.title, session: it.session });
 		log(`stale: ${it.id} back to brook`);
 	}
