@@ -87,7 +87,7 @@ function fakePi() {
 const macCtx = (id, picks, notes = [], widgets = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
 	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m), setWidget: (k, v) => widgets.push([k, v]) } });
 /** brook answers the card on the Mac: /card opens the picker (it never pops up by itself). */
-const cardCmd = (pi, ctx) => pi.commands["alt+y"].handler(ctx);
+const cardCmd = (pi, ctx) => pi.commands["super+shift+y"].handler(ctx);
 
 
 
@@ -203,7 +203,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	await new Promise(r => setTimeout(r, 20));
 	assert.equal(shown.length, 0, "the card never pops up by itself: For you keeps working");
 	assert.equal(widgets[0][0], "foryou-card");
-	assert.match(widgets[0][1].join("\n"), /Loop a[\s\S]*1  Fix in backtest \(backtest\) ›\n  2  Discuss\n  Type a number, later, no or done/);
+	assert.deepEqual(widgets[0][1], ["● Loop a   ⌘⇧Y"], "one quiet line; details are behind the shortcut");
 	await cardCmd(pi, fy);
 	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_SEND]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
@@ -342,4 +342,20 @@ test("Mac: old loop prompts stored as plain user messages are folded when drawn"
 	assert.equal(pi.renderers.md(md, { messageType: "user" }), "↳ loop **确认是否加入这两个** · you: latter");
 	assert.equal(pi.renderers.md("hello", { messageType: "user" }), "hello");
 	assert.equal(pi.renderers.md(md, { messageType: "assistant" }), md);
+});
+
+test("Otty sidebar: the For you tab shows the hand icon while a card waits, and clears when none", async () => {
+	const d = tmp(loop("a"));
+	const pi = fakePi(), badges = [];
+	register(pi, { dir: d, sessions: async () => [], answer: async () => "ok", cardPollMs: 60_000, badge: w => badges.push(w) });
+	const ctx = macCtx("pix-foryou", []);
+	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20));
+	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20));
+	assert.deepEqual(badges, [true], "set once, not on every check");
+	writeFileSync(join(d, "inbox.jsonl"), "");
+	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20));
+	assert.deepEqual(badges, [true, false]);
+	const { ottyBadge } = await import("../extensions/foryou.ts");
+	const calls = []; ottyBadge(true, (c, a) => calls.push([c, ...a]), "1a2b"); ottyBadge(false, (c, a) => calls.push([c, ...a]), "p_1a2b");
+	assert.deepEqual(calls, [["otty", "pane", "badge", "p_1a2b", "--kind", "awaiting-input"], ["otty", "pane", "badge", "p_1a2b", "--clear"]]);
 });

@@ -10,6 +10,7 @@ import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../src/remote-state.ts";
 import { readFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { actItem, finishedItem, answerCard, currentCard, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
@@ -36,7 +37,7 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 	return !!(await actItem(id, { into, cwd }));
 }
 
-export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number }
+export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number; badge?: (waiting: boolean) => void }
 
 /** Answer through the hub when it runs (it queues work into sessions and updates the phone). */
 async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: number; to?: string; text?: string }): Promise<"ok" | "gone" | "nohub"> {
@@ -47,17 +48,21 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 	} catch { return "nohub"; }
 }
 
-export const CARD_KEY = "alt+y";
+/** Cmd+Shift+Y (Otty sends Cmd as super via the kitty keyboard protocol; plain Cmd+Y is Otty's Redo). */
+export const CARD_KEY = "super+shift+y";
+
+/** The hand icon on the For you tab in Otty's sidebar while a card waits (like the phone). */
+export function ottyBadge(waiting: boolean, run: (cmd: string, args: string[]) => void = (c, a) => { try { execFile(c, a, () => {}); } catch { /* no otty */ } }, pane = process.env.OTTY_PANE_ID) {
+	if (!pane) return;
+	run("otty", ["pane", "badge", pane.startsWith("p_") ? pane : `p_${pane}`, ...(waiting ? ["--kind", "awaiting-input"] : ["--clear"])]);
+}
 export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_SEND = "Send to a session…", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
 /** The waiting card as a few short lines above the editor. */
 export const cardLines = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
-	`● ${it.title}`,
-	...(it.why ? [`  ${it.why.length > 100 ? `${it.why.slice(0, 99)}…` : it.why}`] : []),
-	...it.choices.map((c, i) => `  ${i + 1}  ${choiceLabel(c)}`),
-	`  Type a number, later, no or done to answer · ${it.source}${it.left ? ` · ${it.left} more waiting` : ""}`,
+	`● ${it.title.length > 60 ? `${it.title.slice(0, 59)}…` : it.title}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
 ];
 
 /** A short reply in the For you editor that answers the waiting card: a button number or later/no/done. */
@@ -110,10 +115,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// Cards: in the For you session only. A card never pops up by itself: it sits as a small widget above the
 	// editor (reply with a number, later, no or done) and on the phone, so the session keeps working. brook answers whenever he wants;
 	// the first answer (Mac or phone) wins. Typing "later"/"no"/"done" on the card acts directly.
-	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined, shown: string | undefined;
+	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined, shown: string | undefined, badged: boolean | undefined;
 	const widget = (ctx: any, it: Awaited<ReturnType<typeof currentCard>>) => {
 		const key = it ? `${it.id}:${it.left}:${it.choices.map(c => c.label).join("|")}` : "";
 		if (key === shown) return;
+		if (!!key !== badged) { badged = !!key; (deps.badge ?? ottyBadge)(badged); }
 		shown = key;
 		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
 	};
@@ -201,7 +207,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		timer.unref?.();
 	});
 	pi.on("agent_end", (_e, ctx) => void check(ctx).catch(() => {}));
-	pi.on("session_start", (_e, ctx) => { shown = undefined; void check(ctx).catch(() => {}); });
+	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
 	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
 	pi.on("before_agent_start", async (event, ctx) => {
 		apply(ctx);
