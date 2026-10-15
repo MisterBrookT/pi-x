@@ -35,7 +35,7 @@ function rfbFixture({ securityTypes }) {
   return s;
 }
 
-async function setup(t, securityTypes, { failReads = 0, keychain } = {}) {
+async function setup(t, securityTypes, { failReads = 0, keychain, native } = {}) {
   const home = await mkdtemp(join(tmpdir(), 'pix-desktop-'));
   const token = 'fixture-token-not-real';
   const hub = await startRemoteHub({ token, port: 0, home, sessionsDir: join(home, 'sessions'), memoryRoot: join(home, 'memory') });
@@ -53,7 +53,8 @@ async function setup(t, securityTypes, { failReads = 0, keychain } = {}) {
   await page.route('**/api/desktop/**', async route => {
     const req = route.request(), url = new URL(req.url());
     assert.equal(req.headers().authorization, `Bearer ${token}`);
-    if (url.pathname === '/api/desktop/open') { opens++; return json(route, 200, { id }); }
+    if (url.pathname === '/api/desktop/open') { opens++; return json(route, 200, native ? { id, nativeInput: true } : { id }); }
+    if (native && url.pathname === `/api/desktop/${id}/input`) return native.handle(route, JSON.parse(req.postData()), json);
     if (url.pathname === `/api/desktop/${id}/read`) {
       const seq = Number(url.searchParams.get('seq'));
       if (readFailures > 0) { readFailures--; return json(route, 502, { error: 'relay hiccup' }); }
@@ -358,4 +359,137 @@ for (const [label, viewport] of [['portrait', { width: 390, height: 844 }], ['la
   assert.ok(screen.height >= viewport.height - 64 - 110 - 60, 'screen takes most of the height');
   if (label === 'portrait') await page.screenshot({ path: '/tmp/pix-desktop-mobile.png' });
   assert.deepEqual(errors, []);
+});
+
+// Hub-side native input: seq-idempotent, records each executed event once; a test can hold or drop replies.
+function nativeFixture() {
+  const n = { executed: [], posts: [], seq: 0, gate: null, dropNext: 0, failNext: 0 };
+  n.handle = async (route, body, json) => {
+    n.posts.push(body);
+    if (n.gate) await n.gate;
+    if (body.seq < n.seq) return json(route, 200, { ack: body.seq + 1 });
+    assert.equal(body.seq, n.seq, 'input seq has no gap');
+    if (n.failNext) { n.failNext--; return json(route, 422, { error: 'could not type' }); }
+    n.executed.push(body.key ? { key: body.key } : { text: body.text }); n.seq++;
+    if (n.dropNext) { n.dropNext--; return route.abort('connectionreset'); }
+    return json(route, 200, { ack: n.seq });
+  };
+  return n;
+}
+
+test('Mac screen sends native typing exactly once, coalesced and in order, and retries a lost reply with the same seq', async t => {
+  const native = nativeFixture();
+  const { page, rfb, errors, logs } = await setup(t, [1], { native });
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.locator('#desktopKeyboard').click();
+  const until = async f => { for (let i = 0; i < 80 && !f(); i++) await page.waitForTimeout(50); };
+  // Hold the first request so later typing queues and coalesces behind it.
+  let release; native.gate = new Promise(r => { release = r; });
+  await page.keyboard.type('a');
+  await until(() => native.posts.length === 1);
+  await page.keyboard.type('bc');
+  await page.keyboard.insertText('€');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('d');
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 });
+  await cdp.send('Input.insertText', { text: '你' });
+  await page.keyboard.press('Enter');
+  await page.locator('#desktopKeys').getByRole('button', { name: 'Esc' }).click();
+  assert.equal(await page.locator('#desktopText').inputValue(), '');
+  native.dropNext = 1; // the reply to the held first event is lost
+  native.gate = null; release();
+  await until(() => native.executed.length === 6);
+  await page.waitForTimeout(300);
+  assert.deepEqual(native.executed, [{ text: 'a' }, { text: 'bc€' }, { key: 'backspace' }, { text: 'd你' }, { key: 'enter' }, { key: 'escape' }]);
+  const retried = native.posts.filter(p => p.seq === 0);
+  assert.equal(retried.length, 2, 'lost reply is retried');
+  assert.deepEqual(retried[0], retried[1], 'retry repeats the same seq and payload');
+  assert.deepEqual(rfb.keys(), [], 'no VNC key events when native input is available');
+  assert.doesNotMatch(logs.join('\n') + await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })), /€|你|bc/);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen native typing: Close cancels queued keys and an execution failure stops without retyping', async t => {
+  const native = nativeFixture();
+  const { page, rfb, errors } = await setup(t, [1], { native });
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.locator('#desktopKeyboard').click();
+  let release; native.gate = new Promise(r => { release = r; });
+  await page.keyboard.type('x');
+  for (let i = 0; i < 40 && !native.posts.length; i++) await page.waitForTimeout(50);
+  await page.keyboard.type('yz');
+  await page.keyboard.press('Enter');
+  await page.locator('#desktopClose').click();
+  native.gate = null; release();
+  await page.waitForTimeout(500);
+  assert.deepEqual(native.executed, [{ text: 'x' }], 'queued keys after Close are dropped');
+  assert.equal(native.posts.length, 1);
+  // Reconnect starts a fresh seq; a 422 ends the session instead of retyping.
+  Object.assign(native, { seq: 0, posts: [], executed: [], failNext: 1 });
+  resetRfb(rfb);
+  await page.locator('#menu').click();
+  await page.locator('#desktopOpen').click();
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.locator('#desktopKeyboard').click();
+  await page.keyboard.type('q');
+  await page.getByText('Typing failed on the Mac').waitFor();
+  await page.keyboard.type('r');
+  await page.waitForTimeout(300);
+  assert.deepEqual(native.posts, [{ seq: 0, text: 'q' }], 'fresh seq, no retry after 422');
+  assert.deepEqual(native.executed, []);
+  assert.equal(await page.locator('#desktopIntro').isVisible(), true);
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen native typing sends pasted and uncancelable input once, maps newlines to Return, and keeps the input empty', async t => {
+  const native = nativeFixture();
+  const { page, errors } = await setup(t, [1], { native });
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  await page.locator('#desktopKeyboard').click();
+  const until = async f => { for (let i = 0; i < 80 && !f(); i++) await page.waitForTimeout(50); };
+  // The browser inserts text itself (beforeinput not cancelled), then fires input.
+  const insert = (inputType, data, cancelable) => page.evaluate(([inputType, data, cancelable]) => {
+    const el = document.getElementById('desktopText');
+    const init = { inputType, cancelable, bubbles: true };
+    if (inputType === 'insertFromPaste') { init.dataTransfer = new DataTransfer(); init.dataTransfer.setData('text/plain', data); } else init.data = data;
+    if (el.dispatchEvent(new InputEvent('beforeinput', init))) { el.value += data; el.dispatchEvent(new InputEvent('input', { inputType, data, bubbles: true })); }
+  }, [inputType, data, cancelable]);
+  const typed = () => native.executed.map(e => e.key ? `<${e.key}>` : e.text).join('');
+  await insert('insertFromPaste', 'p1\r\nq', true);
+  await until(() => typed() === 'p1<enter>q');
+  assert.equal(await page.locator('#desktopText').inputValue(), '');
+  await insert('insertText', 'dict', false); // uncancelable: falls back to the committed input value
+  await until(() => typed().endsWith('dict'));
+  await insert('insertReplacementText', 'r', false);
+  await insert('insertText', 'k', true); // cancelable insertText is sent by beforeinput only
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'ha', selectionStart: 2, selectionEnd: 2 });
+  await cdp.send('Input.insertText', { text: '好' });
+  await until(() => typed().endsWith('好'));
+  await page.waitForTimeout(300);
+  assert.equal(typed(), 'p1<enter>qdictrk好');
+  assert.equal(await page.locator('#desktopText').inputValue(), '');
+  assert.deepEqual(errors, []);
+});
+
+test('Mac screen native typing fails closed when the hub ack is not the next seq', async t => {
+  for (const ack of [undefined, 5, 1.5, '1']) {
+    const native = nativeFixture();
+    native.handle = async (route, body, json) => { native.posts.push(body); return json(route, 200, ack === undefined ? {} : { ack }); };
+    const { page, errors } = await setup(t, [1], { native });
+    await page.locator('#desktopConnect').click();
+    await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+    await page.locator('#desktopKeyboard').click();
+    await page.keyboard.type('a');
+    await page.getByText('Typing failed: unexpected reply from the Mac').waitFor();
+    await page.keyboard.type('b');
+    await page.waitForTimeout(200);
+    assert.deepEqual(native.posts, [{ seq: 0, text: 'a' }], `ack ${JSON.stringify(ack)}: no further sends`);
+    assert.deepEqual(errors, []);
+  }
 });

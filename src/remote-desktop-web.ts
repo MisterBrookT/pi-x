@@ -25,12 +25,16 @@ class PixDesktopChannel{
 }
 // Saved login lives only in the Mac Keychain (hub API); the page holds it just for the current attempt.
 // desktopSkipSaved: the last automatic sign-in failed, so the next connection asks by hand instead of looping.
+// Native input (open says nativeInput:true): typing goes to the hub's /input as ordered seq'd events instead of VNC keysyms.
+// desktopNativeQ holds unsent events (text coalesced up to desktopNativeText code points); the in-flight one has already left it.
+const desktopNativeMax=512,desktopNativeText=256;
+let desktopNative=false,desktopNativeQ=[],desktopNativeSeq=0,desktopNativeBusy=false;
 let desktopRfb=null,desktopChannel=null,desktopGen=0,desktopPending=false,desktopToSave=null,desktopSkipSaved=false,desktopForgetGen=0;
 function desktopStatus(text){$("desktopStatus").textContent=text}
 function desktopClearCredentials(){desktopToSave=null;$("desktopUsername").value="";$("desktopPassword").value="";$("desktopRemember").checked=false;$("desktopCredentials").hidden=true}
-function desktopEnd(text){desktopGen++;desktopPending=false;const rfb=desktopRfb,ch=desktopChannel;desktopRfb=null;desktopChannel=null;desktopClearCredentials();desktopKeyboard(false);desktopZoom(false);$("desktopMenu").hidden=true;$("desktopMore").setAttribute("aria-expanded","false");$("desktopKeys").hidden=true;$("desktopIntro").hidden=false;$("desktopConnect").disabled=false;try{rfb?.disconnect()}catch{}ch?.close();$("desktopScreen").replaceChildren();desktopStatus(text||"Not connected")}
-async function desktopConnect(){const gen=++desktopGen;desktopPending=true;$("desktopConnect").disabled=true;desktopStatus("Connecting…");try{await pixVNCReady;if(gen!==desktopGen)return;const {id}=await api("/api/desktop/open",{method:"POST",body:"{}"});if(gen!==desktopGen||$("desktopView").hidden){api("/api/desktop/"+id+"/close",{method:"POST",body:"{}"}).catch(()=>{});return}
-    const ch=desktopChannel=new PixDesktopChannel(id);const rfb=desktopRfb=new PixVNC.default($("desktopScreen"),ch,{shared:true});desktopPending=false;desktopZoom(false);rfb.focusOnClick=true;$("desktopIntro").hidden=true;
+function desktopEnd(text){desktopGen++;desktopPending=false;desktopNative=false;desktopNativeQ=[];desktopNativeSeq=0;desktopNativeBusy=false;const rfb=desktopRfb,ch=desktopChannel;desktopRfb=null;desktopChannel=null;desktopClearCredentials();desktopKeyboard(false);desktopZoom(false);$("desktopMenu").hidden=true;$("desktopMore").setAttribute("aria-expanded","false");$("desktopKeys").hidden=true;$("desktopIntro").hidden=false;$("desktopConnect").disabled=false;try{rfb?.disconnect()}catch{}ch?.close();$("desktopScreen").replaceChildren();desktopStatus(text||"Not connected")}
+async function desktopConnect(){const gen=++desktopGen;desktopPending=true;$("desktopConnect").disabled=true;desktopStatus("Connecting…");try{await pixVNCReady;if(gen!==desktopGen)return;const opened=await api("/api/desktop/open",{method:"POST",body:"{}"}),id=opened.id;if(gen!==desktopGen||$("desktopView").hidden){api("/api/desktop/"+id+"/close",{method:"POST",body:"{}"}).catch(()=>{});return}
+    desktopNative=opened.nativeInput===true;desktopNativeQ=[];desktopNativeSeq=0;desktopNativeBusy=false;const ch=desktopChannel=new PixDesktopChannel(id);const rfb=desktopRfb=new PixVNC.default($("desktopScreen"),ch,{shared:true});desktopPending=false;desktopZoom(false);rfb.focusOnClick=true;$("desktopIntro").hidden=true;
     let savedTried=false,autoAttempt=false;
     const askCredentials=types=>{$("desktopUsername").hidden=!types.includes("username");$("desktopCredentials").hidden=false;desktopStatus("Mac sign-in required");($("desktopUsername").hidden?$("desktopPassword"):$("desktopUsername")).focus()};
     rfb.addEventListener("credentialsrequired",async e=>{if(desktopRfb!==rfb)return;const types=e.detail?.types||["password"];
@@ -44,20 +48,33 @@ async function desktopConnect(){const gen=++desktopGen;desktopPending=true;$("de
     rfb.addEventListener("securityfailure",e=>{if(desktopRfb!==rfb)return;desktopToSave=null;if(autoAttempt)desktopSkipSaved=true;desktopStatus((autoAttempt?"Saved login failed, sign in by hand next time. ":"")+"Sign-in failed"+(e.detail?.reason?": "+e.detail.reason:""))});
     rfb.addEventListener("disconnect",e=>{if(desktopRfb!==rfb)return;const failed=/Sign-in failed/.test($("desktopStatus").textContent);desktopEnd(failed?$("desktopStatus").textContent:e.detail?.clean?"Disconnected":"Connection lost")});
   }catch(e){if(gen===desktopGen)desktopEnd("Could not connect: "+(e.message||e))}}
-function desktopKey(name){const k={enter:[0xff0d,"Enter"],backspace:[0xff08,"Backspace"],escape:[0xff1b,"Escape"]}[name];if(k&&desktopRfb)desktopRfb.sendKey(k[0],k[1])}
+function desktopNativeCount(){let n=0;for(const e of desktopNativeQ)n+=e.key?1:e.n;return n}
+function desktopNativePush(ev){if(desktopNativeCount()+(ev.key?1:ev.n)>desktopNativeMax)return desktopEnd("Typing stopped: too many keys queued");const last=desktopNativeQ.at(-1);
+  if(ev.text&&last?.text&&last.n+ev.n<=desktopNativeText){last.text+=ev.text;last.n+=ev.n}else desktopNativeQ.push(ev);void desktopNativePump()}
+// One event in flight; a lost reply resends the same seq and payload (the hub dedupes by seq); a 4xx means it ran or cannot run, so stop instead of retyping.
+async function desktopNativePump(){if(desktopNativeBusy)return;desktopNativeBusy=true;const gen=desktopGen,id=desktopChannel?.id;
+  while(gen===desktopGen&&desktopNativeQ.length){const ev=desktopNativeQ.shift(),seq=desktopNativeSeq,body=JSON.stringify(ev.key?{seq,key:ev.key}:{seq,text:ev.text});let r=null;
+    for(let n=0;;n++){try{r=await api("/api/desktop/"+id+"/input",{method:"POST",body});break}catch(e){if(gen!==desktopGen)return;if((e.status>=400&&e.status<500)||n>=desktopRetries)return desktopEnd(e.status===422?"Typing failed on the Mac":"Typing failed: connection lost");await new Promise(res=>setTimeout(res,300*(n+1)));if(gen!==desktopGen)return}}
+    // The hub must acknowledge exactly this event; anything else is ambiguous, so stop rather than skip or replay.
+    if(!Number.isInteger(r?.ack)||r.ack!==seq+1)return desktopEnd("Typing failed: unexpected reply from the Mac");desktopNativeSeq=seq+1}
+  if(gen===desktopGen)desktopNativeBusy=false}
+function desktopKey(name){if(desktopNative){if(desktopRfb&&["enter","backspace","escape"].includes(name))desktopNativePush({key:name});return}const k={enter:[0xff0d,"Enter"],backspace:[0xff08,"Backspace"],escape:[0xff1b,"Escape"]}[name];if(k&&desktopRfb)desktopRfb.sendKey(k[0],k[1])}
 // X11 keysyms: Latin-1 maps directly, other Unicode is 0x01000000|codepoint.
-function desktopType(text){if(!desktopRfb||!text)return;$("desktopHint").hidden=true;for(const ch of text){const cp=ch.codePointAt(0);if(cp===10||cp===13){desktopKey("enter");continue}desktopRfb.sendKey(cp<0x100?cp:0x01000000|cp,null)}}
+function desktopType(text){if(!desktopRfb||!text)return;$("desktopHint").hidden=true;for(const ch of text.replace(/\r\n?/g,"\n")){const cp=ch.codePointAt(0);if(cp===10||cp===13){desktopKey("enter");continue}if(desktopNative){desktopNativePush({text:ch,n:1});continue}desktopRfb.sendKey(cp<0x100?cp:0x01000000|cp,null)}}
 // Zoom shows the Mac at 1:1 using noVNC's own viewport: a one-finger drag pans, a tap still clicks. Fit scales it to the phone.
 function desktopZoom(on){const rfb=desktopRfb;if(rfb){rfb.scaleViewport=!on;rfb.clipViewport=on;rfb.dragViewport=on}const b=$("desktopFit");b.setAttribute("aria-pressed",String(on));b.lastChild.textContent=on?"Fit":"Zoom";b.setAttribute("aria-label",on?"Fit screen":"Zoom screen")}
 // Live typing: a hidden input owns the iPhone keyboard; every character goes to the Mac at once and the input stays empty,
 // so nothing typed (often a password) lingers on the page. IME composition is sent once, when it is committed.
 const desktopSink=$("desktopText");
 function desktopKeyboard(on){$("desktopKeyPanel").hidden=!on;$("desktopKeyboard").setAttribute("aria-pressed",String(on));desktopSink.value="";if(desktopRfb)desktopRfb.focusOnClick=!on;if(on){$("desktopHint").hidden=false;desktopSink.focus({preventScroll:true})}else if(document.activeElement===desktopSink)desktopSink.blur()}
-desktopSink.addEventListener("beforeinput",e=>{if(e.isComposing||e.inputType==="insertCompositionText")return;if(e.inputType==="insertText"){e.preventDefault();desktopType(e.data||"")}else if(e.inputType==="insertLineBreak"||e.inputType==="insertParagraph"){e.preventDefault();desktopKey("enter")}else if(e.inputType==="deleteContentBackward"){e.preventDefault();desktopKey("backspace")}});
+// Paste/replacement is read from the event so newlines survive (a single-line input strips them). Inserts that cannot be
+// cancelled (some iOS dictation/autocorrect) or carry no readable text land in the input; the input handler sends the committed value once and clears it.
+let desktopComposed=false;
+desktopSink.addEventListener("beforeinput",e=>{if(e.isComposing||e.inputType==="insertCompositionText")return;if(e.inputType==="insertText"&&e.cancelable){e.preventDefault();desktopType(e.data||"")}else if(e.cancelable&&/^insert(FromPaste|FromDrop|ReplacementText|FromYank)$/.test(e.inputType)){const t=e.data??e.dataTransfer?.getData("text/plain");if(t!=null){e.preventDefault();desktopType(t)}}else if(e.inputType==="insertLineBreak"||e.inputType==="insertParagraph"){e.preventDefault();desktopKey("enter")}else if(e.inputType==="deleteContentBackward"){e.preventDefault();desktopKey("backspace")}});
 // Return and Backspace arrive as keydown even when the input is empty (no beforeinput then).
 desktopSink.addEventListener("keydown",e=>{if(e.isComposing||e.keyCode===229)return;const name={Enter:"enter",Backspace:"backspace",Escape:"escape"}[e.key];if(name){e.preventDefault();desktopKey(name)}});
-desktopSink.addEventListener("compositionend",e=>{desktopType(e.data||"");setTimeout(()=>{desktopSink.value=""},0)});
-desktopSink.addEventListener("input",e=>{if(!e.isComposing)desktopSink.value=""});
+desktopSink.addEventListener("compositionend",e=>{desktopType(e.data||"");desktopComposed=true;setTimeout(()=>{desktopComposed=false;desktopSink.value=""},0)});
+desktopSink.addEventListener("input",e=>{if(e.isComposing)return;const v=desktopSink.value;desktopSink.value="";if(!desktopComposed)desktopType(v)});
 desktopSink.addEventListener("blur",()=>setTimeout(()=>{if(document.activeElement!==desktopSink&&$("desktopKeyboard").getAttribute("aria-pressed")==="true"&&!desktopKeyTap)desktopKeyboard(false)},150));
 // Toolbar taps must not steal focus from the hidden input, or the iPhone keyboard would close.
 let desktopKeyTap=false;$("desktopKeys").addEventListener("pointerdown",e=>{if(e.target.closest("button")){e.preventDefault();desktopKeyTap=true;setTimeout(()=>desktopKeyTap=false,300)}});

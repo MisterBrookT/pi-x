@@ -46,6 +46,8 @@ export interface DesktopBrokerOptions {
   pollMs?: number;
   maxSessions?: number;
   queueLimit?: number;
+  /** Release companion resources when the socket ends, the session expires, or it is closed. */
+  onClose?: (id: string) => void;
 }
 
 const strictBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -62,8 +64,10 @@ export function createDesktopBroker(options: DesktopBrokerOptions = {}) {
     const s = sessions.get(id);
     if (!s) return;
     sessions.delete(id);
+    const wasClosed = s.closed;
     s.closed = true; s.queue = []; s.queued = 0; s.delivered = undefined;
     s.socket.destroy();
+    if (!wasClosed) options.onClose?.(id);
     wake(s);
   };
   const sweep = setInterval(() => { for (const [id, s] of sessions) if (Date.now() - s.lastActive > idleMs) dispose(id); }, Math.min(5_000, idleMs));
@@ -89,7 +93,7 @@ export function createDesktopBroker(options: DesktopBrokerOptions = {}) {
         if (s.queued >= queueLimit) socket.pause();
         wake(s);
       });
-      const end = () => { s.closed = true; wake(s); };
+      const end = () => { if (s.closed) return; s.closed = true; options.onClose?.(id); wake(s); };
       socket.on("end", end); socket.on("close", end); socket.on("error", end);
       return { status: 200, body: { id } };
     },

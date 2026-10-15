@@ -15,6 +15,7 @@ import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, 
 import { previewRemoteDocument } from "./remote-document-preview.ts";
 import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "./remote-desktop.ts";
 import { createDesktopCredentialStore, type DesktopCredentialStore } from "./remote-desktop-credentials.ts";
+import { createDesktopInput, createDesktopInputController, type DesktopInputController } from "./remote-desktop-input.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import { paths as proactivePaths } from "./proactive.ts";
@@ -175,6 +176,8 @@ export interface RemoteHubOptions {
   onRetire?: () => void;
   /** Remembered desktop login; tests inject a store with a fake security runner. */
   desktopCredentials?: DesktopCredentialStore;
+  /** Native keyboard for the desktop; tests inject a fake controller so no real keystrokes happen. */
+  desktopInput?: DesktopInputController;
   /** Tests only: a broker wired to a fake VNC server; production always uses the fixed 127.0.0.1:5900 broker. */
   desktopBroker?: DesktopBroker;
   /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
@@ -239,8 +242,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const mediaBySession = new Map<string, Map<string, RemoteMedia>>();
   const phones = new Set<ServerResponse>();
   // Phone VNC to this Mac's Screen Sharing; the destination is fixed inside remote-desktop.ts.
-  const desktop = options.desktopBroker ?? createDesktopBroker();
+  const desktop = options.desktopBroker ?? createDesktopBroker({ onClose: id => desktopInput.close(id) });
   const desktopCredentials = options.desktopCredentials ?? createDesktopCredentialStore();
+  // A test/injected VNC broker must never accidentally type on the host Mac.
+  const desktopInput = createDesktopInput(options.desktopInput ?? createDesktopInputController(options.desktopBroker ? "injected-broker" : process.platform));
 
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -344,7 +349,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         req.on("close", () => phones.delete(res));
         return;
       }
-      if (req.method === "POST" && path === "/api/desktop/open") { await body(req); const r = desktop.open(); return send(res, r.status, r.body); }
+      if (req.method === "POST" && path === "/api/desktop/open") { await body(req); const r = desktop.open(); return send(res, r.status, r.status === 200 && desktopInput.enabled ? { ...r.body, nativeInput: true } : r.body); }
       if (path === "/api/desktop/credentials" && req.method === "DELETE") {
         try { await desktopCredentials.remove(); return send(res, 200, { ok: true }); } catch { return send(res, 500, { error: "could not forget desktop login" }); }
       }
@@ -360,12 +365,18 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         try { await desktopCredentials.save(input); return send(res, 200, { ok: true }); }
         catch { return send(res, 400, { error: "could not save desktop login" }); }
       }
-      const desktopMatch = path.match(new RegExp(`^/api/desktop/(${desktopIdPattern})/(read|write|close)$`));
+      const desktopMatch = path.match(new RegExp(`^/api/desktop/(${desktopIdPattern})/(read|write|close|input)$`));
       if (desktopMatch) {
         const [, id, verb] = desktopMatch;
         if (verb === "read" && req.method === "GET") { const r = await desktop.read(id, url.searchParams.get("seq")); return res.destroyed ? undefined : send(res, r.status, r.body); }
         if (verb === "write" && req.method === "POST") { const r = desktop.write(id, await body(req)); return send(res, r.status, r.body); }
-        if (verb === "close" && req.method === "POST") { const r = desktop.close(id); return send(res, r.status, r.body); }
+        if (verb === "input" && req.method === "POST") {
+          let input: unknown;
+          try { input = await body(req); } catch { return send(res, 400, { error: "invalid desktop input" }); }
+          const r = await desktopInput.input(id, input, () => desktop.has(id));
+          return res.destroyed ? undefined : send(res, r.status, r.body);
+        }
+        if (verb === "close" && req.method === "POST") { desktopInput.close(id); const r = desktop.close(id); return send(res, r.status, r.body); }
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
       if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
@@ -624,6 +635,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       unwatchFile(proactiveFile, onProactive);
       unwatchFile(healthFile, onProactive);
       clearInterval(wake);
+      desktopInput.dispose();
       desktop.dispose();
       for (const timer of heldBack) clearTimeout(timer);
       for (const session of sessions.values()) session.waiter?.([]);
