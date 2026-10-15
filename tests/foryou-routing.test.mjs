@@ -369,11 +369,24 @@ test("transparent decision: every card button says what it would do, in plain wo
 	assert.equal(c.task, "Switch loader");
 });
 
-test("Mac: with several cards waiting, Next card → steps to the next one in the same picker", async () => {
+test("Mac: with several cards waiting, ← / → flip between them in the picker", async () => {
 	const d = tmp(loop("a"), { ...loop("b"), at: "2026-10-09T09:00:00Z" });
 	const pi = fakePi(), shown = [];
 	register(pi, { dir: d, sessions: async () => [], answer: async () => "ok", cardPollMs: 60_000 });
-	await cardCmd(pi, macCtx("pix-foryou", ["Next card →", undefined], shown));
-	assert.match(shown[0].title, /^Loop a\nKnight · 1 of 2/);
-	assert.match(shown[1].title, /^Loop b\nKnight · 2 of 2/);
+	let keys;
+	const ctx = macCtx("pix-foryou", [], shown);
+	const keyQueue = ["\x1b[C", "\x1b[C", "\x1b[D", null];
+	ctx.ui.onTerminalInput = h => { keys = h; return () => { keys = undefined; }; };
+	ctx.ui.select = async (title, options, o) => {
+		shown.push({ title, options });
+		const k = keyQueue.shift();
+		if (!k) return undefined;
+		assert.deepEqual(keys(k), { consume: true });
+		assert.equal(o.signal.aborted, true);
+		return undefined;
+	};
+	await cardCmd(pi, ctx);
+	assert.deepEqual(shown.map(x => x.title.split("\n")[0]), ["Loop a", "Loop b", "Loop a", "Loop b"], "→ wraps around, ← goes back");
+	assert.match(shown[0].title, /1 of 2 {3}← → more cards/);
+	assert.equal(keys, undefined, "key listener removed when the picker closes");
 });

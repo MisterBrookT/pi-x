@@ -10,6 +10,7 @@ import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../src/remote-state.ts";
 import { readFileSync } from "node:fs";
+import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { actItem, finishedItem, answerCard, currentCard, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
@@ -56,7 +57,7 @@ export function ottyBadge(waiting: boolean, run: (cmd: string, args: string[]) =
 	if (!pane) return;
 	run("otty", ["pane", "badge", pane.startsWith("p_") ? pane : `p_${pane}`, ...(waiting ? ["--kind", "awaiting-input"] : ["--clear"])]);
 }
-export const CARD_NEXT = "Next card →", CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_ELSE = "Something else…";
+export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
@@ -71,7 +72,7 @@ export const sendLabel = (x: { id: string; name: string; cwd?: string }) => x.id
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
 export const cardTitle = (it: { title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
 	it.title,
-	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}` : ""}`,
+	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
 	"",
 	...(it.why ? [it.why, ""] : []),
 	...(it.task ?? it.action ? [`Plan: ${it.task ?? it.action}`] : []),
@@ -153,9 +154,19 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			const taken = new Set(it.choices.map(c => c.run));
 			const targets = it.sessions.filter(x => x.fits && !taken.has(x.id)).slice(0, 2);
 			const sendLabels = targets.map(sendLabel);
-			const pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO, ...(it.left ? [CARD_NEXT] : [])], { signal: close.signal });
+			// ←/→ flip between waiting cards without leaving the picker.
+			let step = 0;
+			const flip = (it.left && ctx.ui.onTerminalInput) ? ctx.ui.onTerminalInput((data: string) => {
+				const d = matchesKey(data, "right") ? 1 : matchesKey(data, "left") ? -1 : 0;
+				if (!d) return undefined;
+				step = d; close?.abort();
+				return { consume: true };
+			}) : undefined;
+			let pick: string | undefined;
+			try { pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO], { signal: close.signal }); }
+			finally { flip?.(); }
+			if (step) { showing = undefined; return void (await answer(ctx, skip + step + it.left + 1)); }
 			if (!pick) return;
-			if (pick === CARD_NEXT) { showing = undefined; return void (await answer(ctx, skip + 1)); }
 			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			const to = targets[sendLabels.indexOf(pick)]?.id;
