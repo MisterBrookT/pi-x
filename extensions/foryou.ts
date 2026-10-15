@@ -8,9 +8,9 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { LOOP_MESSAGE, loopMessage } from "../src/remote-state.ts";
+import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../src/remote-state.ts";
 import { readFileSync } from "node:fs";
-import { actItem, finishedItem, answerCard, currentCard, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, finishedItem, answerCard, currentCard, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
@@ -54,11 +54,19 @@ export const choiceLabel = (c: { label: string; run: string; name?: string }) =>
 
 /** The waiting card as a few short lines above the editor. */
 export const cardLines = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
-	`● For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}`,
-	`  ${it.title}`,
-	...(it.why ? [`  ${it.why.length > 110 ? `${it.why.slice(0, 109)}…` : it.why}`] : []),
-	`  ${it.choices.map(choiceLabel).join("  ·  ")}  ·  or type your own   alt+y to answer`,
+	`● ${it.title}`,
+	...(it.why ? [`  ${it.why.length > 100 ? `${it.why.slice(0, 99)}…` : it.why}`] : []),
+	...it.choices.map((c, i) => `  ${i + 1}  ${choiceLabel(c)}`),
+	`  Type a number, later, no or done to answer · ${it.source}${it.left ? ` · ${it.left} more waiting` : ""}`,
 ];
+
+/** A short reply in the For you editor that answers the waiting card: a button number or later/no/done. */
+export function cardReply(text: string, buttons: number): { answer: CardAnswer; choice?: number; text?: string } | undefined {
+	const t = text.trim();
+	const n = /^\d$/.test(t) ? Number(t) : NaN;
+	if (n >= 1 && n <= buttons) return { answer: "choice", choice: n - 1 };
+	return quickAnswer(t) ? { answer: "else", text: t } : undefined;
+}
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -100,7 +108,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		pi.setActiveTools([...active]);
 	};
 	// Cards: in the For you session only. A card never pops up by itself: it sits as a small widget above the
-	// editor (alt+y to answer) and on the phone, so the session keeps working. brook answers whenever he wants;
+	// editor (reply with a number, later, no or done) and on the phone, so the session keeps working. brook answers whenever he wants;
 	// the first answer (Mac or phone) wins. Typing "later"/"no"/"done" on the card acts directly.
 	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined, shown: string | undefined;
 	const widget = (ctx: any, it: Awaited<ReturnType<typeof currentCard>>) => {
@@ -150,6 +158,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	};
 	pi.registerShortcut(CARD_KEY, { description: "Answer the waiting For you card", handler: async (ctx) => { if (isCoordinator(ctx)) await answer(ctx); } });
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
+	// Older loop prompts were stored as plain user messages: fold them the same way when drawn.
+	pi.registerMarkdownTransformer?.((md, c) => {
+		if (c.messageType !== "user") return md;
+		const f = loopPromptSummary(md);
+		return f ? `↳ loop **${f.title}**${f.you ? ` · you: ${f.you}` : ""}` : md;
+	});
 	pi.registerMessageRenderer(LOOP_MESSAGE, (message, { expanded, outputPad }, theme) => {
 		const s = (message.details ?? {}) as { title?: string; you?: string };
 		const head = `${theme.fg("accent", "↳ loop")} ${theme.bold(s.title ?? "")}${s.you ? theme.fg("dim", `  · you: ${s.you}`) : ""}`;
@@ -157,7 +171,23 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		box.addChild(new Text(expanded ? `${head}\n${theme.fg("dim", String(message.content))}` : head, 0, 0));
 		return box;
 	});
-	pi.on("input", (event) => {
+	pi.on("input", async (event, ctx) => {
+		// brook's own short reply answers the waiting card; anything longer is a normal chat with For you.
+		if (event.source === "interactive" && !event.images?.length && isCoordinator(ctx) && event.text.trim().length <= 20) {
+			const it = currentCard(deps.dir, await sessions().catch(() => []));
+			const r = it && cardReply(event.text, it.choices.length);
+			if (it && r) {
+				const via = await (deps.answer ?? answerViaHub)(it.id, r);
+				if (via === "nohub") {
+					const a = answerCard(it.id, r.answer, { ...r, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
+					if (a?.here) pi.sendUserMessage(a.here, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+					if (a?.into) await (deps.handOff ?? handOff)(it.id, a.into);
+				}
+				ctx.ui.notify(via === "gone" ? "That card was already answered." : `✓ ${it.title}`, "info");
+				await check(ctx).catch(() => {});
+				return { action: "handled" as const };
+			}
+		}
 		if (event.source !== "extension" || event.images?.length) return { action: "continue" as const };
 		const m = loopMessage(event.text);
 		if (!m) return { action: "continue" as const };

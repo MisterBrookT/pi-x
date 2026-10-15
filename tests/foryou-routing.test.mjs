@@ -82,7 +82,7 @@ test("pile check: closes and merges only open loops it names", () => {
 function fakePi() {
 	const handlers = {}, sent = [];
 	const commands = {}, renderers = {}, custom = [];
-	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
+	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, registerMarkdownTransformer: f => { renderers.md = f; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
 }
 const macCtx = (id, picks, notes = [], widgets = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
 	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m), setWidget: (k, v) => widgets.push([k, v]) } });
@@ -203,7 +203,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	await new Promise(r => setTimeout(r, 20));
 	assert.equal(shown.length, 0, "the card never pops up by itself: For you keeps working");
 	assert.equal(widgets[0][0], "foryou-card");
-	assert.match(widgets[0][1].join("\n"), /Loop a[\s\S]*Fix in backtest \(backtest\) ›  ·  Discuss[\s\S]*alt\+y to answer/);
+	assert.match(widgets[0][1].join("\n"), /Loop a[\s\S]*1  Fix in backtest \(backtest\) ›\n  2  Discuss\n  Type a number, later, no or done/);
 	await cardCmd(pi, fy);
 	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_SEND]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
@@ -318,4 +318,28 @@ test("Mac transcript: Pix's loop prompt is stored as a folded pix-loop message; 
 	const theme = { fg: (_c, t) => t, bold: t => t, bg: (_c, t) => t };
 	const lines = pi.renderers["pix-loop"](m, { expanded: false, outputPad: 0 }, theme).render(80).join("\n");
 	assert.match(lines, /↳ loop 确认是否加入这两个  · you: Draft reply/); assert.doesNotMatch(lines, /proactive-daemon/);
+});
+
+test("Mac: in For you, a short reply (a button number, later/no/done) answers the waiting card; other text is chat", async () => {
+	const d = tmp(loop("a", { choices: [{ label: "Fix it", run: "s1" }, { label: "Talk", run: "discuss" }] }));
+	const pi = fakePi(), answers = [], notes = [];
+	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
+	const ctx = macCtx("pix-foryou", [], notes);
+	const send = text => pi.handlers.input[0]({ type: "input", text, source: "interactive" }, ctx);
+	assert.equal((await send("why this one?")).action, "continue");
+	assert.equal((await send("2")).action, "handled");
+	assert.equal((await send("latter")).action, "handled");
+	assert.equal((await send("9")).action, "continue", "no such button: plain chat");
+	assert.deepEqual(answers, [["a", { answer: "choice", choice: 1 }], ["a", { answer: "else", text: "latter" }]]);
+	assert.equal((await pi.handlers.input[0]({ type: "input", text: "2", source: "interactive" }, macCtx("s1", []))).action, "continue", "other sessions untouched");
+});
+
+test("Mac: old loop prompts stored as plain user messages are folded when drawn", async () => {
+	const { actPrompt } = await import("../src/proactive.ts");
+	const pi = fakePi();
+	register(pi, { dir: tmp(), sessions: async () => [], cardPollMs: 60_000 });
+	const md = `brook answered loop a with his own instruction. Do this instead of the suggested step:\nlatter\n\n(The loop, for context:)\n${actPrompt(loop("a", { title: "确认是否加入这两个" }), "/tmp/p")}`;
+	assert.equal(pi.renderers.md(md, { messageType: "user" }), "↳ loop **确认是否加入这两个** · you: latter");
+	assert.equal(pi.renderers.md("hello", { messageType: "user" }), "hello");
+	assert.equal(pi.renderers.md(md, { messageType: "assistant" }), md);
 });
