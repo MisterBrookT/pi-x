@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerMessageRenderer(MSG, (message, _opts, theme) => {
     const n = message.details as Note;
-    return new Text(`${theme.fg("accent", `✉ ${n.kind} from ${n.from}`)}  ${n.text}`, 0, 0);
+    return new Text(`${theme.fg("accent", `✉ ${n.kind} from ${n.from}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
   });
 
   const show = (ps: Peer[]) => ps.map((p) =>

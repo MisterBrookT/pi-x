@@ -10,7 +10,7 @@
  *   handoff (wakes; the receiver owns the task and reports when done).
  * - Loop stop: every automatic reply in a thread raises hop; at MAX_HOPS mail stops waking anyone.
  */
-import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, watch, type FSWatcher } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, watch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -76,6 +76,8 @@ export function send(from: string, to: string, kind: Kind, text: string, opts: {
   const dir = join(root, to, "inbox");
   mkdirSync(dir, { recursive: true });
   writeAtomic(join(dir, `${note.at}-${id}.json`), note);
+  // One shared transcript of every message, so brook can read all session-to-session talk in one place.
+  appendFileSync(join(root, "log.md"), `\n### ${new Date(note.at).toLocaleString("sv-SE")} · ${from} → ${to} · ${kind} · thread ${note.thread}\n\n${text}\n`);
   return note;
 }
 
