@@ -133,6 +133,10 @@ A loop's main button is always the next real step, and it changes as the work mo
 | Judge | an `update` with the next `button`/`action` when the chat shows progress | "测完了，晚点发你" -> **Send results** |
 
 Buttons on a card: main button, Later, **✓ Done** (brook handled it himself; the judge reads it as "acted on"), ✕ (not worth tracking).
+For you session cards (Mac and phone) show the judge's or coordinator's buttons, a free-text box that is always visible ("Or tell For you what to do…"), Later, Not important, and Send to a session….
+When the coordinator needs brook to decide, it does not ask a blocking question: `loops` action `choices` puts 1-3 buttons it chose (and an optional one-line question) on the card and it ends its turn.
+Free text on a loop that a work session already owns is queued to that session (after its current turn if busy); otherwise For you gets it. Nothing is routed automatically beyond that: picking another session is a button or Send to a session….
+In the phone transcript, a loop task Pix wrote (card answer or handoff) shows as the loop title plus "You: <answer>"; the full prompt Pi received is under Details.
 Quiet rows (Pi is on it, later) show, on hover in the pill or always on the phone: **✓ Done**, and **Open** (focus or resume the session on it) or **Now** (bring it back to "needs you").
 
 ## The coordinator

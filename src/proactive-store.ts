@@ -3,7 +3,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { actPrompt, addNote, type Choice, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
+import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "./remote-mac.ts";
 import { relayConfigPath } from "./remote-relay-agent.ts";
 import { memoryAll, memoryDir } from "./proactive-memory.ts";
@@ -150,7 +150,32 @@ export function suggestItem(id: string, session: { id: string; name?: string }, 
 	return true;
 }
 
-export type CardAnswer = "choice" | "send" | "else" | "later" | "no";
+/**
+ * The coordinator publishes a decision for brook without waiting on him: the loop gets these buttons
+ * and comes back to "needs you" as a card (Mac and phone). He can still type his own answer or pick Later.
+ */
+export function publishChoices(id: string, choices: unknown, o: { question?: string; dir?: string } = {}): boolean {
+	const it = readAll(o.dir).find(i => i.id === id && isOpen(i));
+	const clean = cleanChoices(choices);
+	if (!it || !clean) return false;
+	const action = o.question?.replace(/\s+/g, " ").trim().slice(0, 200);
+	write(o.dir, { id, status: "pending", wakeAt: null, choices: clean, ...(action ? { action } : {}) });
+	return true;
+}
+
+export type CardAnswer = "choice" | "send" | "else" | "later" | "no" | "done";
+
+/**
+ * A typed answer that is really a button: "later", "no", "done" (and close typos/translations).
+ * These act on the loop directly instead of becoming a task for the model.
+ */
+export function quickAnswer(text: string | undefined): "later" | "no" | "done" | undefined {
+	const t = (text ?? "").trim().toLowerCase().replace(/[.!。！\s]+$/u, "");
+	if (/^(later|latter|laters|not now|snooze|tomorrow|稍后|以后|晚点|等等|待会|回头|明天)$/u.test(t)) return "later";
+	if (/^(no|nope|skip|drop|ignore|forget it|not important|不|不用|不要|算了|忽略|不重要)$/u.test(t)) return "no";
+	if (/^(done|did it|handled|finished|ok done|已完成|完成|搞定|做完了|好了|处理了)$/u.test(t)) return "done";
+	return undefined;
+}
 export const cardLaterDays = 2;
 /** A button as the card shows it: the judge's label, and where it runs (session name for display). */
 export interface CardChoice { label: string; run: string; name?: string }
@@ -196,7 +221,8 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	const at = o.now ?? new Date();
 	const it = readAll(o.dir).find(i => i.id === id && needsYou(i, at.getTime()));
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
-	if (!it || !["choice", "send", "else", "later", "no"].includes(answer) || (answer === "else" && !text)) return undefined;
+	if (answer === "else") answer = quickAnswer(text) ?? "else";
+	if (!it || !["choice", "send", "else", "later", "no", "done"].includes(answer) || (answer === "else" && !text)) return undefined;
 	const c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
 	if (answer === "send" && !(o.to && /^[\w.-]{1,80}$/.test(o.to) && (o.to !== "new" || it.project))) return undefined;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
@@ -204,7 +230,10 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	if (c?.run === "later" || c?.run === "no") answer = c.run;
 	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
 	if (answer === "no") { write(o.dir, { id, status: "dismissed" }); return { item: it }; }
+	if (answer === "done") { write(o.dir, { id, status: "done" }); return { item: it }; }
 	if (answer === "send") return { item: it, into: o.to };
+	// His own words on a loop a work session already owns go back to that session, with the loop's context.
+	if (answer === "else" && it.session && it.session !== forYouSession.id) { write(o.dir, { id, action: text }); return { item: it, into: it.session }; }
 	if (c && c.run !== "here" && c.run !== "discuss" && c.run !== "later" && c.run !== "no") {
 		if (c.prompt) write(o.dir, { id, action: c.prompt });
 		return { item: it, into: c.run };
@@ -297,6 +326,13 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
 use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
 Only change a loop (drop, later, handoff) when brook asks or a loop was just tapped; a question is not a request to act.
+Routing: prefer the session already on a loop, then an open session in the same project or whose recent work matches
+(see the list below); start a new session only when none fits. Never push work into an unrelated session. A busy session
+gets the task queued after its current turn; that is fine, do not wait for it.
+Decisions: when a loop needs brook to choose, do not ask with a blocking question. Use the loops tool action "choices" to
+put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
+own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
+Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
 He can also just chat with you about a card ("why this?", "send it to pix", "merge with the other one"): answer, and use
 the loops tool when he asks for a change.
 

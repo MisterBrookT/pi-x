@@ -39,3 +39,22 @@ test("phone draws Mermaid as a readable diagram and falls back to source when in
   assert.match(bad, /&lt;script&gt;/);
   assert.match(renderRemoteMarkdown("```ts\nconst a = 1 < 2;\n```"), /<pre><code class="language-ts">const a = 1 &lt; 2;/);
 });
+
+test("loop prompts Pix wrote fold to a short line with Details; the full text stays; brook's own prose is untouched", async () => {
+	const { actPrompt } = await import("../src/proactive.ts");
+	const base = actPrompt({ id: "a1", title: "确认是否加入这两个", why: "W", action: "Ask", source: "Knight", howToRead: "feishu msg om_123", status: "pending", at: "", refs: [], sourceKey: "" }, "/tmp/p");
+	const text = `brook answered loop a1 with his own instruction. Do this instead of the suggested step:\nlatter\n\n(The loop, for context:)\n${base}`;
+	const [m] = remoteMessages([{ role: "user", timestamp: 1, content: text }]);
+	assert.equal(m.text, text, "agent-visible content preserved");
+	assert.match(m.html, /^<p><b>确认是否加入这两个<\/b><br>You: latter<\/p><details class="loop-ctx"><summary>Details<\/summary><pre>[\s\S]*om_123/);
+	const [plain] = remoteMessages([{ role: "user", timestamp: 1, content: "A proactive loop from me: **x**\nWhy: just chatting" }]);
+	assert.doesNotMatch(plain.html, /loop-ctx/);
+});
+
+test("phone: a folded pix-loop message shows as brook's short line, with the full prompt under Details", async () => {
+	const { actPrompt } = await import("../src/proactive.ts");
+	const text = `brook tapped "Later" on loop a1. Do it here.\n\n${actPrompt({ id: "a1", title: "T1", why: "W", action: "Ask", source: "K", howToRead: "x", status: "pending", at: "", refs: [], sourceKey: "" }, "/tmp/p")}`;
+	const [m] = remoteMessages([{ role: "custom", customType: "pix-loop", display: true, timestamp: 1, content: text }]);
+	assert.equal(m.role, "user");
+	assert.match(m.html, /^<p><b>T1<\/b><br>You: Later<\/p><details class="loop-ctx">/);
+});

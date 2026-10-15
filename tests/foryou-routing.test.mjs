@@ -81,10 +81,13 @@ test("pile check: closes and merges only open loops it names", () => {
 
 function fakePi() {
 	const handlers = {}, sent = [];
-	return { handlers, sent, registerTool() {}, getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
+	const commands = {}, renderers = {}, custom = [];
+	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
 }
-const macCtx = (id, picks, notes = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
-	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m) } });
+const macCtx = (id, picks, notes = [], widgets = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
+	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m), setWidget: (k, v) => widgets.push([k, v]) } });
+/** brook answers the card on the Mac: /card opens the picker (it never pops up by itself). */
+const cardCmd = (pi, ctx) => pi.commands["alt+y"].handler(ctx);
 
 
 
@@ -190,14 +193,19 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	const d = tmp(loop("a", { choices: [{ label: "Fix in backtest", run: "s1" }, { label: "Discuss", run: "discuss" }] }));
 	const pi = fakePi(), answers = [];
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
-	const shown = [];
-	await pi.handlers.agent_end[0]({}, macCtx("s1", ["x"], shown));
+	const shown = [], widgets = [];
+	await pi.handlers.agent_end[0]({}, macCtx("s1", ["x"], shown, widgets));
 	await new Promise(r => setTimeout(r, 20));
-	assert.equal(shown.length, 0, "work sessions are never interrupted");
+	assert.equal(shown.length + widgets.length, 0, "work sessions are never interrupted");
 	const fix = choiceLabel({ label: "Fix in backtest", run: "s1", name: "backtest" });
-	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [fix], shown));
+	const fy = macCtx("pix-foryou", [fix], shown, widgets);
+	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
-	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_NO, CARD_SEND, CARD_ELSE]);
+	assert.equal(shown.length, 0, "the card never pops up by itself: For you keeps working");
+	assert.equal(widgets[0][0], "foryou-card");
+	assert.match(widgets[0][1].join("\n"), /Loop a[\s\S]*Fix in backtest \(backtest\) ›  ·  Discuss[\s\S]*alt\+y to answer/);
+	await cardCmd(pi, fy);
+	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_SEND]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
 });
 
@@ -205,11 +213,9 @@ test("Mac: without the hub the card answers directly; dismissing the picker chan
 	const d = tmp(loop("a"));
 	const pi = fakePi();
 	register(pi, { dir: d, sessions: async () => [], answer: async () => "nohub", cardPollMs: 60_000 });
-	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [undefined]));
-	await new Promise(r => setTimeout(r, 20));
+	await cardCmd(pi, macCtx("pix-foryou", [undefined]));
 	assert.equal(pi.sent.length, 0); assert.equal(inbox(d)[0].status, "pending");
-	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [CARD_ELSE, "only draft it"]));
-	await new Promise(r => setTimeout(r, 20));
+	await cardCmd(pi, macCtx("pix-foryou", [CARD_ELSE, "only draft it"]));
 	assert.match(pi.sent[0], /only draft it/);
 });
 
@@ -240,8 +246,7 @@ test("Mac: Send to a session… asks which one, then hands it there", async () =
 	const d = tmp(loop("a"));
 	const pi = fakePi(), answers = [], shown = [];
 	register(pi, { dir: d, sessions: async () => live, answer: async (id, body) => (answers.push([id, body]), "ok"), cardPollMs: 60_000 });
-	pi.handlers.agent_end[0]({}, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
-	await new Promise(r => setTimeout(r, 20));
+	await cardCmd(pi, macCtx("pix-foryou", [CARD_SEND, (o) => o.find(x => x.startsWith("backtest"))], shown));
 	assert.equal(shown[1].title, "Hand this job to:");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
@@ -253,4 +258,64 @@ test("pile check writes specific buttons for old loops that have none, and the p
 	assert.match(p, /never a generic set/);
 	const v = parsePile(JSON.stringify({ choices: [{ id: "b", choices: [{ label: "Ask 王", run: "here" }, { label: "bad", run: "../" }] }, { id: "zz", choices: [{ label: "x", run: "here" }] }] }), new Set(["a", "b"]));
 	assert.deepEqual(v.choices, [{ id: "b", choices: [{ label: "Ask 王", run: "here" }] }]);
+});
+
+test("loops tool choices: the coordinator publishes semantic buttons without blocking; they persist and come back as a card", async () => {
+	const tools = new Map();
+	const pi = { ...fakePi(), registerTool: t => tools.set(t.name, t) };
+	const d = tmp(loop("a", { status: "onit", session: "s1" }));
+	register(pi, { dir: d, sessions: async () => live, cardPollMs: 60_000 });
+	const run = p => tools.get("loops").execute("t", p).then(r => r.content[0].text);
+	assert.match(await run({ action: "choices", id: "a", question: "Merge these two?", choices: [{ label: "Merge them", run: "here" }, { label: "Keep both", run: "s1" }] }), /End your turn/);
+	const it = inbox(d).find(i => i.id === "a");
+	assert.equal(it.status, "pending"); assert.equal(it.action, "Merge these two?");
+	const c = currentCard(d, live);
+	assert.deepEqual(c.choices.map(x => [x.label, x.run]), [["Merge them", "here"], ["Keep both", "s1"]]);
+	assert.match(await run({ action: "choices", id: "a", choices: [{ label: "bad", run: "../x" }] }), /no valid choices/);
+	assert.match(await run({ action: "choices", id: "zz", choices: [{ label: "x", run: "here" }] }), /No open loop/);
+});
+
+test("card free text on a loop a work session owns goes back to that session with the loop's context", () => {
+	const d = tmp(loop("a", { status: "pending", session: "s1" }), loop("b"));
+	const r = answerCard("a", "else", { text: "the latter", dir: d, live });
+	assert.equal(r.into, "s1"); assert.equal(r.here, undefined);
+	assert.equal(inbox(d).find(i => i.id === "a").action, "the latter", "his words become the next step the session is told");
+	assert.match(answerCard("b", "else", { text: "draft only", dir: d }).here, /own instruction[\s\S]*draft only/, "no owner: For you does it");
+});
+
+test("coordinator prompt: prefer relevant sessions, publish choices instead of blocking, no unapproved risky work", async () => {
+	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const ctx = coordinatorContext(tmp(), live);
+	assert.match(ctx, /Never push work into an unrelated session/);
+	assert.match(ctx, /do not ask with a blocking question\. Use the loops tool action "choices"/);
+	assert.match(ctx, /type his\nown answer or pick Later/);
+	assert.match(ctx, /Do not start expensive or risky work/);
+});
+
+test("regression: typing 'latter' (or later/no/done) on a card acts on the loop instead of becoming a task", () => {
+	const d = tmp(loop("a"), loop("b"), loop("c"), loop("e"));
+	assert.equal(answerCard("a", "else", { text: "latter", dir: d, now: new Date("2026-10-13T05:00:00") }).here, undefined);
+	assert.equal(inbox(d).find(i => i.id === "a").status, "later");
+	assert.equal(answerCard("b", "else", { text: "算了", dir: d }).here, undefined);
+	assert.equal(inbox(d).find(i => i.id === "b").status, "dismissed");
+	answerCard("c", "else", { text: "Done.", dir: d });
+	assert.equal(inbox(d).find(i => i.id === "c").status, "done");
+	assert.match(answerCard("e", "else", { text: "later reply to Knight with the doc", dir: d }).here, /own instruction/, "a real instruction still goes to For you");
+});
+
+test("Mac transcript: Pix's loop prompt is stored as a folded pix-loop message; the model still gets the full text", async () => {
+	const { actPrompt } = await import("../src/proactive.ts");
+	const pi = fakePi();
+	register(pi, { dir: tmp(), sessions: async () => [], cardPollMs: 60_000 });
+	const text = `brook tapped "Draft reply" on loop a. Do it here.\n\n${actPrompt(loop("a", { title: "确认是否加入这两个" }), "/tmp/p")}`;
+	const r = await pi.handlers.input[0]({ type: "input", text, source: "extension" });
+	assert.equal(r.action, "handled");
+	const [m, o] = pi.custom[0];
+	assert.equal(m.customType, "pix-loop"); assert.equal(m.content, text); assert.deepEqual(m.details, { title: "确认是否加入这两个", you: "Draft reply" });
+	assert.equal(o.triggerTurn, true);
+	assert.equal((await pi.handlers.input[0]({ type: "input", text: "hello", source: "extension" })).action, "continue");
+	assert.equal((await pi.handlers.input[0]({ type: "input", text, source: "interactive" })).action, "continue", "brook's own typing is never touched");
+	const theme = { fg: (_c, t) => t, bold: t => t, bg: (_c, t) => t };
+	const lines = pi.renderers["pix-loop"](m, { expanded: false, outputPad: 0 }, theme).render(80).join("\n");
+	assert.match(lines, /↳ loop 确认是否加入这两个  · you: Draft reply/); assert.doesNotMatch(lines, /proactive-daemon/);
 });

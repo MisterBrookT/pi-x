@@ -234,7 +234,11 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   const card = page.locator('[data-job="j1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /For you · Group[\s\S]*Use the fmp doc[\s\S]*Switch the backtest loader/);
-  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "Not important", "Send to a session…", "Something else…"]);
+  assert.deepEqual(await card.locator("button[data-card]").allTextContents(), ["1.Switch loader ›In backtest", "2.Discuss", "Later", "Not important", "Send to a session…"]);
+  // A free-text answer is always visible on the card, no extra tap.
+  assert.equal(await card.locator(".job-write textarea").isVisible(), true);
+  assert.equal(await card.locator(".job-write textarea").getAttribute("placeholder"), "Or tell For you what to do…");
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   // Send to a session… opens the list of open sessions under the card; it never includes For you.
   await card.getByRole("button", { name: /Send to a session/ }).click();
   assert.deepEqual(await card.locator(".job-to b").allTextContents(), ["backtest (open)"]);
@@ -268,7 +272,6 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
   const card = page.locator('[data-job="k1"]');
   await card.waitFor();
   assert.match(await card.textContent(), /1 more/);
-  await card.getByRole("button", { name: "Something else…" }).click();
   await card.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Send" }).click();

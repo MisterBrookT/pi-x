@@ -7,8 +7,10 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { Box, Text } from "@earendil-works/pi-tui";
+import { LOOP_MESSAGE, loopMessage } from "../src/remote-state.ts";
 import { readFileSync } from "node:fs";
-import { actItem, finishedItem, answerCard, currentCard, coordinatorContext, dismissItem, doneItem, forYouSession, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, finishedItem, answerCard, currentCard, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
@@ -45,9 +47,18 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 	} catch { return "nohub"; }
 }
 
-export const CARD_NO = "Not important, forget it", CARD_SEND = "Send to a session…", CARD_ELSE = "Something else…";
+export const CARD_KEY = "alt+y";
+export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_SEND = "Send to a session…", CARD_ELSE = "Something else…";
 /** How a judge-written button reads in the Mac picker: where it runs, when that is another session. */
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
+
+/** The waiting card as a few short lines above the editor. */
+export const cardLines = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
+	`● For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}`,
+	`  ${it.title}`,
+	...(it.why ? [`  ${it.why.length > 110 ? `${it.why.slice(0, 109)}…` : it.why}`] : []),
+	`  ${it.choices.map(choiceLabel).join("  ·  ")}  ·  or type your own   alt+y to answer`,
+];
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
@@ -56,20 +67,23 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["handoff", "note", "next", "finished", "later", "done", "drop"] as const),
+			action: StringEnum(["handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.String({ description: "Loop id" }),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
 			cwd: Type.Optional(Type.String({ description: "handoff into \"new\": the project folder (default: the loop's project)" })),
 			text: Type.Optional(Type.String({ description: "note: the progress line; next: what is done" })),
 			button: Type.Optional(Type.String({ description: "next: the new main button, 1-3 words naming the outcome" })),
+			choices: Type.Optional(Type.Array(Type.Object({ label: Type.String(), run: Type.String({ description: "here, discuss, a session id, new, later, or no" }), prompt: Type.Optional(Type.String()) }), { description: "choices: the card's buttons" })),
+			question: Type.Optional(Type.String({ description: "choices: what brook is deciding, one line" })),
 			step: Type.Optional(Type.String({ description: "next: the next step" })),
 		}),
 		async execute(_id, p) {
 			const done = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
 			if (p.action === "note") return done(noteItem(p.id, p.text ?? "", deps.dir) ? "Noted." : `No loop ${p.id}, or empty note.`);
 			if (p.action === "finished") return done(finishedItem(p.id, p.text ?? "", deps.dir) ? "Back to brook to check and close." : `No open loop ${p.id}, or empty text.`);
+			if (p.action === "choices") return done(publishChoices(p.id, p.choices, { question: p.question, dir: deps.dir }) ? "On brook's card. End your turn; his answer will come back." : `No open loop ${p.id}, or no valid choices.`);
 			if (p.action === "later") return done(laterItem(p.id, deps.dir) ? "Parked." : `No open loop ${p.id}.`);
 			if (p.action === "next") return done(nextItem(p.id, { button: p.button ?? "", action: p.step ?? "", note: p.text }, deps.dir) ? `Moved ${p.id} on: "${p.button}".` : `No open loop ${p.id}, or missing button/step.`);
 			if (p.action === "done") return done(doneItem(p.id, deps.dir) ? "Done." : `No open loop ${p.id}.`);
@@ -85,21 +99,33 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);
 		pi.setActiveTools([...active]);
 	};
-	// Cards: in the For you session only. When Pi is idle, show the oldest loop that needs brook; nothing
-	// runs until he picks. The phone shows the same card; whichever answers first wins, the other closes.
-	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined;
+	// Cards: in the For you session only. A card never pops up by itself: it sits as a small widget above the
+	// editor (alt+y to answer) and on the phone, so the session keeps working. brook answers whenever he wants;
+	// the first answer (Mac or phone) wins. Typing "later"/"no"/"done" on the card acts directly.
+	let timer: ReturnType<typeof setInterval> | undefined, showing: string | undefined, close: AbortController | undefined, shown: string | undefined;
+	const widget = (ctx: any, it: Awaited<ReturnType<typeof currentCard>>) => {
+		const key = it ? `${it.id}:${it.left}:${it.choices.map(c => c.label).join("|")}` : "";
+		if (key === shown) return;
+		shown = key;
+		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
+	};
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
 		const it = currentCard(deps.dir, await sessions().catch(() => []));
-		if (showing && showing !== it?.id) { close?.abort(); return; }
-		if (!it || showing || !ctx.isIdle()) return;
+		if (showing && showing !== it?.id) close?.abort();
+		widget(ctx, it);
+	};
+	const answer = async (ctx: any) => {
+		const it = currentCard(deps.dir, await sessions().catch(() => []));
+		if (!it) { ctx.ui.notify("No card waiting.", "info"); return; }
+		if (showing) return;
 		showing = it.id; close = new AbortController();
 		try {
 			const title = `For you · ${it.source}${it.left ? ` · ${it.left} more` : ""}\n${it.title}\n${it.why ? `${it.why}\n` : ""}Next: ${it.action}`;
 			const labels = it.choices.map(choiceLabel);
-			const pick = await ctx.ui.select(title, [...labels, CARD_NO, ...(it.sessions.length ? [CARD_SEND] : []), CARD_ELSE], { signal: close.signal });
+			const pick = await ctx.ui.select(title, [...labels, CARD_ELSE, ...(it.choices.some(c => c.run === "later") ? [] : [CARD_LATER]), CARD_NO, ...(it.sessions.length ? [CARD_SEND] : [])], { signal: close.signal });
 			if (!pick) return;
-			const text = pick === CARD_ELSE ? await ctx.ui.input("What should For you do instead?", "", { signal: close.signal }) : undefined;
+			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
 			if (pick === CARD_ELSE && !text?.trim()) return;
 			let to: string | undefined;
 			if (pick === CARD_SEND) {
@@ -109,18 +135,35 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				to = it.sessions[names.indexOf(where)]?.id;
 			}
 			const index = labels.indexOf(pick);
-			const answer: CardAnswer = index >= 0 ? "choice" : pick === CARD_NO ? "no" : to ? "send" : "else";
+			const kind: CardAnswer = index >= 0 ? "choice" : pick === CARD_LATER ? "later" : pick === CARD_NO ? "no" : to ? "send" : "else";
 			const choice = index >= 0 ? index : undefined;
-			const via = await (deps.answer ?? answerViaHub)(it.id, { answer, choice, ...(to ? { to } : {}), text });
+			const via = await (deps.answer ?? answerViaHub)(it.id, { answer: kind, choice, ...(to ? { to } : {}), text });
 			if (via === "gone") { ctx.ui.notify("That card was already answered.", "info"); return; }
-			if (via === "ok") return;
-			// No hub: answer here directly.
-			const r = answerCard(it.id, answer, { choice, to, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
-			if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
-			if (r.here) pi.sendUserMessage(r.here);
-			if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);
-		} finally { showing = undefined; close = undefined; }
+			if (via !== "ok") {
+				// No hub: answer here directly.
+				const r = answerCard(it.id, kind, { choice, to, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
+				if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
+				if (r.here) pi.sendUserMessage(r.here, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+				if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);
+			}
+		} finally { showing = undefined; close = undefined; await check(ctx).catch(() => {}); }
 	};
+	pi.registerShortcut(CARD_KEY, { description: "Answer the waiting For you card", handler: async (ctx) => { if (isCoordinator(ctx)) await answer(ctx); } });
+	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
+	pi.registerMessageRenderer(LOOP_MESSAGE, (message, { expanded, outputPad }, theme) => {
+		const s = (message.details ?? {}) as { title?: string; you?: string };
+		const head = `${theme.fg("accent", "↳ loop")} ${theme.bold(s.title ?? "")}${s.you ? theme.fg("dim", `  · you: ${s.you}`) : ""}`;
+		const box = new Box(outputPad, 0, (t: string) => theme.bg("customMessageBg", t));
+		box.addChild(new Text(expanded ? `${head}\n${theme.fg("dim", String(message.content))}` : head, 0, 0));
+		return box;
+	});
+	pi.on("input", (event) => {
+		if (event.source !== "extension" || event.images?.length) return { action: "continue" as const };
+		const m = loopMessage(event.text);
+		if (!m) return { action: "continue" as const };
+		pi.sendMessage(m, { triggerTurn: true, deliverAs: event.streamingBehavior ?? "followUp" });
+		return { action: "handled" as const };
+	});
 	pi.on("session_start", (_e, ctx) => {
 		apply(ctx);
 		clearInterval(timer);
@@ -128,6 +171,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		timer.unref?.();
 	});
 	pi.on("agent_end", (_e, ctx) => void check(ctx).catch(() => {}));
+	pi.on("session_start", (_e, ctx) => { shown = undefined; void check(ctx).catch(() => {}); });
 	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
 	pi.on("before_agent_start", async (event, ctx) => {
 		apply(ctx);

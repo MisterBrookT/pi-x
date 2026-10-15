@@ -11,6 +11,7 @@ function fakePi() {
 	const handlers = {}, tools = new Map(); let active = ["read", "bash"];
 	return {
 		handlers, tools, get active() { return active; },
+		registerShortcut() {}, registerMessageRenderer() {}, sendMessage() {},
 		registerTool: t => { tools.set(t.name, t); active = [...active, t.name]; },
 		getActiveTools: () => active, setActiveTools: a => { active = a; }, getAllTools: () => [...tools.values()],
 		on: (e, h) => { (handlers[e] ??= []).push(h); },
