@@ -209,6 +209,7 @@ export interface Card {
 	/** 1-based position among waiting cards (the Mac picker can step through them). */
 	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string;
 	/** Other waiting asks in the same line of work, decided together on this card. */
+	when?: string;
 	related?: { id: string; title: string; source: string; why: string; kind?: string }[]; line?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
 	sessions: { id: string; name: string; cwd?: string; fits?: boolean }[];
@@ -266,7 +267,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
 	const it = waiting[at];
 	if (!it) return undefined;
 	const rel = heads[at].related, ln = lineOf(it);
-	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), at: at + 1, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
+	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), at: at + 1, when: it.at, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**

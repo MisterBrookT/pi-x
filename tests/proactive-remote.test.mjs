@@ -235,7 +235,7 @@ test("one place: the bell opens the For you chat; its card is open, shows source
   assert.match(await card.locator(".job-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
   const go = card.locator(".job-go");
   assert.equal(await go.count(), 1, "one recommended move");
-  assert.match(await go.textContent(), /Ask Minara →[\s\S]*In minara: Package the newest data/);
+  assert.match(await go.textContent(), /Ask Minara[\s\S]*In minara · Package the newest data/);
   for (const b of await card.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(800); await page.screenshot({ path: process.env.PIX_SHOT }); }
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
@@ -333,6 +333,6 @@ test("related asks in one line of work share one card, and one answer handles th
   await page.goto(`${base}/#token=${token}`);
   const rel = page.locator('.job-card[data-job="h1"] .job-rel');
   await rel.waitFor();
-  assert.match(await rel.textContent(), /News bench · also 1 related[\s\S]*Data for 欧阳/);
+  assert.match(await rel.textContent(), /Same thread · News bench[\s\S]*Data for 欧阳/);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
