@@ -7,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerBackground, { reminderDelaySeconds, statusText } from "../extensions/background.ts";
-import { BACKGROUND_STATE_QUERY } from "../src/background-state.ts";
+import registerBackground, { reminderDelaySeconds, statusText } from "../plugins/background/index.ts";
+import { BACKGROUND_STATE_QUERY } from "../plugins/background/background-state.ts";
 
 const quote = (text) => `'${text.replaceAll("'", `'\\''`)}'`;
 const node = (script) => `${quote(process.execPath)} -e ${quote(script)}`;
@@ -362,7 +362,7 @@ test("state query reports the earliest next health check, and changes are announ
 	const timers = clock();
 	const goalRef = { current: { id: "g1", active: true } };
 	const h = harness(t, "tui", timers, goalRef);
-	const { BACKGROUND_CHANGED } = await import("../src/background-state.ts");
+	const { BACKGROUND_CHANGED } = await import("../plugins/background/background-state.ts");
 	let changed = 0;
 	h.bus.on(BACKGROUND_CHANGED, () => { changed++; });
 	const g = await gate(t);

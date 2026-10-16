@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addAnthropicFastBeta, applyFastMode, fastModeActiveFor, fastModeTarget, isFastModeEnabled, setFastModeEnabled } from "../src/fast-mode.ts";
+import { addAnthropicFastBeta, applyFastMode, fastModeActiveFor, fastModeTarget, isFastModeEnabled, setFastModeEnabled } from "../plugins/fast-mode/fast-mode.ts";
 
 test("fast mode recognizes only supported direct providers", () => {
   assert.equal(fastModeTarget({ provider: "openai-codex", api: "openai-responses" }), "openai");

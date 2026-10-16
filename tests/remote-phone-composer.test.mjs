@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { remoteAppHtml } from '../src/remote-web.ts';
+import { remoteAppHtml } from '../plugins/remote/remote-web.ts';
 
 const html = remoteAppHtml;
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];

@@ -10,8 +10,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { visibleWidth, getKeybindings, setKittyProtocolActive } from "@earendil-works/pi-tui";
-import { buildPanel } from "../src/tool-panel.ts";
-import { ToolPanelView } from "../src/tool-panel-view.ts";
+import { buildPanel } from "../plugins/core/tool-panel.ts";
+import { ToolPanelView } from "../plugins/core/tool-panel-view.ts";
 
 test('role shortcut is scoped and supports Kitty keyboard encoding', () => {
  const model = { rows: [], activeTokens: 0, activeCount: 0, totalCount: 0 };

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { remoteRelayWebScript } from "../src/remote-relay-web.ts";
+import { remoteRelayWebScript } from "../plugins/remote/remote-relay-web.ts";
 
 // A fake browser: sockets record what they send; the test controls pongs, visibility and time.
 function phone() {

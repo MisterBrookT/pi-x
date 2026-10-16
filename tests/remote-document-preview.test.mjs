@@ -3,7 +3,7 @@ import { access, copyFile, mkdtemp, readFile, realpath, rm, writeFile } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { previewRemoteDocument } from "../src/remote-document-preview.ts";
+import { previewRemoteDocument } from "../plugins/remote/remote-document-preview.ts";
 
 async function home(t) {
   const path = await mkdtemp(join(tmpdir(), "pix-preview-test-"));

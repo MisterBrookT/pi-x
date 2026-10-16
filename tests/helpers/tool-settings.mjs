@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { toolSettings } from '../../src/tool-settings.ts';
+import { toolSettings } from '../../plugins/core/tool-settings.ts';
 const stores = new WeakMap();
 const dirs = [];
 process.on('exit', () => { for (const dir of dirs) rmSync(dir, { recursive:true, force:true }); });

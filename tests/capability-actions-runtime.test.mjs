@@ -19,7 +19,7 @@ test('Pi separately loads the role action and /tool, including after reload', as
   const bus = createEventBus();
   for (let reload = 0; reload < 2; reload++) {
     const loaded = await loadExtensions([
-      resolve('extensions/upstream-tools.ts'), resolve('extensions/computer.ts'), resolve('extensions/tool.ts'),
+      resolve('plugins/subagents/index.ts'), resolve('plugins/computer/index.ts'), resolve('plugins/core/tool.ts'),
     ], process.cwd(), bus);
     t.after(() => loaded.runtime.invalidate());
     assert.deepEqual(loaded.errors, []);

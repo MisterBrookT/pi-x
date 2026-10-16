@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Script } from "node:vm";
-import registerRemote from "../extensions/remote.ts";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { deletableSessionFile, launchCommand, launchPi, launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "../src/remote-mac.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
-import { remoteAppHtml } from "../src/remote-web.ts";
+import registerRemote from "../plugins/remote/index.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { deletableSessionFile, launchCommand, launchPi, launchableFolder, listFolders, listMemory, readMemory, recentFolders } from "../plugins/remote/remote-mac.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
 import { goalSession, say } from "./helpers/goal-session.mjs";
 
 const token = "t".repeat(32);
@@ -174,14 +174,14 @@ test("launchPi adds a tab to an open Otty window, never starts a second Otty, an
 });
 
 test("ottyWindow prefers the focused window and tolerates errors", async () => {
-  const { ottyWindow } = await import("../src/remote-mac.ts");
+  const { ottyWindow } = await import("../plugins/remote/remote-mac.ts");
   assert.equal(await ottyWindow("otty", async () => JSON.stringify({ data: [{ id: "a" }, { id: "b", focused: true }] })), "b");
   assert.equal(await ottyWindow("otty", async () => JSON.stringify({ data: [] })), undefined);
   assert.equal(await ottyWindow("otty", async () => { throw Error("no socket"); }), undefined);
 });
 
 test("focusOttyTab finds the tab by title and focuses it", async () => {
-  const { focusOttyTab } = await import("../src/remote-mac.ts");
+  const { focusOttyTab } = await import("../plugins/remote/remote-mac.ts");
   const calls = [];
   const run = async (cmd, args) => { calls.push(args.join(" ")); return JSON.stringify({ data: [{ id: "t1", title: "π - minara" }, { id: "t2", title: "π - For you - tangyinghao" }] }); };
   assert.equal(await focusOttyTab("For you", "otty", run), true);
@@ -190,7 +190,7 @@ test("focusOttyTab finds the tab by title and focuses it", async () => {
 });
 
 test("Resume lists saved sessions newest first like pi -r, skipping live and empty ones", async t => {
-  const { pastSessions } = await import("../src/remote-mac.ts");
+  const { pastSessions } = await import("../plugins/remote/remote-mac.ts");
   const { utimes } = await import("node:fs/promises");
   const f = await fixture(t);
   const dir = join(f.sessions, "--code--");
@@ -206,7 +206,7 @@ test("Resume lists saved sessions newest first like pi -r, skipping live and emp
 });
 
 test("Resume accepts only a real session file under the sessions folder", async t => {
-  const { resumableSession } = await import("../src/remote-mac.ts");
+  const { resumableSession } = await import("../plugins/remote/remote-mac.ts");
   const f = await fixture(t);
   const file = join(f.sessions, "--code--", "2026-01-01_abc.jsonl");
   await writeFile(file, JSON.stringify({ type: "session", id: "abc", cwd: join(f.home, "code") }) + "\n" + JSON.stringify({ type: "message", message: { role: "user", content: "x" } }) + "\n");

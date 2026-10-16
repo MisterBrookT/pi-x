@@ -1,0 +1,137 @@
+/**
+ * Sessions coordinate with each other directly, so brook only hears about real decisions.
+ *
+ * Tool `chat`: board (who is doing what, who claims what), set (my doing / claims), send (note | ask | handoff | reply).
+ * - note: arrives on the receiver's next turn, never wakes it. ask / handoff / reply: wake it (until the hop limit).
+ * - Claims are enforced: edit / write on a file another live session claims is blocked with "ask <owner> first".
+ */
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { basename, resolve } from "node:path";
+import { Type } from "typebox";
+import { board, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
+
+const MSG = "pix-chat";
+/** Sessions that never join chat (brook's personal session). */
+const OFF = new Set(["for-you"]);
+
+const HOW = {
+  note: "FYI only; no answer expected.",
+  ask: `Answer with chat send kind="reply" to="{from}" thread="{thread}" (add grant=[path] to let them edit a file you claim). Settle it yourselves; involve brook only for things that leave this machine, deletions, or a conflict you cannot resolve.`,
+  handoff: `This task is now yours. When done (or if you cannot do it), send kind="reply" to="{from}" thread="{thread}" with the result.`,
+  reply: "This answers your earlier message; continue your work with it. Reply again only if something is still open.{grant}",
+};
+
+export function format(n: Note): string {
+  const how = HOW[n.kind].replaceAll("{from}", n.from).replaceAll("{thread}", n.thread)
+    .replace("{grant}", n.grant?.length ? ` You may now edit: ${n.grant.join(", ")}.` : "");
+  const stop = n.hop >= MAX_HOPS ? `\n\nThis thread hit the ${MAX_HOPS}-reply limit, so it did not wake you. Do not reply automatically; tell brook what is open.` : "";
+  return `[chat ${n.kind} from session "${n.from}", thread ${n.thread}]\n\n${n.text}\n\n${how}${stop}`;
+}
+
+export default function (pi: ExtensionAPI) {
+  let me: Peer | undefined;
+  let room: ReturnType<typeof join_> | undefined;
+  let sent: (Note & { to: string }) | undefined;  // last message sent, rendered as a bubble in this pane
+  const granted = new Set<string>();  // files other sessions explicitly let me edit
+  const hops = new Map<string, number>();  // thread -> hop of the last message seen, so my reply goes one higher
+
+  const receive = (n: Note) => {
+    hops.set(n.thread, n.hop);
+    for (const f of n.grant ?? []) granted.add(f);
+    pi.sendMessage({ customType: MSG, display: true, details: n, content: format(n) },
+      wakes(n) ? { triggerTurn: true, deliverAs: "followUp" } : { deliverAs: "nextTurn" });
+  };
+
+  pi.on("session_start", (_e, ctx) => {
+    room?.close(); room = undefined; me = undefined;
+    const base = pi.getSessionName() || basename(ctx.cwd) || "pi";
+    if (OFF.has(slug(base)) || process.env.PIX_CHAT_OFF) return;  // brook's personal session stays out of project chat
+    const name = claimName(base, process.pid);
+    me = { name, cwd: ctx.cwd, pid: process.pid, at: Date.now(), status: "idle", doing: "", claims: [] };
+    room = join_(me, receive);
+  });
+  pi.on("agent_start", () => room?.update({ status: "busy" }));
+  pi.on("agent_end", () => room?.update({ status: "idle" }));
+  pi.on("session_shutdown", () => { room?.close(); room = undefined; });
+
+  // Enforce claims on file edits.
+  pi.on("tool_call", (event, ctx) => {
+    if (!me || (event.toolName !== "edit" && event.toolName !== "write")) return;
+    const path = (event.input as { path?: string }).path;
+    if (!path) return;
+    const abs = resolve(ctx.cwd, path);
+    const o = owner(abs, me.name) ?? owner(path, me.name);
+    if (o && !granted.has(abs)) return { block: true, reason: `${abs} is claimed by session "${o.name}" (doing: ${o.doing || "?"}). ` +
+      `Ask it: chat send kind="ask" to="${o.name}" naming the file. Do not work around this with bash. ` +
+      `When the owner allows it, it sends chat with grant=["${abs}"] (or drops the claim), and the edit will pass.` };
+  });
+
+  pi.registerMessageRenderer(MSG, (message, _opts, theme) => {
+    const n = message.details as Note;
+    return new Text(`${theme.fg("accent", `✉ ${n.kind} from ${n.from}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
+  });
+
+  const show = (ps: Peer[]) => ps.map((p) =>
+    `${p.name === me?.name ? "* " : "  "}${p.name} [${p.status}] ${p.cwd}\n    doing: ${p.doing || "-"}\n    claims: ${(p.claims ?? []).join(", ") || "-"}`).join("\n");
+
+  pi.registerTool({
+    name: "chat",
+    label: "Chat",
+    description: "Coordinate with other Pi sessions on this Mac, instead of asking brook to relay. " +
+      "board: who is doing what and who claims which files / machines / services. " +
+      "set: publish what I am doing and what I claim (absolute file paths, or names like a800c, nd-fresh); other sessions cannot edit my claimed files. " +
+      "send: kind note (FYI, does not wake them), ask (they answer), handoff (they own the task and report back), reply (answer an ask/handoff; pass its thread). " +
+      "To let another session edit a file you claim, reply with grant=[path]. " +
+      "Before editing files or using machines another session might own, check the board; if claimed, ask the owner.",
+    parameters: Type.Object({
+      action: StringEnum(["board", "set", "send"]),
+      to: Type.Optional(Type.String({ description: "Session name (unique prefix works)" })),
+      kind: Type.Optional(StringEnum([...KINDS])),
+      message: Type.Optional(Type.String()),
+      thread: Type.Optional(Type.String({ description: "Thread id when replying" })),
+      doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
+      claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
+      grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
+    }),
+    renderCall(args, theme) {
+      if (args.action !== "send") return new Text(theme.fg("muted", `chat ${args.action}`), 0, 0);
+      return new Text(theme.fg("muted", `chat → ${args.to ?? "?"}`), 0, 0);
+    },
+    renderResult(r, _o, theme, context) {
+      const n = (r.details as { sent?: Note & { to: string } } | undefined)?.sent;
+      const t = r.content[0]?.type === "text" ? r.content[0].text : "";
+      if (!n) return new Text(theme.fg(context.isError ? "error" : "muted", t), 0, 0);
+      return new Text(`${theme.fg("accent", `✉ ${n.kind} to ${n.to}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
+    },
+    async execute(_id, p, _signal, _update, ctx: ExtensionContext) {
+      const text = ((): string => {
+        if (!me || !room) return "chat is not ready";
+        if (p.action === "board") return `You are "${me.name}".\n${show(board())}`;
+        if (p.action === "set") {
+          const claims = p.claims?.map((c) => (c.includes("/") ? resolve(ctx.cwd, c) : c));
+          const clash = (claims ?? []).map((c) => [c, owner(c, me!.name)] as const).filter(([, o]) => o);
+          if (clash.length) return `Not set: ${clash.map(([c, o]) => `${c} is claimed by ${o!.name}`).join("; ")}. Ask them first.`;
+          room.update({ ...(p.doing !== undefined && { doing: p.doing }), ...(claims && { claims }) });
+          return `Board updated.\n${show(board().filter((x) => x.name === me!.name))}`;
+        }
+        if (!p.to || !p.message) return "send needs to and message";
+        const to = find(p.to, undefined, me.name);
+        if (typeof to !== "string") return to.error;
+        const kind = (p.kind ?? "note") as Kind;
+        const hop = p.thread ? (hops.get(p.thread) ?? 0) + 1 : 0;
+        const grant = p.grant?.map((g) => resolve(ctx.cwd, g));
+        const n = send(me.name, to, kind, p.message, { thread: p.thread, hop, grant });
+        hops.set(n.thread, hop);
+        sent = { ...n, to };
+        const live = board().some((x) => x.name === to);
+        return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
+          (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
+      })();
+      const details = p.action === "send" && sent ? { sent } : {};
+      sent = undefined;
+      return { content: [{ type: "text", text }], details };
+    },
+  });
+}

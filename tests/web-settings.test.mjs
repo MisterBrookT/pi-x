@@ -10,7 +10,7 @@ import {
 	setAllowRanges,
 	setMaxInlineChars,
 	updateWebSettings,
-} from "../src/web-settings.ts";
+} from "../plugins/web/web-settings.ts";
 
 function fixture(t, initial = {}) {
 	const dir = mkdtempSync(join(tmpdir(), "pix-web-settings-"));

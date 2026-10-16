@@ -4,10 +4,10 @@ import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDesktopCredentialStore, runSecurity, desktopCredentialService, desktopCredentialAccount, validDesktopCredentials } from "../src/remote-desktop-credentials.ts";
-import { createDesktopBroker } from "../src/remote-desktop.ts";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { createDesktopCredentialStore, runSecurity, desktopCredentialService, desktopCredentialAccount, validDesktopCredentials } from "../plugins/desktop/remote-desktop-credentials.ts";
+import { createDesktopBroker } from "../plugins/desktop/remote-desktop.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 // Never reaches the real Screen Sharing port: an unconnected socket stays open until disposed.
 function fakeBroker(t) { const broker = createDesktopBroker({ connect: () => new Socket() }); t.after(() => broker.dispose()); return broker; }
@@ -134,7 +134,7 @@ test("broker reports live sessions", () => {
 
 test("relay agent never serves credential replies from its request cache", async t => {
   const { WebSocketServer } = await import("ws");
-  const { startRemoteRelayAgent, sealRelayFrame, openRelayFrame } = await import("../src/remote-relay-agent.ts");
+  const { startRemoteRelayAgent, sealRelayFrame, openRelayFrame } = await import("../plugins/remote/remote-relay-agent.ts");
   const dir = await mkdtemp(join(tmpdir(), "pix-cred-relay-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const kc = fakeKeychain(), token = "r".repeat(32), relaySecret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
   const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir, desktopBroker: fakeBroker(t), desktopCredentials: createDesktopCredentialStore(kc.run) });

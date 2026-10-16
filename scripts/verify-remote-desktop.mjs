@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { chromium, devices } from 'playwright';
-import { startRemoteHub } from '../src/remote-hub.ts';
-import { startRemoteRelayAgent, readRelayOrigin } from '../src/remote-relay-agent.ts';
+import { startRemoteHub } from '../plugins/remote/remote-hub.ts';
+import { startRemoteRelayAgent, readRelayOrigin } from '../plugins/remote/remote-relay-agent.ts';
 const origin = await readRelayOrigin();
 if (!origin) throw Error('Configure relay origin first');
 const token = randomBytes(32).toString('base64url'), secret = randomBytes(32).toString('base64url');

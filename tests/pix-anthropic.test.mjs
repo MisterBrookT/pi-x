@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
-import registerPixAnthropic from "../extensions/pix-anthropic/index.ts";
-import { createPixAnthropicStream } from "../extensions/pix-anthropic/stream.ts";
-import { clearFastModeFallbacks, fastModeActiveFor, setFastModeEnabled } from "../src/fast-mode.ts";
+import registerPixAnthropic from "../plugins/pix-anthropic/index.ts";
+import { createPixAnthropicStream } from "../plugins/pix-anthropic/stream.ts";
+import { clearFastModeFallbacks, fastModeActiveFor, setFastModeEnabled } from "../plugins/fast-mode/fast-mode.ts";
 
 const SSE = [
   `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 0, cache_read_input_tokens: 120, cache_creation_input_tokens: 8 } } })}\n\n`,

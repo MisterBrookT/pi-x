@@ -5,9 +5,9 @@ import test from "node:test";
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../src/proactive.ts";
-import { dismissItem, forYouView, laterItem, readOpen, takeItem } from "../src/proactive-store.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../plugins/foryou/proactive.ts";
+import { dismissItem, forYouView, laterItem, readOpen, takeItem } from "../plugins/foryou/proactive-store.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 const DAY = 86_400_000;
 const now = Date.parse("2026-10-09T10:00:00Z");
@@ -92,7 +92,7 @@ test("relay allows Later from the phone", () => {
 });
 
 test("routing: the main button goes to the coordinator; the loops tool can send it to a live, own, or new session", async () => {
-	const { routeFor, actItem } = await import("../src/proactive-store.ts");
+	const { routeFor, actItem } = await import("../plugins/foryou/proactive-store.ts");
 	const home = "/Users/b";
 	const live = [{ id: "pix-foryou", name: "For you", cwd: home }, { id: "s1", name: "newsdecision", cwd: "/Users/b/work/nd" }];
 	const it = loop("a", { project: "~/work/nd" });
@@ -117,8 +117,8 @@ test("routing: the main button goes to the coordinator; the loops tool can send 
 });
 
 test("the brief: notes stay on the loop, go into the task, and are capped", async () => {
-	const { noteItem } = await import("../src/proactive-store.ts");
-	const { actPrompt, addNote } = await import("../src/proactive.ts");
+	const { noteItem } = await import("../plugins/foryou/proactive-store.ts");
+	const { actPrompt, addNote } = await import("../plugins/foryou/proactive.ts");
 	const dir = inbox(loop("n"));
 	assert.equal(noteItem("n", "  signed up,\n got API key  ", dir), true);
 	assert.equal(noteItem("n", "", dir), false); assert.equal(noteItem("zz", "x", dir), false);
@@ -126,13 +126,13 @@ test("the brief: notes stay on the loop, go into the task, and are capped", asyn
 	assert.match(it.note, /^- \d{4}-\d{2}-\d{2}: signed up, got API key$/);
 	const p = actPrompt(it);
 	assert.match(p, /Progress so far[\s\S]*signed up, got API key/);
-	assert.match(p, /proactive-daemon\.ts note n "/);
+	assert.match(p, /foryou\/daemon\.ts note n "/);
 	let note; for (let i = 0; i < 20; i++) note = addNote(note, `step ${i}`);
 	assert.equal(note.split("\n").length, 12); assert.match(note, /step 19$/);
 });
 
 test("coordinator context: memory, every open loop with project, session and brief, and live sessions", async () => {
-	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
 	const dir = inbox(loop("a", { project: "~/nd", status: "onit", session: "loop-a", note: "- 2026-10-09: half done" }), loop("b"), loop("c", { status: "dismissed" }));
 	writeFileSync(join(dir, "memory.md"), "- newsdecision lives in ~/nd\n");
 	const c = coordinatorContext(dir, [{ id: "s1", name: "nd", cwd: "/x", busy: true }]);
@@ -153,7 +153,7 @@ test("judge: a loop can carry a project folder; bad paths are dropped; the judge
 });
 
 test("regression: a first handoff does not claim the loop was 'picked up again'", async () => {
-	const { actItem } = await import("../src/proactive-store.ts");
+	const { actItem } = await import("../plugins/foryou/proactive-store.ts");
 	const dir = inbox(loop("f", { project: "/tmp" }));
 	const prompts = [];
 	await actItem("f", { dir, into: "new", launch: async (_d, _m, o) => { prompts.push(o.prompt); } });
@@ -164,7 +164,7 @@ test("regression: a first handoff does not claim the loop was 'picked up again'"
 });
 
 test("next: a finished step moves the loop on with the next button and brings it back to brook", async () => {
-	const { nextItem } = await import("../src/proactive-store.ts");
+	const { nextItem } = await import("../plugins/foryou/proactive-store.ts");
 	const dir = inbox(loop("db", { status: "onit", session: "loop-db", button: "Start Databento test", note: "- 2026-10-09: signed up" }));
 	assert.equal(nextItem("db", { button: "Send results to Amber", action: "Send Amber the test results", note: "Test done: latency 40ms" }, dir), true);
 	const [it] = readOpen(dir);
@@ -177,7 +177,7 @@ test("next: a finished step moves the loop on with the next button and brings it
 });
 
 test("done is not dismissed; now brings a parked loop back", async () => {
-	const { doneItem, nowItem } = await import("../src/proactive-store.ts");
+	const { doneItem, nowItem } = await import("../plugins/foryou/proactive-store.ts");
 	const dir = inbox(loop("a"), loop("p", { status: "later", wakeAt: "2099-01-01T00:00:00Z" }));
 	assert.equal(doneItem("a", dir), true);
 	assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "a").status, "done");
@@ -190,7 +190,7 @@ test("done is not dismissed; now brings a parked loop back", async () => {
 });
 
 test("open: focuses the tab of the session on a loop, else resumes that session", async () => {
-	const { openItem } = await import("../src/proactive-store.ts");
+	const { openItem } = await import("../plugins/foryou/proactive-store.ts");
 	const dir = inbox(loop("o", { status: "onit", session: "loop-o", sessionCwd: "/tmp/nd", title: "Test Databento" }), loop("f", { status: "onit", session: "pix-foryou" }), loop("n"));
 	const focused = [], launched = [];
 	assert.equal(await openItem("o", { dir, focusTab: async n => (focused.push(n), true), launch: async (...a) => launched.push(a) }), true);
@@ -203,10 +203,10 @@ test("open: focuses the tab of the session on a loop, else resumes that session"
 });
 
 test("work sessions are told how to move a loop on (next) or leave a note", async () => {
-	const { actPrompt } = await import("../src/proactive.ts");
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const p = actPrompt(loop("z"), "/tmp/x");
-	assert.match(p, /PIX_PROACTIVE_DIR=\/tmp\/x node .*proactive-daemon\.ts note z "/);
-	assert.match(p, /proactive-daemon\.ts next z "<1-3 word outcome button/);
+	assert.match(p, /PIX_PROACTIVE_DIR=\/tmp\/x node .*foryou\/daemon\.ts note z "/);
+	assert.match(p, /foryou\/daemon\.ts next z "<1-3 word outcome button/);
 });
 
 test("parseVerdict: a group question aimed at someone else (no @, reply, or name) is not brook's loop", () => {

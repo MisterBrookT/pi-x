@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { chromium, devices } from "playwright";
-import { remoteAppHtml } from "../src/remote-web.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
 
 // Pix Remote on an iPhone or iPad with a Bluetooth keyboard: Return sends, Shift+Return breaks a line,
 // and the on-screen keyboard keeps Return as a newline.

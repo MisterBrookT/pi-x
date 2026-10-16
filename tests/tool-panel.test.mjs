@@ -8,7 +8,7 @@ import {
 	formatTokens,
 	panelSummary,
 	panelGroup,
-} from "../src/tool-panel.ts";
+} from "../plugins/core/tool-panel.ts";
 
 const tool = (name, description = "d") => ({
 	name,

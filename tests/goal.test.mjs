@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import registerGoal from "../extensions/goal.ts";
-import { BACKGROUND_STATE_QUERY, backgroundState } from "../src/background-state.ts";
-import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, goalInstructions, parseGoal } from "../src/goal-state.ts";
-import { hasPendingGoalWork } from "../src/goal-work.ts";
+import registerGoal from "../plugins/goal/index.ts";
+import { BACKGROUND_STATE_QUERY, backgroundState } from "../plugins/background/background-state.ts";
+import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, goalInstructions, parseGoal } from "../plugins/goal/goal-state.ts";
+import { hasPendingGoalWork } from "../plugins/goal/goal-work.ts";
 
 function harness(sessionManager = SessionManager.inMemory()) {
 	const handlers = new Map();

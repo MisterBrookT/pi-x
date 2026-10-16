@@ -16,7 +16,7 @@ import {
 	getAgentDir,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { renderBenchmarkHtml, summarize, summaryLines } from "../src/benchmark.ts";
+import { renderBenchmarkHtml, summarize, summaryLines } from "../plugins/core/benchmark.ts";
 
 const exec = promisify(execFile);
 const REQUIRED_TOOLS = ["web_search", "fetch_content", "subagent", "todo", "question", "tool_search"];

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed } from "../src/footer.ts";
+import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed } from "../plugins/footer/footer.ts";
 
 test("footer defaults favor useful operational metrics over cost", () => {
   assert.equal(defaultFooterOptions.tokenSpeed, true);

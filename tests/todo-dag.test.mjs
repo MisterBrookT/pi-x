@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme, createEventBus } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { TODO_STALE_CALLS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../extensions/todo.ts";
+import registerTodo, { TODO_STALE_CALLS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../plugins/todo/index.ts";
 
 const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;

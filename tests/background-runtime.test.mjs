@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { AssistantMessageEventStream, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import registerBackground from "../extensions/background.ts";
+import registerBackground from "../plugins/background/index.ts";
 
 // Real Pi extension binding, message queue and agent loop; only model responses are scripted.
 for (const finishWhileBusy of [false, true]) {

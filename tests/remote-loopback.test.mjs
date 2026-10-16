@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createServer } from "node:http";
 import { configureHttpDispatcher } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/http-dispatcher.js";
-import { bypassProxyForLoopback } from "../src/remote-loopback.ts";
+import { bypassProxyForLoopback } from "../plugins/remote/remote-loopback.ts";
 
 test("hub requests on loopback skip an http_proxy that answers 502 (regression: phone saw no sessions)", async () => {
   const proxy = createServer((_q, r) => { r.writeHead(502); r.end(); });

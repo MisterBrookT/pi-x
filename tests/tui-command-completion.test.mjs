@@ -2,7 +2,7 @@ import test from "node:test";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import assert from "node:assert/strict";
 import { CombinedAutocompleteProvider, Editor } from "@earendil-works/pi-tui";
-import registerCapabilities from "../extensions/capabilities.ts";
+import registerCapabilities from "../plugins/core/capabilities.ts";
 
 const plain = (text) => text;
 const theme = {

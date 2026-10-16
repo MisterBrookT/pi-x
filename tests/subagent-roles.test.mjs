@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createJiti } from 'jiti';
 
 const jiti = createJiti(import.meta.url);
-const { configureSubagentRoles, roleSummary } = await jiti.import('../src/subagent-roles.ts');
+const { configureSubagentRoles, roleSummary } = await jiti.import('../plugins/subagents/subagent-roles.ts');
 const { discoverAgents } = await jiti.import('../node_modules/pi-subagents/src/agents/agents.ts');
 
 function fixture(t, choices, options = {}) {

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { copyFile, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { startRemoteHub } from '../src/remote-hub.ts';
-import { relayAllowed } from '../src/remote-relay-agent.ts';
+import { startRemoteHub } from '../plugins/remote/remote-hub.ts';
+import { relayAllowed } from '../plugins/remote/remote-relay-agent.ts';
 
 test('authenticated document previews expose all PDF pages through relay-allowed API', async t => {
   const home = await mkdtemp(join(tmpdir(), 'pix-document-api-'));

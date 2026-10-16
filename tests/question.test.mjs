@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderQuestion } from "../extensions/question.ts";
+import { renderQuestion } from "../plugins/question/index.ts";
 
 const plain = { fg: (_c, t) => t, bold: t => t };
 const options = [
@@ -28,7 +28,7 @@ test("narrow terminals put descriptions under the option and never overflow", ()
 });
 
 test("number and j/k keys also work under the Kitty keyboard protocol", async () => {
-  const { keyChar } = await import("../extensions/question.ts");
+  const { keyChar } = await import("../plugins/question/index.ts");
   assert.equal(keyChar("2"), "2");
   assert.equal(keyChar("\x1b[50u"), "2");
   assert.equal(keyChar("\x1b[106u"), "j");
@@ -36,7 +36,7 @@ test("number and j/k keys also work under the Kitty keyboard protocol", async ()
 
 test("the question tool tells the model to ask decisions as choices", async () => {
   let tool;
-  const { default: register } = await import("../extensions/question.ts");
+  const { default: register } = await import("../plugins/question/index.ts");
   register({ registerTool: t => { tool = t; }, events: { on: () => () => {}, emit() {} } });
   assert.ok(tool.promptSnippet);
   assert.match(tool.promptGuidelines.join(" "), /instead of writing the question in your reply/);

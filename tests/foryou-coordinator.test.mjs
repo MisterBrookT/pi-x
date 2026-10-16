@@ -4,8 +4,8 @@ import test from "node:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import register from "../extensions/foryou.ts";
-import { parseInbox } from "../src/proactive.ts";
+import register from "../plugins/foryou/index.ts";
+import { parseInbox } from "../plugins/foryou/proactive.ts";
 
 function fakePi() {
 	const handlers = {}, tools = new Map(); let active = ["read", "bash"];
@@ -54,7 +54,7 @@ test("coordinator: loops tool and context only in the For you session", async ()
 });
 
 test("regression: coordinator context says a question is not a request to change loops", async () => {
-	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
 	const { mkdtempSync, writeFileSync } = await import("node:fs");
 	const { tmpdir } = await import("node:os");
 	const dir = mkdtempSync(tmpdir() + "/fy-");

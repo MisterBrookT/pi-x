@@ -4,8 +4,8 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createPushSender, encryptPushPayload } from "../src/remote-push.ts";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { createPushSender, encryptPushPayload } from "../plugins/remote/remote-push.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 const hmac = (k, d) => createHmac("sha256", k).update(d).digest();
 // A phone-side subscription and the RFC 8291 decryption a browser performs.
@@ -191,7 +191,7 @@ test("sidebar links come from a local file, only http(s), and the relay allows t
   const { mkdtemp, writeFile } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { relayAllowed } = await import("../src/remote-relay-agent.ts");
+  const { relayAllowed } = await import("../plugins/remote/remote-relay-agent.ts");
   const dir = await mkdtemp(join(tmpdir(), "links-"));
   const linksPath = join(dir, "links.json");
   await writeFile(linksPath, JSON.stringify([{ label: "Book", url: "https://decision.example/" }, { label: "Bad", url: "javascript:alert(1)" }, { label: "", url: "https://x" }]));

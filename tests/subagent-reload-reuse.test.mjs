@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createJiti } from 'jiti';
-import { subagentRequest } from '../src/simple-subagent.ts';
+import { subagentRequest } from '../plugins/subagents/simple-subagent.ts';
 
 // Pi provides its bundled packages to extensions at load time; mirror that for the executor import.
 // Pi 1.3 hoists them to the top-level node_modules; older Pi nested them under pi-coding-agent.

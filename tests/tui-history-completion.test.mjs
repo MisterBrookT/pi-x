@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import registerHistoryCompletion, { historySuggestion } from "../extensions/history-completion.ts";
-import smartEditor, { completionSuggestion } from "../extensions/smart-editor.ts";
+import registerHistoryCompletion, { historySuggestion } from "../plugins/editor/history-completion.ts";
+import smartEditor, { completionSuggestion } from "../plugins/editor/index.ts";
 
 test("history completion follows zsh-style prompt-prefix matching", () => {
   const history = [

@@ -8,8 +8,8 @@ import { settingsFor } from "./helpers/tool-settings.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager, createEventBus } from "@earendil-works/pi-coding-agent";
-import registerCapabilities from "../extensions/capabilities.ts";
-import registerTool from "../extensions/tool.ts";
+import registerCapabilities from "../plugins/core/capabilities.ts";
+import registerTool from "../plugins/core/tool.ts";
 
 const ALL = [
 	"read", "bash", "todo", "question", "lsp_diagnostics", "lsp_fix",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 // The Mac re-sends the whole session every few seconds. Phones must get only what changed.
 test("phones get a small patch for a new message and nothing for an unchanged heartbeat", async t => {

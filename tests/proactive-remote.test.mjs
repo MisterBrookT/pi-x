@@ -5,10 +5,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { actItem, dismissItem, readPending } from "../src/proactive-store.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
-import { parseInbox } from "../src/proactive.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { actItem, dismissItem, readPending } from "../plugins/foryou/proactive-store.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
+import { parseInbox } from "../plugins/foryou/proactive.ts";
 
 const token = "foryou-token-1234567890";
 const item = (id, extra = {}) => ({ id, at: new Date().toISOString(), source: "Group", sourceKey: "feishu:c", title: `Title ${id}`, why: `Why ${id}`, action: "Draft a reply", refs: [], howToRead: "lark-cli ...", status: "pending", ...extra });
@@ -93,7 +93,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   writeFileSync(join(dir, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (3 chats)", since: "x" }] }));
   await page.getByText("Can't read Feishu: login expired (3 chats)").waitFor({ timeout: 12000 });
   // DingTalk without Mac permission shows its own line; it disappears once DingTalk reads again.
-  const { trackHealth, healthSummary } = await import("../src/proactive.ts");
+  const { trackHealth, healthSummary } = await import("../plugins/foryou/proactive.ts");
   const ding = trackHealth({}, [{ source: "DingTalk", error: "DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk" }], [], "x");
   writeFileSync(join(dir, "health.json"), JSON.stringify({ state: ding, problems: healthSummary(ding) }));
   await page.getByText("Can't read DingTalk: Mac permission required (DingTalk)").waitFor({ timeout: 12000 });

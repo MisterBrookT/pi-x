@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OttyKittySyncFilter, installOttyKittySync, isLocalOtty } from "../src/otty-kitty-sync.ts";
+import { OttyKittySyncFilter, installOttyKittySync, isLocalOtty } from "../plugins/terminal-support/otty-kitty-sync.ts";
 import { Container, Image, TuiMainScreen, Text, setCapabilityOverrides } from "@earendil-works/pi-tui";
 
 const B = "\x1b[?2026h", E = "\x1b[?2026l";

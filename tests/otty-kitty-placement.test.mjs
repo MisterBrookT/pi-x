@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OttyKittySyncFilter } from "../src/otty-kitty-sync.ts";
+import { OttyKittySyncFilter } from "../plugins/terminal-support/otty-kitty-sync.ts";
 
 // Model the observed Otty 1.5.4 failure: inside synchronized output,
 // Kitty placement uses the cursor captured when the frame began.

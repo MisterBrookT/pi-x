@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Script } from "node:vm";
-import registerRemote, { shouldShowRemotePairing } from "../extensions/remote.ts";
-import { fitRemoteSnapshot, readRemoteToken, startRemoteHub } from "../src/remote-hub.ts";
-import { prepareRemotePairing, privateServeUrl } from "../src/remote-pair.ts";
-import { branchMessages, remoteMessages, remoteMedia } from "../src/remote-state.ts";
-import { remoteAppHtml } from "../src/remote-web.ts";
+import registerRemote, { shouldShowRemotePairing } from "../plugins/remote/index.ts";
+import { fitRemoteSnapshot, readRemoteToken, startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { prepareRemotePairing, privateServeUrl } from "../plugins/remote/remote-pair.ts";
+import { branchMessages, remoteMessages, remoteMedia } from "../plugins/remote/remote-state.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
 import { call, goalSession, say } from "./helpers/goal-session.mjs";
 
 const token = "t".repeat(32);
@@ -67,8 +67,8 @@ test("background completion is a structured card, not model-facing prose", () =>
 });
 
 test("tool arguments expose a useful one-line label without losing raw input", () => {
-  const [message] = remoteMessages([{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "src/remote-web.ts" } }] }]);
-  assert.equal(message.tools[0].label, "src/remote-web.ts");
+  const [message] = remoteMessages([{ role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "plugins/remote/remote-web.ts" } }] }]);
+  assert.equal(message.tools[0].label, "plugins/remote/remote-web.ts");
   assert.match(message.tools[0].input, /remote-web.ts/);
 });
 
@@ -476,7 +476,7 @@ test("the phone sees the current todo plan from a real Pi session", async (t) =>
   const probe = await startRemoteHub({ token, port: 0 });
   const port = probe.port; await probe.close();
   const tokenPath = join(dir, "token");
-  const { default: registerTodo } = await import("../extensions/todo.ts");
+  const { default: registerTodo } = await import("../plugins/todo/index.ts");
   const replies = [
     () => call("todo", { action: "replace", items: [{ text: "Read" }, { text: "Fix" }] }),
     () => say("planned"),
@@ -516,9 +516,9 @@ test("live text reaches phones as small stream events, not whole-session updates
 
 test("half-written markdown in live text renders as if already closed", async () => {
   const { default: remend } = await import("remend");
-  const { renderRemoteMarkdown } = await import("../src/remote-markdown.ts");
+  const { renderRemoteMarkdown } = await import("../plugins/remote/remote-markdown.ts");
   assert.match(renderRemoteMarkdown(remend("Hello **wor")), /<strong>wor<\/strong>/);
-  assert.match(await readFile(new URL("../extensions/remote.ts", import.meta.url), "utf8"), /renderRemoteMarkdown\(remend\(text\)/);
+  assert.match(await readFile(new URL("../plugins/remote/index.ts", import.meta.url), "utf8"), /renderRemoteMarkdown\(remend\(text\)/);
 });
 
 test("a hub running older Pix code reports its version and hands over when asked", async () => {
@@ -579,7 +579,7 @@ test("/rc with a slow relay warns but keeps remote on", async (t) => {
 });
 
 test("interactive Pi turns remote on with whatever is paired; other modes and subagents stay off", async () => {
-  const { remoteAutostartMode: m } = await import("../extensions/remote.ts");
+  const { remoteAutostartMode: m } = await import("../plugins/remote/index.ts");
   const both = { relay: true, tailnet: true };
   assert.equal(m({ env: {}, mode: "tui", ...both }), "relay");
   assert.equal(m({ env: {}, mode: "tui", relay: false, tailnet: true }), "tailnet");

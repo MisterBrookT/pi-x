@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { callTitle, resultLines, scriptSummary } from "../src/computer-render.ts";
-import { describeOcclusion } from "../src/computer-script.ts";
+import { callTitle, resultLines, scriptSummary } from "../plugins/computer/computer-render.ts";
+import { describeOcclusion } from "../plugins/computer/computer-script.ts";
 
 test("the call title names the operations the script performs", () => {
 	assert.equal(

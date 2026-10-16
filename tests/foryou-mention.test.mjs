@@ -4,9 +4,9 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CombinedAutocompleteProvider } from "@earendil-works/pi-tui";
-import { expandForYou, forYouSuggestions, withForYou } from "../src/foryou-mention.ts";
-import { readPending } from "../src/proactive-store.ts";
-import { parseInbox } from "../src/proactive.ts";
+import { expandForYou, forYouSuggestions, withForYou } from "../plugins/foryou/foryou-mention.ts";
+import { readPending } from "../plugins/foryou/proactive-store.ts";
+import { parseInbox } from "../plugins/foryou/proactive.ts";
 
 const item = { id: "251a4abe", at: "2026-10-06T08:21:22Z", title: "Knight 提醒核对回测设置", why: "W", action: "A", refs: [], source: "Decision Model", sourceKey: "feishu:c", howToRead: "HOW", status: "pending" };
 const inboxDir = () => { const d = mkdtempSync(join(tmpdir(), "pix-foryou-")); writeFileSync(join(d, "inbox.jsonl"), JSON.stringify(item) + "\n"); return d; };

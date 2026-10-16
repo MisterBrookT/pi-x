@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkPermissions, parseAuthRows, renderReport } from "../src/computer-permissions.ts";
+import { checkPermissions, parseAuthRows, renderReport } from "../plugins/computer/computer-permissions.ts";
 
 const darwin = (stdout) => ({ platform: "darwin", query: async () => stdout });
 

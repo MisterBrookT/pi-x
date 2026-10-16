@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { createServer, connect as netConnect } from 'node:net';
 import { createDecipheriv, createHash, getDiffieHellman } from 'node:crypto';
 import { chromium, devices } from 'playwright';
-import { startRemoteHub } from '../src/remote-hub.ts';
-import { createDesktopBroker } from '../src/remote-desktop.ts';
-import { createDesktopCredentialStore } from '../src/remote-desktop-credentials.ts';
+import { startRemoteHub } from '../plugins/remote/remote-hub.ts';
+import { createDesktopBroker } from '../plugins/desktop/remote-desktop.ts';
+import { createDesktopCredentialStore } from '../plugins/desktop/remote-desktop-credentials.ts';
 
 // Real noVNC (iPhone browser) -> real hub HTTP polling -> real broker -> loopback TCP fake Apple
 // Screen Sharing server (ephemeral port, never 5900) speaking RFB 003.889 with ARD auth (type 30).

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, devices } from 'playwright';
-import { startRemoteHub } from '../src/remote-hub.ts';
+import { startRemoteHub } from '../plugins/remote/remote-hub.ts';
 
 // A tiny RFB 3.8 server speaking real bytes to the real noVNC bundle, behind the hub's desktop HTTP contract.
 function rfbFixture({ securityTypes }) {

@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AssistantMessageEventStream, InMemoryCredentialStore, getCurrentSystemPrompt, getCurrentTools, normalizeContext } from "@earendil-works/pi-ai";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import registerGoal from "../../extensions/goal.ts";
-import registerBackground from "../../extensions/background.ts";
-import { GOAL_ENTRY, parseGoal } from "../../src/goal-state.ts";
+import registerGoal from "../../plugins/goal/index.ts";
+import registerBackground from "../../plugins/background/index.ts";
+import { GOAL_ENTRY, parseGoal } from "../../plugins/goal/goal-state.ts";
 
 /** Real Pi sessions, tools and lifecycle; only the provider's replies are scripted. */
 export async function goalSession(t, script, { sessionManager, extensions = [], tools = ["goal", "background", "bash"], settings, goalExtensionPath } = {}) {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 process.env.PIX_COMPLETE_CONFIG = join(await mkdtemp(join(tmpdir(), "pix-complete-")), "pix-complete.json");
-const { default: smartEditor } = await import("../extensions/smart-editor.ts");
+const { default: smartEditor } = await import("../plugins/editor/index.ts");
 
 const stripCursor = line => line.split("\u001B_pi:c\u0007").join("");
 const tick = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));

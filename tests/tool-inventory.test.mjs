@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { estimateTokens, groupByOrigin, inventory, originOf, pickerLabel, renderTable, summarize, toolChars, totals } from "../src/tool-inventory.ts";
+import { estimateTokens, groupByOrigin, inventory, originOf, pickerLabel, renderTable, summarize, toolChars, totals } from "../plugins/core/tool-inventory.ts";
 
 const tool = (name, extra = {}) => ({
 	name,

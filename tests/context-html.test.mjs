@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { entryText, escapeHtml, renderContextHtml } from "../src/context-html.ts";
+import { entryText, escapeHtml, renderContextHtml } from "../plugins/context/context-html.ts";
 
 const baseReport = {
 	slices: [{ label: "system prompt", tokens: 100, percent: 100, count: 1 }],

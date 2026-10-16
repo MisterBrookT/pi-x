@@ -137,11 +137,11 @@ Completing a goal still permits the agent's normal final summary.
 
 ## Implementation and tests
 
-`extensions/goal.ts` owns the command, reporting tool, state reminders,
-persistence, and `agent_settled` continuation hook. `src/goal-state.ts` validates
-saved state; `src/goal-work.ts` checks pending work. `src/state-reminder.ts`
+`plugins/goal/index.ts` owns the command, reporting tool, state reminders,
+persistence, and `agent_settled` continuation hook. `plugins/goal/goal-state.ts` validates
+saved state; `plugins/goal/goal-work.ts` checks pending work. `plugins/core/state-reminder.ts`
 handles append-only, deduplicated messages shared with Todo. Background commands and
-goals coordinate via Pi's session-scoped event bus in `src/background-state.ts`.
+goals coordinate via Pi's session-scoped event bus in `plugins/background/background-state.ts`.
 No new dependency or secondary model is used.
 
 `tests/goal.test.mjs` covers state, limits, races, public subagent status

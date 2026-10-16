@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import registerContext, { report, setBrowserOpener } from "../extensions/context.ts";
+import registerContext, { report, setBrowserOpener } from "../plugins/context/index.ts";
 
 // The export opens the page in a desktop browser, which a test run must not do.
 const opened = [];

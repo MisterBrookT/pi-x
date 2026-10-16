@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Agents call the daemon script as a CLI; a wrong verb once started the forever loop and hung a session.
-const script = new URL("../scripts/proactive-daemon.ts", import.meta.url).pathname;
+const script = new URL("../plugins/foryou/daemon.ts", import.meta.url).pathname;
 const dir = () => { const d = mkdtempSync(join(tmpdir(), "pix-cli-")); writeFileSync(join(d, "inbox.jsonl"), JSON.stringify({ id: "a1", at: new Date().toISOString(), source: "G", sourceKey: "k", title: "Title a1", why: "", action: "", refs: [], howToRead: "", status: "pending" }) + "\n"); return d; };
 
 test("list prints open loops and exits", () => {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { adapters, parseGmail, parseWechat, parseWechatChats } from "../src/proactive-sources.ts";
-import { planBatch } from "../src/proactive.ts";
+import { adapters, parseGmail, parseWechat, parseWechatChats } from "../plugins/foryou/proactive-sources.ts";
+import { planBatch } from "../plugins/foryou/proactive.ts";
 
 test("gmail and wechat adapters are registered", () => {
 	for (const k of ["gmail", "wechat", "wechat-all"]) assert.ok(adapters[k], k);

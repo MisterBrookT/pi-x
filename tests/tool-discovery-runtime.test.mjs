@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Type } from "typebox";
-import registerCapabilities from "../extensions/capabilities.ts";
-import registerTool from "../extensions/tool.ts";
+import registerCapabilities from "../plugins/core/capabilities.ts";
+import registerTool from "../plugins/core/tool.ts";
 import { createCodemodeExtension, createToolSearchExtension } from "@earendil-works/pi-coding-agent";
-import { withSpecialistExposure } from "../src/tool-discovery.ts";
-import { withPixToolGuidance } from "../src/tool-guidance.ts";
+import { withSpecialistExposure } from "../plugins/core/tool-discovery.ts";
+import { withPixToolGuidance } from "../plugins/core/tool-guidance.ts";
 import { goalSession, call, say, finish } from "./helpers/goal-session.mjs";
 
 const settings = () => {

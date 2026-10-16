@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import registerRemote from "../extensions/remote.ts";
-import { readRemoteToken, startRemoteHub } from "../src/remote-hub.ts";
-import { readRelayOrigin, relayRoom, sealRelayFrame, openRelayFrame } from "../src/remote-relay-agent.ts";
+import registerRemote from "../plugins/remote/index.ts";
+import { readRemoteToken, startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { readRelayOrigin, relayRoom, sealRelayFrame, openRelayFrame } from "../plugins/remote/remote-relay-agent.ts";
 import { goalSession, say } from "../tests/helpers/goal-session.mjs";
 
 test("public relay delivers a phone prompt into the same Pi transcript", { timeout: 30_000 }, async t => {

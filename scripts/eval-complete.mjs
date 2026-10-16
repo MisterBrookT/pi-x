@@ -5,7 +5,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { buildPrompt, normalizeContinuation, normalizeSuggestion } from "../src/ai-completion.ts";
+import { buildPrompt, normalizeContinuation, normalizeSuggestion } from "../plugins/editor/ai-completion.ts";
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => (a.startsWith("--") ? [a.slice(2), all[i + 1]] : [])).filter(Boolean));
 const SAMPLES = Number(args.samples ?? 12);

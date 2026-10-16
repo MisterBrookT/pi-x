@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { graphOrder, renderTodoGraph } from "../src/todo-graph.ts";
+import { graphOrder, renderTodoGraph } from "../plugins/todo/todo-graph.ts";
 
 const plan = rows => rows.map(([text, dependsOn = []], i) => ({ id: String(i + 1), text, dependsOn, status: "pending" }));
 const once = (lines, ids) => {

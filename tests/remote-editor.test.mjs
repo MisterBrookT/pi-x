@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 // Writing on the phone with a Bluetooth keyboard: open a note from Files, edit, save to the Mac, and
 // move around long files and the conversation without a mouse.

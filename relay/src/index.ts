@@ -1,7 +1,7 @@
-import { remoteAppHtml, remoteIconSvg, remoteManifest } from "../../src/remote-web.ts";
-import { remoteRelayWebScript } from "../../src/remote-relay-web.ts";
-import { remoteServiceWorker } from "../../src/remote-sw.ts";
-import { pageUpdateScript } from "../../src/remote-relay-web.ts";
+import { remoteAppHtml, remoteIconSvg, remoteManifest } from "../../plugins/remote/remote-web.ts";
+import { remoteRelayWebScript } from "../../plugins/remote/remote-relay-web.ts";
+import { remoteServiceWorker } from "../../plugins/remote/remote-sw.ts";
+import { pageUpdateScript } from "../../plugins/remote/remote-relay-web.ts";
 
 // Build id: the page checks /version when it comes back to the screen and reloads itself when a newer
 // page is deployed, so a home-screen app that stays open never keeps running old code.

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { chromium } from "playwright";
-import { remoteAppHtml, remoteIconSvg } from "../src/remote-web.ts";
+import { remoteAppHtml, remoteIconSvg } from "../plugins/remote/remote-web.ts";
 
 const serve = () => new Promise(resolve => { const server = createServer((req, res) => { res.setHeader("content-type", "text/html"); res.end(req.url === "/" ? remoteAppHtml : ""); }); server.listen(0, "127.0.0.1", () => resolve(server)); });
 

@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
 import { join } from "node:path";
-import { remoteAppHtml } from "../src/remote-web.ts";
-import { runningHelpers } from "../src/remote-helpers.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
+import { runningHelpers } from "../plugins/remote/remote-helpers.ts";
 
 const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)[1];
 // Load only the pure rendering functions from the phone app, without its DOM bootstrapping.

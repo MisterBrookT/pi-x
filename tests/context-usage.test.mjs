@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bar, buildReport, estimateTokens, renderReport, sizeOf } from "../src/context-usage.ts";
+import { bar, buildReport, estimateTokens, renderReport, sizeOf } from "../plugins/context/context-usage.ts";
 
 const msg = (role, content, toolName) => ({ type: "message", message: { role, content, toolName } });
 const text = (n) => [{ type: "text", text: "x".repeat(n) }];

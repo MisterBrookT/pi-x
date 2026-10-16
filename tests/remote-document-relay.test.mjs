@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { remoteRelayWebScript } from '../src/remote-relay-web.ts';
+import { remoteRelayWebScript } from '../plugins/remote/remote-relay-web.ts';
 
 test('document conversion has a longer relay deadline; ordinary requests keep the short deadline', async () => {
   const code = remoteRelayWebScript.slice(remoteRelayWebScript.indexOf('function relayApi('), remoteRelayWebScript.indexOf('function relayConnect('));

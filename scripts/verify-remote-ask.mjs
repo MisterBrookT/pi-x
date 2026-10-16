@@ -1,7 +1,7 @@
 // Regression: typing in a question's "Something else" box must survive live updates from the Mac. Run: node scripts/verify-remote-ask.mjs
 import assert from "node:assert/strict";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 const token="t-fixture"; const hub=await startRemoteHub({token,port:0,home:"/tmp",sessionsDir:"/tmp/none",memoryRoot:"/tmp",launch:async()=>{}});
 const base=`http://127.0.0.1:${hub.port}`, auth={authorization:`Bearer ${token}`,"content-type":"application/json"};
 let n=0; const pub=async(extra={})=>assert.equal((await fetch(`${base}/agent/s1`,{method:"PUT",headers:auth,body:JSON.stringify({id:"s1",name:"Q",named:true,cwd:"/tmp",busy:false,messages:[{id:"m"+(n++),role:"assistant",text:"tick "+n,timestamp:n}],question:{id:"q1",question:"Pick one?",options:[{label:"A"},{label:"B"}]},...extra})})).status,200);

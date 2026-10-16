@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJiti } from "jiti";
 const jiti = createJiti(import.meta.url);
-const chat = await jiti.import("../src/chat.ts");
-const { format } = await jiti.import("../extensions/chat.ts");
+const chat = await jiti.import("../plugins/chat/chat.ts");
+const { format } = await jiti.import("../plugins/chat/index.ts");
 const wait = async (f) => { for (let i = 0; i < 100 && !f(); i++) await new Promise((r) => setTimeout(r, 20)); };
 const peer = (name, extra = {}) => ({ name, cwd: "/x", pid: process.pid, at: 0, status: "idle", doing: "", claims: [], ...extra });
 

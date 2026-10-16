@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager, createEventBus } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS, setKittyProtocolActive } from "@earendil-works/pi-tui";
-import { registerCapabilityAction } from "../src/capability-actions.ts";
-import registerTool from "../extensions/tool.ts";
+import { registerCapabilityAction } from "../plugins/core/capability-actions.ts";
+import registerTool from "../plugins/core/tool.ts";
 
 const tool = (name, description = "d") => ({
 	name,

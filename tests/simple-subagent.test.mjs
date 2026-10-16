@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateToolArguments } from '@earendil-works/pi-ai';
-import { simplifySubagent, subagentRequest } from '../src/simple-subagent.ts';
-import { toolChars, estimateTokens } from '../src/tool-inventory.ts';
+import { simplifySubagent, subagentRequest } from '../plugins/subagents/simple-subagent.ts';
+import { toolChars, estimateTokens } from '../plugins/core/tool-inventory.ts';
 
 const tool = simplifySubagent({ name:'subagent', label:'Subagent', description:'old', parameters:{}, execute: async()=>({content:[]}) });
 const validate = args => validateToolArguments(tool,{type:'toolCall',id:'t',name:'subagent',arguments:args});

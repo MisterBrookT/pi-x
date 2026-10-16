@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { decodeWords, parseFetch, textPreview, toMsg } from "../src/imap.ts";
+import { decodeWords, parseFetch, textPreview, toMsg } from "../plugins/foryou/imap.ts";
 
 test("decodeWords: base64 and Q encoded subjects", () => {
 	assert.equal(decodeWords("=?UTF-8?B?5a6J5YWo5o+Q6YaS?="), "安全提醒");
@@ -26,7 +26,7 @@ test("parseFetch + toMsg: literal bodies become messages with sender name and su
 });
 
 test("regression: non-ASCII Gmail queries are sent as UTF-8 literals, ASCII stays quoted", async () => {
-	const { imapString } = await import("../src/imap.ts");
+	const { imapString } = await import("../plugins/foryou/imap.ts");
 	assert.equal(imapString('in:inbox "x"'), '"in:inbox \\"x\\""');
 	assert.equal(imapString("填写 form"), `{${Buffer.byteLength("填写 form")}+}\r\n填写 form`);
 });

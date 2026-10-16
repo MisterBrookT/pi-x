@@ -10,7 +10,7 @@ try {
   log("deploying relay/ …");
   execFileSync("npx", ["wrangler", "deploy"], { cwd: new URL("../relay/", import.meta.url), stdio: ["ignore", "ignore", "inherit"], timeout: 180_000 });
   if (!origin) { log("deployed (no relay origin configured to verify)"); process.exit(0); }
-  const { remoteAppHtml } = await import("../src/remote-web.ts");
+  const { remoteAppHtml } = await import("../plugins/remote/remote-web.ts");
   const marker = remoteAppHtml.match(/<form class="composer"[\s\S]{0,400}/)[0];
   for (let i = 0; i < 10; i++) {
     const live = await (await fetch(origin + "/?v=" + Date.now(), { cache: "no-store" })).text();

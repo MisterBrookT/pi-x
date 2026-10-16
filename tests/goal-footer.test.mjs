@@ -4,10 +4,10 @@ import { createJiti } from "jiti";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { FooterDataProvider } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/footer-data-provider.js";
-import registerGoal from "../extensions/goal.ts";
-import { BACKGROUND_STATE_QUERY } from "../src/background-state.ts";
+import registerGoal from "../plugins/goal/index.ts";
+import { BACKGROUND_STATE_QUERY } from "../plugins/background/background-state.ts";
 
-const registerFooter = await createJiti(import.meta.url).import("../extensions/footer.ts", { default: true });
+const registerFooter = await createJiti(import.meta.url).import("../plugins/footer/index.ts", { default: true });
 
 async function harness(t) {
 	const handlers = new Map();

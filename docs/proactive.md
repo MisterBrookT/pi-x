@@ -51,12 +51,12 @@ flowchart TB
 
 | Piece | File | Job |
 |---|---|---|
-| Core | `src/proactive.ts` | Types, judge prompt, verdict, list format, rate limit |
-| Sources | `src/proactive-sources.ts` | One adapter per channel |
-| Daemon | `scripts/proactive-daemon.ts` | Poll sources, judge, write the list; `act`, `later`, `dismiss`, `note` verbs |
-| Coordinator | `extensions/foryou.ts` | In the For you session only: the map of open loops and the `loops` tool |
-| Mac view | `scripts/proactive-pill.swift` | Floating 🔔 with the needs-you count; click to see those, plus quiet lines for loops Pi is on or that come back later |
-| List + Do it | `src/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
+| Core | `plugins/foryou/proactive.ts` | Types, judge prompt, verdict, list format, rate limit |
+| Sources | `plugins/foryou/proactive-sources.ts` | One adapter per channel |
+| Daemon | `plugins/foryou/daemon.ts` | Poll sources, judge, write the list; `act`, `later`, `dismiss`, `note` verbs |
+| Coordinator | `plugins/foryou/index.ts` | In the For you session only: the map of open loops and the `loops` tool |
+| Mac view | `plugins/foryou/pill.swift` | Floating 🔔 with the needs-you count; click to see those, plus quiet lines for loops Pi is on or that come back later |
+| List + Do it | `plugins/foryou/proactive-store.ts` | The only code that reads or changes the list; "Do it" starts a Pi session with remote on |
 | iPhone view | Pix Remote "For you" page (opened from the menu, or by tapping the push) | Same list, same buttons, a push for each new item |
 
 ## One loop
@@ -170,7 +170,7 @@ And one tool, `loops`, only in that session:
 
 If the coordinator is open, the task is queued into it; if not, it opens as a **new tab in the open Otty window** (tmux if Otty is not running).
 
-**The brief.** Each loop keeps a few dated progress lines (`note`). Whoever works on a loop gets the brief in its task, and is asked to leave a line when it stops (`node scripts/proactive-daemon.ts note <id> "..."`). Chats can be long, cut, or lost; the brief is what carries a loop from one session to the next. The judge sees the latest line too.
+**The brief.** Each loop keeps a few dated progress lines (`note`). Whoever works on a loop gets the brief in its task, and is asked to leave a line when it stops (`node plugins/foryou/daemon.ts note <id> "..."`). Chats can be long, cut, or lost; the brief is what carries a loop from one session to the next. The judge sees the latest line too.
 
 ## @ in Pi
 
@@ -237,8 +237,8 @@ Set `PIX_PROACTIVE_DIR` to use another folder.
 ## Run
 
 ```bash
-node scripts/proactive-daemon.ts --once --dry-run   # judge once, change nothing
-node scripts/proactive-daemon.ts                    # keep watching
+node plugins/foryou/daemon.ts --once --dry-run   # judge once, change nothing
+node plugins/foryou/daemon.ts                    # keep watching
 swiftc -O scripts/proactive-pill.swift -o ~/.pix/proactive/pill
 ```
 

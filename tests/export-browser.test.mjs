@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import test from "node:test";
 import { InteractiveMode, SessionManager, initTheme } from "@earendil-works/pi-coding-agent";
-import { installBrowserExport } from "../extensions/export.ts";
+import { installBrowserExport } from "../plugins/export/index.ts";
 import { goalSession, say } from "./helpers/goal-session.mjs";
 
 async function fixture(t, opener, cold = false) {

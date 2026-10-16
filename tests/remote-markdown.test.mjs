@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
-import { remoteMessages } from "../src/remote-state.ts";
+import { renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
+import { remoteMessages } from "../plugins/remote/remote-state.ts";
 
 test("phone renders a real Pi reply as readable Markdown and marks Mac-only references", () => {
   const reply = "That was the **first** attempt. The [later video](file:///Users/brook/run.mp4) passed.\n\n- One\n- Two\n\n```ts\nconst done = true;\n```";
@@ -41,7 +41,7 @@ test("phone draws Mermaid as a readable diagram and falls back to source when in
 });
 
 test("loop prompts Pix wrote fold to a short line with Details; the full text stays; brook's own prose is untouched", async () => {
-	const { actPrompt } = await import("../src/proactive.ts");
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const base = actPrompt({ id: "a1", title: "确认是否加入这两个", why: "W", action: "Ask", source: "Knight", howToRead: "feishu msg om_123", status: "pending", at: "", refs: [], sourceKey: "" }, "/tmp/p");
 	const text = `brook answered loop a1 with his own instruction. Do this instead of the suggested step:\nlatter\n\n(The loop, for context:)\n${base}`;
 	const [m] = remoteMessages([{ role: "user", timestamp: 1, content: text }]);
@@ -52,7 +52,7 @@ test("loop prompts Pix wrote fold to a short line with Details; the full text st
 });
 
 test("phone: a folded pix-loop message shows as brook's short line, with the full prompt under Details", async () => {
-	const { actPrompt } = await import("../src/proactive.ts");
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const text = `brook tapped "Later" on loop a1. Do it here.\n\n${actPrompt({ id: "a1", title: "T1", why: "W", action: "Ask", source: "K", howToRead: "x", status: "pending", at: "", refs: [], sourceKey: "" }, "/tmp/p")}`;
 	const [m] = remoteMessages([{ role: "custom", customType: "pix-loop", display: true, timestamp: 1, content: text }]);
 	assert.equal(m.role, "user");

@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderBenchmarkHtml, summarize, summaryLines } from "../src/benchmark.ts";
+import { renderBenchmarkHtml, summarize, summaryLines } from "../plugins/core/benchmark.ts";
 
 const input = {
 	requiredTools: ["todo", "web_search"],

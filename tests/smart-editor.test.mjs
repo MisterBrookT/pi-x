@@ -11,7 +11,7 @@ import {
 	pastedImagePath,
 	readImageDimensions,
 	shouldCompactPaste,
-} from "../src/smart-editor.ts";
+} from "../plugins/editor/smart-editor.ts";
 
 test("continues ordered and bullet lists", () => {
 	assert.equal(continuedListMarker("1. first"), "2. ");

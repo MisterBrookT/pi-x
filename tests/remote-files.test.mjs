@@ -5,11 +5,11 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { checkRemotePath, convertDocument, fileChunkBytes, listRemoteFiles, readRemoteChunk, resolveMention, sanitizeDocumentHtml } from "../src/remote-files.ts";
-import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
-import { remoteMessages } from "../src/remote-state.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { checkRemotePath, convertDocument, fileChunkBytes, listRemoteFiles, readRemoteChunk, resolveMention, sanitizeDocumentHtml } from "../plugins/remote/remote-files.ts";
+import { renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
+import { remoteMessages } from "../plugins/remote/remote-state.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 const token = "f".repeat(32);
 const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -157,8 +157,8 @@ test("the phone edits Markdown and text in place; a change on the Mac is never s
 });
 
 test("new files and Markdown photos stay inside allowed folders and never overwrite", async () => {
-  const { createEditable, saveMarkdownImage } = await import("../src/remote-files.ts");
-  const { renderRemoteMarkdown } = await import("../src/remote-markdown.ts");
+  const { createEditable, saveMarkdownImage } = await import("../plugins/remote/remote-files.ts");
+  const { renderRemoteMarkdown } = await import("../plugins/remote/remote-markdown.ts");
   const { mkdtemp, mkdir, writeFile, readFile, realpath } = await import("node:fs/promises");
   const home = await realpath(await mkdtemp(join((await import("node:os")).tmpdir(), "pix-new-")));
   const notes = join(home, "Notes"); await mkdir(notes);

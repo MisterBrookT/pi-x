@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,readFileSync,mkdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {toolSettings} from '../src/tool-settings.ts';
+import {toolSettings} from '../plugins/core/tool-settings.ts';
 const directory=t=>{const d=mkdtempSync(join(tmpdir(),'pix-shared-'));t.after(()=>rmSync(d,{recursive:true,force:true}));return d;};
 test('independent settings readers see updates and merge only changed keys',t=>{
  const d=directory(t),a=toolSettings(d),b=toolSettings(d);

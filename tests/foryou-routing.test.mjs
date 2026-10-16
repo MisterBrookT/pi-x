@@ -5,10 +5,10 @@ import test from "node:test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../src/proactive.ts";
-import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../src/proactive-memory.ts";
-import { answerCard, cardChoices, currentCard, sendTargets, suggestItem } from "../src/proactive-store.ts";
-import register, { CARD_ELSE, CARD_NO, choiceLabel } from "../extensions/foryou.ts";
+import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../plugins/foryou/proactive.ts";
+import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../plugins/foryou/proactive-memory.ts";
+import { answerCard, cardChoices, currentCard, sendTargets, suggestItem } from "../plugins/foryou/proactive-store.ts";
+import register, { CARD_ELSE, CARD_NO, choiceLabel } from "../plugins/foryou/index.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -92,15 +92,15 @@ const cardCmd = (pi, ctx) => pi.commands["super+shift+y"].handler(ctx);
 
 
 test("judgment log: weekly prune keeps the last 30 days and unreadable lines", async () => {
-	const { pruneLog } = await import("../src/proactive.ts");
+	const { pruneLog } = await import("../plugins/foryou/proactive.ts");
 	const now = Date.parse("2026-10-12T00:00:00Z");
 	const text = [{ at: "2026-08-01T00:00:00Z", kind: "judge" }, { at: "2026-10-01T00:00:00Z", kind: "error" }].map(x => JSON.stringify(x)).join("\n") + "\nnot json\n";
 	assert.equal(pruneLog(text, now), JSON.stringify({ at: "2026-10-01T00:00:00Z", kind: "error" }) + "\nnot json\n");
 });
 
 test("regression: a loop Pi finished does not sit silently in 'Pi is on it'", async () => {
-	const { staleOnit } = await import("../src/proactive.ts");
-	const { finishedItem } = await import("../src/proactive-store.ts");
+	const { staleOnit } = await import("../plugins/foryou/proactive.ts");
+	const { finishedItem } = await import("../plugins/foryou/proactive-store.ts");
 	const now = Date.parse("2026-10-12T20:00:00Z");
 	const old = loop("o", { status: "onit", session: "s", at_status: "2026-10-10T00:00:00Z" });
 	const fresh = loop("f", { status: "onit", session: "s", at_status: "2026-10-12T19:00:00Z" });
@@ -122,14 +122,14 @@ test("regression: the pile check sees each loop's latest progress, so it can clo
 });
 
 test("regression: ✓ Done and Now work from the phone through the relay", async () => {
-	const { relayAllowed } = await import("../src/remote-relay-agent.ts");
+	const { relayAllowed } = await import("../plugins/remote/remote-relay-agent.ts");
 	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(relayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
 	assert.ok(!relayAllowed("/api/foryou/abc123/rm", "POST"));
 });
 
 test("health: a source failing 3 checks in a row shows in For you; one success clears it", async () => {
-	const { trackHealth, healthSummary, problemText } = await import("../src/proactive.ts");
-	const { forYouView } = await import("../src/proactive-store.ts");
+	const { trackHealth, healthSummary, problemText } = await import("../plugins/foryou/proactive.ts");
+	const { forYouView } = await import("../plugins/foryou/proactive-store.ts");
 	assert.equal(problemText('error: {"type":"authentication","subtype":"token_invalid"}'), "login expired");
 	let st = {};
 	for (let i = 0; i < 2; i++) st = trackHealth(st, [{ source: "黄恩浩", error: "token_invalid" }, { source: "Knight", error: "token_invalid" }], [], `t${i}`);
@@ -221,7 +221,7 @@ test("Mac: without the hub the card answers directly; dismissing the picker chan
 });
 
 test("chat: the For you session knows which card brook is looking at, so he can talk about 'this one'", async () => {
-	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
 	const d = tmp(loop("a", { choices: [{ label: "Fix it", run: "s1" }] }));
 	const ctx = coordinatorContext(d, live);
 	assert.match(ctx, /The card on brook's screen now\nid=a "Loop a" \(0 more after it\)/);
@@ -255,7 +255,7 @@ test("Mac: one flat list. Open sessions are options in it (no second picker); th
 });
 
 test("pile check writes specific buttons for old loops that have none, and the prompt shows what each loop is about", async () => {
-	const { pilePrompt, parsePile } = await import("../src/proactive.ts");
+	const { pilePrompt, parsePile } = await import("../plugins/foryou/proactive.ts");
 	const p = pilePrompt({ me: "b", memory: "", now: "n", open: [loop("a", { why: "fake coins", action: "ask 王", choices: [{ label: "X", run: "here" }] }), loop("b")] });
 	assert.match(p, /why: fake coins\n  next: ask 王\n  choices: X \(here\)/);
 	assert.match(p, /never a generic set/);
@@ -287,7 +287,7 @@ test("card free text on a loop a work session owns goes back to that session wit
 });
 
 test("coordinator prompt: prefer relevant sessions, publish choices instead of blocking, no unapproved risky work", async () => {
-	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
 	const ctx = coordinatorContext(tmp(), live);
 	assert.match(ctx, /Never push work into an unrelated session/);
 	assert.match(ctx, /do not ask with a blocking question\. Use the loops tool action "choices"/);
@@ -307,7 +307,7 @@ test("regression: typing 'latter' (or later/no/done) on a card acts on the loop 
 });
 
 test("Mac transcript: Pix's loop prompt is stored as a folded pix-loop message; the model still gets the full text", async () => {
-	const { actPrompt } = await import("../src/proactive.ts");
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const pi = fakePi();
 	register(pi, { dir: tmp(), sessions: async () => [], cardPollMs: 60_000 });
 	const text = `brook tapped "Draft reply" on loop a. Do it here.\n\n${actPrompt(loop("a", { title: "确认是否加入这两个" }), "/tmp/p")}`;
@@ -338,7 +338,7 @@ test("Mac: in For you, a short reply (a button number, later/no/done) answers th
 });
 
 test("Mac: old loop prompts stored as plain user messages are folded when drawn", async () => {
-	const { actPrompt } = await import("../src/proactive.ts");
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const pi = fakePi();
 	register(pi, { dir: tmp(), sessions: async () => [], cardPollMs: 60_000 });
 	const md = `brook answered loop a with his own instruction. Do this instead of the suggested step:\nlatter\n\n(The loop, for context:)\n${actPrompt(loop("a", { title: "确认是否加入这两个" }), "/tmp/p")}`;
@@ -358,7 +358,7 @@ test("Otty sidebar: the For you tab shows the hand icon while a card waits, and 
 	writeFileSync(join(d, "inbox.jsonl"), "");
 	await pi.handlers.agent_end[0]({}, ctx); await new Promise(r => setTimeout(r, 20));
 	assert.deepEqual(badges, [true, false]);
-	const { ottyBadge } = await import("../extensions/foryou.ts");
+	const { ottyBadge } = await import("../plugins/foryou/index.ts");
 	const calls = []; ottyBadge(true, (c, a) => calls.push([c, ...a]), "1a2b"); ottyBadge(false, (c, a) => calls.push([c, ...a]), "p_1a2b");
 	assert.deepEqual(calls, [["otty", "pane", "badge", "p_1a2b", "--kind", "awaiting-input"], ["otty", "pane", "badge", "p_1a2b", "--clear"]]);
 });
@@ -430,7 +430,7 @@ test("nested pick: an action can run here, in a new session, or in any session b
 });
 
 test("regression: the judge is told to close a loop brook already answered himself, and not to re-alert a repeat ask", async () => {
-	const { judgePrompt } = await import("../src/proactive.ts");
+	const { judgePrompt } = await import("../plugins/foryou/proactive.ts");
 	const p = judgePrompt({ me: "唐英豪", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: [], fresh: [{ id: "1", time: "t", sender: "欧阳宗谦", text: "再问一次：44个类别？" }], pending: [], feedback: [loop("d", { status: "done", title: "整理44个事件类别", note: "- 2026-10-15: Finished: replied with the list" })], now: "n" });
 	assert.match(p, /\(me\) that answers or delivers what a loop asks[\s\S]*close it/);
 	assert.match(p, /same ask again[\s\S]*recently done\/resolved/);
@@ -438,8 +438,8 @@ test("regression: the judge is told to close a loop brook already answered himse
 });
 
 test("lines of work: the judge reads the map, files loops under lines, and moves a line's state without a card", async () => {
-	const { judgePrompt, parseVerdict } = await import("../src/proactive.ts");
-	const { applyLineEdits, linesForPrompt } = await import("../src/proactive-lines.ts");
+	const { judgePrompt, parseVerdict } = await import("../plugins/foryou/proactive.ts");
+	const { applyLineEdits, linesForPrompt } = await import("../plugins/foryou/proactive-lines.ts");
 	const lines = [{ id: "train", name: "Jev training", state: "Round 1 done", updated: "x" }];
 	const map = linesForPrompt(lines, [loop("a", { line: "train" })]);
 	assert.match(map, /line=train "Jev training": Round 1 done; open loops: a/);
@@ -453,8 +453,8 @@ test("lines of work: the judge reads the map, files loops under lines, and moves
 });
 
 test("proactive: a new loop is prepared under the hood (read-only) and the result shows on its card", async () => {
-	const { preparePrompt } = await import("../src/proactive.ts");
-	const { preparedItem } = await import("../src/proactive-store.ts");
+	const { preparePrompt } = await import("../plugins/foryou/proactive.ts");
+	const { preparedItem } = await import("../plugins/foryou/proactive-store.ts");
 	const p = preparePrompt(loop("n", { title: "Send 44 categories", howToRead: "lark-cli x" }));
 	assert.match(p, /read-only[\s\S]*Do not send, submit/);
 	assert.match(p, /action "prepared", id n/);
@@ -465,7 +465,7 @@ test("proactive: a new loop is prepared under the hood (read-only) and the resul
 });
 
 test("regression: WeChat reads wait while the Mac is locked, and a failed read restarts the stuck wx daemon", async () => {
-	const { wechatRead, Paused } = await import("../src/proactive-sources.ts");
+	const { wechatRead, Paused } = await import("../plugins/foryou/proactive-sources.ts");
 	const calls = [];
 	await assert.rejects(wechatRead(["msg", "x"], { locked: async () => true, exec: async (...a) => { calls.push(a); return { stdout: "{}" }; } }), e => e instanceof Paused);
 	assert.equal(calls.length, 0, "locked: no read, not a failure");
@@ -475,7 +475,7 @@ test("regression: WeChat reads wait while the Mac is locked, and a failed read r
 });
 
 test("For you knows the whole picture: open jobs with due/back dates and prep, and it recommends what's next", async () => {
-	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
 	const d = tmp(loop("a", { title: "Submit interview times", due: "2026-10-16", prepared: "Form link: x" }), loop("b", { title: "Benchmark run", status: "later", wakeAt: "2099-01-02T00:00:00Z" }));
 	const c = coordinatorContext(d, []);
 	assert.match(c, /id=a \[needs brook, due 2026-10-16\] Submit interview times[\s\S]*prepared: Form link: x/);

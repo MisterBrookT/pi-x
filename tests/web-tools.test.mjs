@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fetchContentTool, getSearchContentTool, registerWebTools, webSearchTool } from "../src/web/tools.ts";
-import { clearRecords, store } from "../src/web/storage.ts";
+import { fetchContentTool, getSearchContentTool, registerWebTools, webSearchTool } from "../plugins/web/tools.ts";
+import { clearRecords, store } from "../plugins/web/storage.ts";
 
 const config = () => ({});
 const noCredentials = { modelRegistry: { getAll: () => [], getApiKeyAndHeaders: async () => ({ ok: false }) } };

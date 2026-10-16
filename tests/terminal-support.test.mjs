@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ottyCapabilities } from "../src/terminal-support.ts";
+import { ottyCapabilities } from "../plugins/terminal-support/terminal-support.ts";
 import { Image, getCapabilities, setCapabilityOverrides } from "@earendil-works/pi-tui";
 
 test("local Otty enables inline Kitty images and links", () => {

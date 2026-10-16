@@ -14,8 +14,8 @@ test("file-based Pi session reload refreshes pix-anthropic's changed auth module
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const entry = join(dir, "index.ts");
 	const auth = join(dir, "claude-auth.ts");
-	const stream = fileURLToPath(new URL("../extensions/pix-anthropic/stream.ts", import.meta.url));
-	const source = (await readFile(new URL("../extensions/pix-anthropic/index.ts", import.meta.url), "utf8"))
+	const stream = fileURLToPath(new URL("../plugins/pix-anthropic/stream.ts", import.meta.url));
+	const source = (await readFile(new URL("../plugins/pix-anthropic/index.ts", import.meta.url), "utf8"))
 		.replace('"./stream.ts"', JSON.stringify(stream));
 	await writeFile(entry, source);
 	const writeAuth = marker => writeFile(auth, `export const claudeAuth = { name: "Claude Code", async resolve() { return { auth: { apiKey: "${marker}" }, source: "test" }; }, async check() { return { type: "api_key", source: "test" }; } };\n`);

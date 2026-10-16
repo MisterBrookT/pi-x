@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import registerPixAnthropic from "../extensions/pix-anthropic/index.ts";
-import { claudeKeychainService, readClaudeToken } from "../extensions/pix-anthropic/claude-auth.ts";
+import registerPixAnthropic from "../plugins/pix-anthropic/index.ts";
+import { claudeKeychainService, readClaudeToken } from "../plugins/pix-anthropic/claude-auth.ts";
 
 const provider = "pix-anthropic";
 const legacy = { type: "oauth", access: "old", refresh: "old-refresh", expires: 0 };
@@ -193,7 +193,7 @@ test("globally bundled Pi lists Pix models with isolated Claude credentials", as
     await chmod(bin, 0o700);
     env.PATH = `${dir}:${env.PATH}`;
   }
-  const { stdout, stderr } = await promisify(execFile)("pi", ["--no-extensions", "--extension", resolve("extensions/pix-anthropic/index.ts"), "--list-models", "pix-anthropic"], { env, timeout: 30000 });
+  const { stdout, stderr } = await promisify(execFile)("pi", ["--no-extensions", "--extension", resolve("plugins/pix-anthropic/index.ts"), "--list-models", "pix-anthropic"], { env, timeout: 30000 });
   assert.equal((stdout.match(/pix-anthropic/g) ?? []).length, 13);
   assert.doesNotMatch(stderr, /warn|error|refresh/i);
 });

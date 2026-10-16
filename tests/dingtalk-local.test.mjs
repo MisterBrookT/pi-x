@@ -5,8 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { dingKey, dingDecrypt, dingSnapshot, dingReadTables, dingText } from '../src/dingtalk-local.ts';
-import { dingAdapters } from '../src/proactive-sources.ts';
+import { dingKey, dingDecrypt, dingSnapshot, dingReadTables, dingText } from '../plugins/foryou/dingtalk-local.ts';
+import { dingAdapters } from '../plugins/foryou/proactive-sources.ts';
 test('DingTalk adapters share one snapshot, preserve own identity and surface failures', async () => {
  let calls=0; const messages=[{id:'m',time:'2026-10-14T00:00:00Z',sender:'brook',text:'today'}];
  const a=dingAdapters(()=>{calls++;return [{id:'c',name:'Research',me:'brook',messages}];});
@@ -60,7 +60,7 @@ test('messages preserve 64-bit IDs, resolve senders, exclude recalled messages a
  assert.match(dingText('{"contentType":1200}'),/Unsupported/);
  }finally{db.close();}
 });
-import { readDingTalkIsolated } from '../src/dingtalk-worker.ts';
+import { readDingTalkIsolated } from '../plugins/foryou/dingtalk-worker.ts';
 import { existsSync, writeFileSync } from 'node:fs';
 test('isolated DingTalk reader kills a blocked worker on timeout, keeps the event loop responsive and removes its temp dir',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'pix-ding-hang-')); t.after(()=>rmSync(dir,{recursive:true,force:true}));

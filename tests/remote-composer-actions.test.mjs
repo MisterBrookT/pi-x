@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
-import { remoteAppHtml } from "../src/remote-web.ts";
-import registerRemote from "../extensions/remote.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
+import registerRemote from "../plugins/remote/index.ts";
 import { say } from "./helpers/goal-session.mjs";
 
 const token = "composer-token-1234567890abcdef";

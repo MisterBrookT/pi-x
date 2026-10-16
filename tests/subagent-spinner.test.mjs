@@ -9,7 +9,7 @@ import {
 	SUBAGENT_SPINNER_INTERVAL_MS,
 	spinnerFrameStep,
 	withAnimatedSubagentWidgets,
-} from "../src/subagent-spinner.ts";
+} from "../plugins/subagents/subagent-spinner.ts";
 
 const fakeTimers = () => {
 	const state = { now: 0, callbacks: new Map(), nextId: 1, cleared: [] };

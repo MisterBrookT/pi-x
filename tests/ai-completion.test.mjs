@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AiCompletion, buildPrompt, normalizeContinuation, normalizeSuggestion, shouldRequestCompletion } from "../src/ai-completion.ts";
+import { AiCompletion, buildPrompt, normalizeContinuation, normalizeSuggestion, shouldRequestCompletion } from "../plugins/editor/ai-completion.ts";
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 

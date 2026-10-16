@@ -7,9 +7,9 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import registerRemote from "../extensions/remote.ts";
-import { readRemoteToken, startRemoteHub } from "../src/remote-hub.ts";
-import { readRelayOrigin } from "../src/remote-relay-agent.ts";
+import registerRemote from "../plugins/remote/index.ts";
+import { readRemoteToken, startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { readRelayOrigin } from "../plugins/remote/remote-relay-agent.ts";
 import { goalSession, say, call } from "../tests/helpers/goal-session.mjs";
 
 const output = new URL(`../.private/var/runs/test-ui/relay-workflow-${new Date().toISOString().replace(/[:.]/g, "-")}/`, import.meta.url).pathname;

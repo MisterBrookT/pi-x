@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractAnswer, extractResults, parseResponseText, resolveAuth, search } from "../src/web/search.ts";
+import { extractAnswer, extractResults, parseResponseText, resolveAuth, search } from "../plugins/web/search.ts";
 
 const citation = (url, title, start, end) => ({ type: "url_citation", url, title, start_index: start, end_index: end });
 

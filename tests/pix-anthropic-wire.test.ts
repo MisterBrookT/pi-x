@@ -11,8 +11,8 @@
  */
 
 import http from "node:http";
-import { createPixAnthropicStream } from "../extensions/pix-anthropic/stream.ts";
-import { CLAUDE_BILLING_HEADER_PREFIX, xxHash64 } from "../extensions/pix-anthropic/fingerprint.ts";
+import { createPixAnthropicStream } from "../plugins/pix-anthropic/stream.ts";
+import { CLAUDE_BILLING_HEADER_PREFIX, xxHash64 } from "../plugins/pix-anthropic/fingerprint.ts";
 
 let captured: { headers: Record<string, string>; body: any; rawBody: string } | null = null;
 

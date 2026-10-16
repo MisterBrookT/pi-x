@@ -2,23 +2,23 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir, access } from "node:fs/promises";
 const root=new URL("..",import.meta.url);
-test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./extensions/upstream-tools.ts","./extensions/capabilities.ts","./extensions/background.ts","./extensions/goal.ts"]) assert.ok(e.includes(x));assert.equal(j["pi-subagents"],undefined);assert.equal(j.pi.skills,undefined);});
+test("Pix exposes only its focused capability set",async()=>{const j=JSON.parse(await readFile(new URL("package.json",root)));const e=j.pi.extensions.join("\n");for(const x of ["./plugins/subagents/index.ts","./plugins/core/capabilities.ts","./plugins/background/index.ts","./plugins/goal/index.ts"]) assert.ok(e.includes(x));assert.equal(j["pi-subagents"],undefined);assert.equal(j.pi.skills,undefined);});
 test("prompt snapshots and comparison exist",async()=>{for(const p of ["docs/prompts/pi-default.txt","docs/prompts/pix-default.txt","docs/system-prompts.html"])await access(new URL(p,root));});
 
 test("Pix ships a self-hostable relay but no personal endpoint or Wrangler state", async () => {
   const manifest = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
   assert.deepEqual(manifest.files.filter(path => path.startsWith("relay/")), ["relay/src/index.ts", "relay/wrangler.jsonc"]);
-  const client = await readFile(new URL("src/remote-relay-agent.ts", root), "utf8");
+  const client = await readFile(new URL("plugins/remote/remote-relay-agent.ts", root), "utf8");
   const config = await readFile(new URL("relay/wrangler.jsonc", root), "utf8");
   assert.doesNotMatch(client + config, /doabit\.dev|brooktang\.fun/);
 });
 
 test("slash commands stay minimal", async () => {
-  const capabilities = await readFile(new URL("extensions/capabilities.ts", root), "utf8");
-  const fast = await readFile(new URL("extensions/fast-mode.ts", root), "utf8");
-  const upstream = await readFile(new URL("extensions/upstream-tools.ts", root), "utf8");
-  const todo = await readFile(new URL("extensions/todo.ts", root), "utf8");
-  const smartEditor = await readFile(new URL("extensions/smart-editor.ts", root), "utf8");
+  const capabilities = await readFile(new URL("plugins/core/capabilities.ts", root), "utf8");
+  const fast = await readFile(new URL("plugins/fast-mode/index.ts", root), "utf8");
+  const upstream = await readFile(new URL("plugins/subagents/index.ts", root), "utf8");
+  const todo = await readFile(new URL("plugins/todo/index.ts", root), "utf8");
+  const smartEditor = await readFile(new URL("plugins/editor/index.ts", root), "utf8");
   for (const dependency of ["pi-subagents", "@narumitw/pi-lsp"]) assert.match(upstream, new RegExp(dependency));
   // Web access is Pix's own engine now, not a bundled upstream package.
   assert.match(upstream, /registerWebTools/);
@@ -29,7 +29,7 @@ test("slash commands stay minimal", async () => {
   assert.match(upstream, /Math\.min\(requestedSpawns, 8\)/);
   // Tool on/off lives in /tool alone. The per-family toggles were removed
   // because they duplicated it and wrote to a record that could contradict it.
-  const toolPanel = await readFile(new URL("extensions/tool.ts", root), "utf8");
+  const toolPanel = await readFile(new URL("plugins/core/tool.ts", root), "utf8");
   assert.match(toolPanel, /registerCommand\("tool"/);
   for (const removed of ["websearch", "computer", "mcp"]) {
     assert.doesNotMatch(capabilities, new RegExp(`registerCommand\\("${removed}"`));
@@ -49,7 +49,7 @@ test("slash commands stay minimal", async () => {
   assert.match(todo, /parentId/);
   assert.match(todo, /prepareArguments/);
   assert.match(todo, /getArgumentCompletions/);
-  const historyCompletion = await readFile(new URL("extensions/history-completion.ts", root), "utf8");
+  const historyCompletion = await readFile(new URL("plugins/editor/history-completion.ts", root), "utf8");
   assert.match(historyCompletion, /historySuggestion/);
   assert.doesNotMatch(historyCompletion, /addAutocompleteProvider/);
   assert.match(smartEditor, /registerHistoryCompletion\(pi\)/);
@@ -57,7 +57,7 @@ test("slash commands stay minimal", async () => {
   assert.match(smartEditor, /editorTheme\.selectList\.description/);
   assert.doesNotMatch(smartEditor, /uiTheme\.fg/);
   assert.match(smartEditor, /super\(tui, editorTheme, keybindings\)/);
-  await access(new URL("extensions/question.ts", root));
+  await access(new URL("plugins/question/index.ts", root));
 });
 
 /**
@@ -69,7 +69,7 @@ test("Pix keeps nine top-level slash commands", async () => {
   // ai-completion is loaded by smart-editor rather than by the manifest, so the
   // whole extension tree is scanned instead of the declared entry points.
   const names = [];
-  for (const entry of await readdir(new URL("extensions/", root), { recursive: true, withFileTypes: true })) {
+  for (const entry of await readdir(new URL("plugins/", root), { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
     const source = await readFile(new URL(`${entry.parentPath}/${entry.name}`, root), "utf8");
     for (const match of source.matchAll(/pi\.registerCommand\("([^"]+)"/g)) names.push(match[1]);
@@ -93,15 +93,15 @@ test("Pix keeps nine top-level slash commands", async () => {
  * the command list twice over.
  */
 test("computer-use actions live under /tool, and the prompt export under a shortcut", async () => {
-  const computer = await readFile(new URL("extensions/computer.ts", root), "utf8");
+  const computer = await readFile(new URL("plugins/computer/index.ts", root), "utf8");
   assert.doesNotMatch(computer, /registerCommand\(/);
   assert.match(computer, /registerCapabilityAction\(pi, "computer", \{\n\t\tverb: "check"/);
   assert.match(computer, /verb: "stop"/);
-  const toolPanel = await readFile(new URL("extensions/tool.ts", root), "utf8");
+  const toolPanel = await readFile(new URL("plugins/core/tool.ts", root), "utf8");
   assert.match(toolPanel, /capabilityActions/);
   // Both exports stay inside /context: they are inspection views of the same
   // window, not commands of their own.
-  const context = await readFile(new URL("extensions/context.ts", root), "utf8");
+  const context = await readFile(new URL("plugins/context/index.ts", root), "utf8");
   assert.match(context, /registerShortcut\("alt\+e"/);
   assert.match(context, /registerShortcut\("alt\+h"/);
   assert.match(context, /value: "html"/);

@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { remoteAppHtml } from "../src/remote-web.ts";
-import { remoteMessages } from "../src/remote-state.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
+import { remoteMessages } from "../plugins/remote/remote-state.ts";
 
 const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)[1];
 const pick = prefix => script.split("\n").find(line => line.startsWith(prefix)) ?? assert.fail(`missing ${prefix}`);

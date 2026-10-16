@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { WordCompletion, wordPrefix } from "../src/word-completion.ts";
+import { WordCompletion, wordPrefix } from "../plugins/editor/word-completion.ts";
 
 test("word completion accepts prose words and rejects code-like tokens", () => {
   assert.equal(wordPrefix("please comp"), "comp");

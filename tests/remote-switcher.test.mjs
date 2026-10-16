@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 // Quick switcher: ⌘K/⌘P opens it, typing filters by name or folder, ↑↓ chooses, ⏎ opens.
 const token = "switcher-token-1234567890";

@@ -4,8 +4,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium, devices } from 'playwright';
-import { startRemoteHub } from '../src/remote-hub.ts';
-import { renderRemoteMarkdown } from '../src/remote-markdown.ts';
+import { startRemoteHub } from '../plugins/remote/remote-hub.ts';
+import { renderRemoteMarkdown } from '../plugins/remote/remote-markdown.ts';
 
  test('iPhone steering survives delayed acknowledgement, stream patches and failure', async t => {
   const home = await mkdtemp(join(tmpdir(), 'pix-steering-'));

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { fitTodoWidgetLines } from "../extensions/todo.ts";
+import { fitTodoWidgetLines } from "../plugins/todo/index.ts";
 
 test("todo widget truncates every line to the available terminal width", () => {
   const lines = [

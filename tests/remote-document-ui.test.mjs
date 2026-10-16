@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { parseHTML } from 'linkedom';
-import { remoteAppHtml } from '../src/remote-web.ts';
+import { remoteAppHtml } from '../plugins/remote/remote-web.ts';
 
 const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)[1];
 function viewer(api) {

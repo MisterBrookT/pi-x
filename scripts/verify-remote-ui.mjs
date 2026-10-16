@@ -4,9 +4,9 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
-import { remoteMedia } from "../src/remote-state.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
+import { remoteMedia } from "../plugins/remote/remote-state.ts";
 
 const output = new URL(`../.private/var/runs/test-ui/remote-cli-${new Date().toISOString().replace(/[:.]/g, '-')}/`, import.meta.url);
 await mkdir(output, { recursive: true });

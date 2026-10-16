@@ -8,7 +8,7 @@ import {
 	parseAllowRanges,
 	parseCidr,
 	validateRemoteUrl,
-} from "../src/web/ssrf.ts";
+} from "../plugins/web/ssrf.ts";
 
 const publicLookup = async () => [{ address: "93.184.216.34" }];
 

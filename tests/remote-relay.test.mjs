@@ -5,9 +5,9 @@ import { webcrypto, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, stat, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { relayRoom, sealRelayFrame, openRelayFrame, rotateRelayKey, readRelayOrigin } from "../src/remote-relay-agent.ts";
-import { remoteRelayWebScript } from "../src/remote-relay-web.ts";
-import { remoteAppHtml } from "../src/remote-web.ts";
+import { relayRoom, sealRelayFrame, openRelayFrame, rotateRelayKey, readRelayOrigin } from "../plugins/remote/remote-relay-agent.ts";
+import { remoteRelayWebScript } from "../plugins/remote/remote-relay-web.ts";
+import { remoteAppHtml } from "../plugins/remote/remote-web.ts";
 
 const browser = vm.createContext({ crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, EventTarget, MessageEvent, setTimeout, clearTimeout, console, Response, Blob, DecompressionStream });
 vm.runInContext(remoteRelayWebScript, browser);
@@ -69,7 +69,7 @@ test("relay uses the same mobile UI but does not send its pairing key as a beare
 });
 
 test("the largest phone photo prompt fits the relay request and encrypted frame limits", async () => {
-  const { relayRequestLimit, relayFrameLimit } = await import("../src/remote-relay-agent.ts");
+  const { relayRequestLimit, relayFrameLimit } = await import("../plugins/remote/remote-relay-agent.ts");
   // Regression: phone accepted ~1 MB photos but the Mac agent rejected bodies over 100 KB as "Prompt too long".
   const photo = "A".repeat(1_000_000), text = "x".repeat(100_000);
   const body = JSON.stringify({ text, images: [{ mimeType: "image/jpeg", data: photo }] });
@@ -90,7 +90,7 @@ test("the Mac notices a relay link that silently died and reconnects", async t =
     if (connections > 1) socket.on("message", data => { if (String(data) === "ping") socket.send("pong"); });
   });
   const states = [];
-  const { startRemoteRelayAgent } = await import("../src/remote-relay-agent.ts");
+  const { startRemoteRelayAgent } = await import("../plugins/remote/remote-relay-agent.ts");
   const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret: "s".repeat(43), localBase: "http://127.0.0.1:9", localToken: "x", heartbeatMs: 50, onState: s => states.push(s) });
   t.after(() => agent.stop());
   await agent.ready;
@@ -103,8 +103,8 @@ test("the Mac notices a relay link that silently died and reconnects", async t =
 
 test("the Mac relays live-text stream events to the phone", async t => {
   const { WebSocketServer } = await import("ws");
-  const { startRemoteHub } = await import("../src/remote-hub.ts");
-  const { startRemoteRelayAgent, openRelayFrame } = await import("../src/remote-relay-agent.ts");
+  const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
+  const { startRemoteRelayAgent, openRelayFrame } = await import("../plugins/remote/remote-relay-agent.ts");
   const token = "r".repeat(32), secret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
   const hub = await startRemoteHub({ token, port: 0 });
   t.after(() => hub.close());
@@ -137,8 +137,8 @@ test("frames are compressed before encryption and the phone opens them", async (
 
 test("on hello the Mac sends only the shown session, tailed, not every transcript", async t => {
   const { WebSocketServer } = await import("ws");
-  const { startRemoteHub } = await import("../src/remote-hub.ts");
-  const { startRemoteRelayAgent, relayTail } = await import("../src/remote-relay-agent.ts");
+  const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
+  const { startRemoteRelayAgent, relayTail } = await import("../plugins/remote/remote-relay-agent.ts");
   const token = "r".repeat(32), secret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
   const hub = await startRemoteHub({ token, port: 0 });
   t.after(() => hub.close());
@@ -173,7 +173,7 @@ test("on hello the Mac sends only the shown session, tailed, not every transcrip
 });
 
 test("tailSession keeps whole turns and leaves short sessions alone", async () => {
-  const { tailSession } = await import("../src/remote-hub.ts");
+  const { tailSession } = await import("../plugins/remote/remote-hub.ts");
   const roles = ["user", "assistant", "assistant", "user", "assistant", "user", "assistant", "user"];
   const s = { messages: roles.map((role, i) => ({ id: i, role })) };
   assert.deepEqual(tailSession(s, 2).messages.map(m => m.id), [5, 6, 7]);

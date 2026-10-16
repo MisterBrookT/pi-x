@@ -2,9 +2,9 @@
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { imageRef } from "../src/remote-state.ts";
-import { renderRemoteMarkdown } from "../src/remote-markdown.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { imageRef } from "../plugins/remote/remote-state.ts";
+import { renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
 
 const token = "simulator-demo-token-not-production";
 const port = Number(process.env.PIX_TEST_FIXTURE_PORT || 18787);

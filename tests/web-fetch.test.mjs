@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeBody, fetchUrl, isHtml, isPdf, isTextual, mimeOf } from "../src/web/fetch.ts";
+import { decodeBody, fetchUrl, isHtml, isPdf, isTextual, mimeOf } from "../plugins/web/fetch.ts";
 
 const lookup = async () => [{ address: "93.184.216.34" }];
 

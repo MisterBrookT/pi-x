@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 // Opening a long session loads only its recent messages; earlier ones load on request; live updates still apply.
 const token = "tail-token-1234567890abc";

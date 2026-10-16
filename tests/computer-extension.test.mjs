@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
-import { capabilityActions } from "../src/capability-actions.ts";
-import registerComputer from "../extensions/computer.ts";
+import { capabilityActions } from "../plugins/core/capability-actions.ts";
+import registerComputer from "../plugins/computer/index.ts";
 
 const okResult = (text, stateId) => ({
 	content: [{ type: "text", text }],

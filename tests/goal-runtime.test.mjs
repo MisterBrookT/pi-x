@@ -4,7 +4,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { goalSession, call, finish, say } from "./helpers/goal-session.mjs";
-import { GOAL_MAX_CONTINUATIONS } from "../src/goal-state.ts";
+import { GOAL_MAX_CONTINUATIONS } from "../plugins/goal/goal-state.ts";
 
 const options = { timeout: 20000 };
 

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, connect } from 'node:net';
-import { createDesktopBroker } from '../src/remote-desktop.ts';
-import { sealRelayFrame } from '../src/remote-relay-agent.ts';
+import { createDesktopBroker } from '../plugins/desktop/remote-desktop.ts';
+import { sealRelayFrame } from '../plugins/remote/remote-relay-agent.ts';
 
 test('desktop batches queued screen bytes into 512 KiB reads without enlarging input writes', async t => {
   const payload = Buffer.alloc(640 * 1024);

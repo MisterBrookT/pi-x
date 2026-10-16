@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getCurrentTools } from "@earendil-works/pi-ai";
-import registerTodo from "../extensions/todo.ts";
+import registerTodo from "../plugins/todo/index.ts";
 import { goalSession, say, call, finish } from "./helpers/goal-session.mjs";
 
 const options = { timeout: 15000 };

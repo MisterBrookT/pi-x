@@ -12,8 +12,8 @@ import {
 	renderOutcome,
 	stateIdOf,
 	summarizeActions,
-} from "../src/computer-script.ts";
-import { ScriptCompileError, compileScript, runScript } from "../src/computer-runner.ts";
+} from "../plugins/computer/computer-script.ts";
+import { ScriptCompileError, compileScript, runScript } from "../plugins/computer/computer-runner.ts";
 
 /** Fake backend: records calls, returns outlines with incrementing state ids. */
 const createFakeOperations = (overrides = {}) => {

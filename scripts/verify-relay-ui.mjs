@@ -6,8 +6,8 @@ import { mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { chromium, devices } from "playwright";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { startRemoteRelayAgent, readRelayOrigin } from "../src/remote-relay-agent.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { startRemoteRelayAgent, readRelayOrigin } from "../plugins/remote/remote-relay-agent.ts";
 
 const output = new URL("../.private/var/runs/test-ui/relay-public/", import.meta.url).pathname;
 await mkdir(output, { recursive: true });

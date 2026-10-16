@@ -5,9 +5,9 @@ import { connect } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDesktopBroker, desktopHost, desktopPort, desktopReadChunkLimit } from "../src/remote-desktop.ts";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { createDesktopBroker, desktopHost, desktopPort, desktopReadChunkLimit } from "../plugins/desktop/remote-desktop.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 // A stand-in VNC server; the broker reaches it only through the unit-test connect factory.
 async function fakeVnc(t) {

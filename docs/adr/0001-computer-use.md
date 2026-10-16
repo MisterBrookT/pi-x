@@ -157,8 +157,8 @@ event was delivered.
 - `@injaneity/pi-computer-use` helper installed at
   `~/Applications/pi-computer-use.app`; macOS Accessibility and Screen Recording
   permissions **not yet granted**, so no desktop flow has been executed.
-- The script surface is implemented in `src/computer-script.ts` and
-  `src/computer-runner.ts`; tests and the pix extension wiring are outstanding.
+- The script surface is implemented in `plugins/computer/computer-script.ts` and
+  `plugins/computer/computer-runner.ts`; tests and the pix extension wiring are outstanding.
 
 ## Addendum — cross-checked against Codex's shipped implementation
 

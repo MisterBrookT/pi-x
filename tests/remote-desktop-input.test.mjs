@@ -4,10 +4,10 @@ import { mkdtemp, rm, writeFile, chmod, readFile } from "node:fs/promises";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDesktopInput, createDesktopInputController, desktopInputScript, runOsascript, validDesktopInput } from "../src/remote-desktop-input.ts";
-import { createDesktopBroker } from "../src/remote-desktop.ts";
-import { startRemoteHub } from "../src/remote-hub.ts";
-import { relayAllowed } from "../src/remote-relay-agent.ts";
+import { createDesktopInput, createDesktopInputController, desktopInputScript, runOsascript, validDesktopInput } from "../plugins/desktop/remote-desktop-input.ts";
+import { createDesktopBroker } from "../plugins/desktop/remote-desktop.ts";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 const secret = "pa\"ss'w\\ord`$(x)\u2028\u2029é😀";
 

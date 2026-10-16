@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clearRecords, findContent, getRecord, sliceContent, store } from "../src/web/storage.ts";
+import { clearRecords, findContent, getRecord, sliceContent, store } from "../plugins/web/storage.ts";
 
 test("a stored record is retrieved by its id", () => {
 	clearRecords();

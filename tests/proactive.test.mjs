@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../src/proactive.ts";
-import { adapterFor, adapters, parseFeishu, parseFeishuThreads, withThreads } from "../src/proactive-sources.ts";
+import { actPrompt, applyMemory, judgePrompt, newSince, parseInbox, parseVerdict, underLimit } from "../plugins/foryou/proactive.ts";
+import { adapterFor, adapters, parseFeishu, parseFeishuThreads, withThreads } from "../plugins/foryou/proactive-sources.ts";
 
 const raw = { data: { messages: [
 	{ message_id: "m3", create_time: "18:42", sender: { name: "Knight  " }, content: "doc ready ![Image](img_x)" },
@@ -105,7 +105,7 @@ test("underLimit ignores quiet items, so they never block a real push", () => {
 });
 
 test("feishu-all expands to every chat; explicit entries keep their project; no duplicates", async () => {
-  const { parseFeishuChats, expandSources, adapters } = await import("../src/proactive-sources.ts");
+  const { parseFeishuChats, expandSources, adapters } = await import("../plugins/foryou/proactive-sources.ts");
   assert.deepEqual(parseFeishuChats({ data: { chats: [{ chat_id: "oc_1", name: "A " }, { name: "no id" }] } }), [{ kind: "feishu", id: "oc_1", name: "A" }]);
   const real = adapters["feishu-all"].expand;
   adapters["feishu-all"].expand = async () => [{ kind: "feishu", id: "oc_1", name: "A" }, { kind: "feishu", id: "oc_2", name: "B" }];
@@ -117,7 +117,7 @@ test("feishu-all expands to every chat; explicit entries keep their project; no 
 });
 
 test("regression: the user's own reply re-judges a chat with pending alerts so it can close them", async () => {
-	const { planBatch, judgePrompt } = await import("../src/proactive.ts");
+	const { planBatch, judgePrompt } = await import("../plugins/foryou/proactive.ts");
 	const msgs = [{ id: "a", sender: "Knight", time: "", text: "q?" }, { id: "b", sender: "brook", time: "", text: "收到" }, { id: "c", sender: "brook", time: "", text: "checking" }];
 	const p = planBatch(msgs, "a", "brook", 1);
 	assert.equal(p.judge, true);
@@ -144,15 +144,15 @@ test("Feishu thread replies (missing from chat history) are merged into their ch
 });
 
 test("newSince: when the cursor message is gone (old thread reply), only messages after its time count", async () => {
-	const { newSince } = await import("../src/proactive.ts");
+	const { newSince } = await import("../plugins/foryou/proactive.ts");
 	const msgs = [{ id: "a", time: "2026-10-14 10:00" }, { id: "b", time: "2026-10-14 12:00" }];
 	assert.deepEqual(newSince(msgs, "gone", "2026-10-14 11:00").map(m => m.id), ["b"]);
 	assert.deepEqual(newSince(msgs, "a", "x").map(m => m.id), ["b"]);
 });
 
 test("direct chats judge his own promises; the pile check never closes a loop due today or later", async () => {
-	const { planBatch, parsePile } = await import("../src/proactive.ts");
-	const { parseFeishuChats } = await import("../src/proactive-sources.ts");
+	const { planBatch, parsePile } = await import("../plugins/foryou/proactive.ts");
+	const { parseFeishuChats } = await import("../plugins/foryou/proactive-sources.ts");
 	const msgs = [{ id: "a", time: "1", sender: "x", text: "" }, { id: "b", time: "2", sender: "brook", text: "我今天光速搞一下" }];
 	assert.equal(planBatch(msgs, "a", "brook", 0).judge, false);
 	assert.equal(planBatch(msgs, "a", "brook", 0, undefined, true).judge, true);
@@ -162,7 +162,7 @@ test("direct chats judge his own promises; the pile check never closes a loop du
 });
 
 test("regression: one failing expansion (DingTalk) keeps the other expansions and explicit projects", async () => {
-  const { expandSources } = await import("../src/proactive-sources.ts");
+  const { expandSources } = await import("../plugins/foryou/proactive-sources.ts");
   const orig = { f: adapters["feishu-all"].expand, d: adapters["dingtalk-all"].expand };
   adapters["feishu-all"].expand = async () => [{ kind: "feishu", id: "oc_1", name: "A" }, { kind: "feishu", id: "oc_2", name: "B" }];
   adapters["dingtalk-all"].expand = async () => { throw new Error("DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk"); };
@@ -177,7 +177,7 @@ test("regression: one failing expansion (DingTalk) keeps the other expansions an
 });
 
 test("health: DingTalk permission shows at once with its own label and clears on success; network still waits 3 ticks", async () => {
-  const { trackHealth, healthSummary, problemText } = await import("../src/proactive.ts");
+  const { trackHealth, healthSummary, problemText } = await import("../plugins/foryou/proactive.ts");
   const err = "DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk";
   assert.equal(problemText(err), "Mac permission required");
   assert.notEqual(problemText("Gmail API permission denied"), "Mac permission required", "remote service permissions are not Mac privacy settings");

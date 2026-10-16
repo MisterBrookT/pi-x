@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { SUPPRESSION_FLAGS, installWrapper, wrapperScript } from "../src/chrome-wrapper.ts";
+import { SUPPRESSION_FLAGS, installWrapper, wrapperScript } from "../plugins/computer/chrome-wrapper.ts";
 
 test("the wrapper disables keychain access for the throwaway profile", () => {
 	// Without this macOS shows a modal "Keychain Not Found" dialog over whatever

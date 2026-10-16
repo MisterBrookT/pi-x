@@ -20,7 +20,7 @@ test("a child with an explicit extension list can discover Pix role models", { t
     else process.env.PI_CODING_AGENT_DIR = previous;
     await rm(dir, { recursive: true, force: true });
   });
-  const provider = resolve("extensions/pix-anthropic/index.ts");
+  const provider = resolve("plugins/pix-anthropic/index.ts");
   await writeFile(join(dir, "settings.json"), JSON.stringify({ subagents: {
     defaultExtensions: [provider],
     agentOverrides: { scout: { model: "pix-anthropic/claude-sonnet-5" } },

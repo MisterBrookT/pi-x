@@ -3,23 +3,23 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../src/remote-autoreload.ts";
-import { BACKGROUND_STATE_QUERY, backgroundState } from "../src/background-state.ts";
+import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../plugins/remote/remote-autoreload.ts";
+import { BACKGROUND_STATE_QUERY, backgroundState } from "../plugins/background/background-state.ts";
 
-test("pixCodeVersion changes when extensions/ or src/ files change, not other files", async t => {
+test("pixCodeVersion changes when plugins/ files change, not other files", async t => {
   const root = await mkdtemp(join(tmpdir(), "pix-version-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(join(root, "extensions"), { recursive: true });
-  await mkdir(join(root, "src", "nested"), { recursive: true });
-  await writeFile(join(root, "extensions", "a.ts"), "a");
-  await writeFile(join(root, "src", "nested", "b.ts"), "b");
+  await mkdir(join(root, "plugins"), { recursive: true });
+  await mkdir(join(root, "plugins", "nested"), { recursive: true });
+  await writeFile(join(root, "plugins", "a.ts"), "a");
+  await writeFile(join(root, "plugins", "nested", "b.ts"), "b");
   const first = pixCodeVersion(root);
   await writeFile(join(root, "README.md"), "docs");
-  assert.equal(pixCodeVersion(root), first, "files outside extensions/ and src/ are ignored");
-  await writeFile(join(root, "src", "nested", "b.ts"), "bigger");
+  assert.equal(pixCodeVersion(root), first, "files outside plugins/ are ignored");
+  await writeFile(join(root, "plugins", "nested", "b.ts"), "bigger");
   assert.notEqual(pixCodeVersion(root), first);
   const second = pixCodeVersion(root);
-  await writeFile(join(root, "extensions", "c.ts"), "c");
+  await writeFile(join(root, "plugins", "c.ts"), "c");
   assert.notEqual(pixCodeVersion(root), second, "a new file changes the version");
 });
 
