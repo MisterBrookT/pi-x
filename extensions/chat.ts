@@ -10,9 +10,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { basename, resolve } from "node:path";
 import { Type } from "typebox";
-import { board, claimName, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "../src/chat.ts";
+import { board, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "../src/chat.ts";
 
 const MSG = "pix-chat";
+/** Sessions that never join chat (brook's personal session). */
+const OFF = new Set(["for-you"]);
 
 const HOW = {
   note: "FYI only; no answer expected.",
@@ -31,6 +33,7 @@ export function format(n: Note): string {
 export default function (pi: ExtensionAPI) {
   let me: Peer | undefined;
   let room: ReturnType<typeof join_> | undefined;
+  let sent: (Note & { to: string }) | undefined;  // last message sent, rendered as a bubble in this pane
   const granted = new Set<string>();  // files other sessions explicitly let me edit
   const hops = new Map<string, number>();  // thread -> hop of the last message seen, so my reply goes one higher
 
@@ -42,8 +45,10 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.on("session_start", (_e, ctx) => {
-    room?.close();
-    const name = claimName(pi.getSessionName() || basename(ctx.cwd) || "pi", process.pid);
+    room?.close(); room = undefined; me = undefined;
+    const base = pi.getSessionName() || basename(ctx.cwd) || "pi";
+    if (OFF.has(slug(base)) || process.env.PIX_CHAT_OFF) return;  // brook's personal session stays out of project chat
+    const name = claimName(base, process.pid);
     me = { name, cwd: ctx.cwd, pid: process.pid, at: Date.now(), status: "idle", doing: "", claims: [] };
     room = join_(me, receive);
   });
@@ -90,6 +95,16 @@ export default function (pi: ExtensionAPI) {
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
       grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
     }),
+    renderCall(args, theme) {
+      if (args.action !== "send") return new Text(theme.fg("muted", `chat ${args.action}`), 0, 0);
+      return new Text(theme.fg("muted", `chat → ${args.to ?? "?"}`), 0, 0);
+    },
+    renderResult(r, _o, theme, context) {
+      const n = (r.details as { sent?: Note & { to: string } } | undefined)?.sent;
+      const t = r.content[0]?.type === "text" ? r.content[0].text : "";
+      if (!n) return new Text(theme.fg(context.isError ? "error" : "muted", t), 0, 0);
+      return new Text(`${theme.fg("accent", `✉ ${n.kind} to ${n.to}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
+    },
     async execute(_id, p, _signal, _update, ctx: ExtensionContext) {
       const text = ((): string => {
         if (!me || !room) return "chat is not ready";
@@ -109,11 +124,14 @@ export default function (pi: ExtensionAPI) {
         const grant = p.grant?.map((g) => resolve(ctx.cwd, g));
         const n = send(me.name, to, kind, p.message, { thread: p.thread, hop, grant });
         hops.set(n.thread, hop);
+        sent = { ...n, to };
         const live = board().some((x) => x.name === to);
         return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
           (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
       })();
-      return { content: [{ type: "text", text }], details: {} };
+      const details = p.action === "send" && sent ? { sent } : {};
+      sent = undefined;
+      return { content: [{ type: "text", text }], details };
     },
   });
 }
