@@ -82,7 +82,10 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator("#forYouOpen").click();
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
-  assert.ok(await page.getByText("Why a").isVisible());
+  // One quiet row per loop: the why shows only after a tap.
+  assert.equal(await page.getByText("Why a").isVisible(), false, "rows are titles only");
+  await page.locator('.fy[data-fy="a"] summary').click();
+  assert.ok(await page.getByText("Why a").isVisible(), "tap opens the row");
   // Lines of work stay inside the agent: the page never shows them.
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "train", name: "Jev training", state: "Round 1 done", updated: "x" }]));
   await page.waitForTimeout(500);
@@ -116,26 +119,26 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   // A new item appears on the Mac side: the phone list updates and a push goes out.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b", { source: "DingTalk: Research", sourceKey: "dingtalk:research" })) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
-  assert.ok(await page.locator('[data-fy="b"]').getByText("DingTalk: Research", { exact: true }).isVisible(), "DingTalk jobs use the same phone view and dismissal route");
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
   assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
-  assert.ok(await page.getByText("Draft a reply").first().isVisible(), "card shows what Pi will do");
+  assert.equal(await page.getByText("Draft a reply").count(), 0, "no 'Pi will' block: concise");
 
   // The main button names the prepared step; Later parks the loop where the phone can still see it.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20" })) + "\n");
   const main = page.locator('[data-fy="c"] [data-fy-act="act"]');
-  await main.waitFor({ timeout: 8000 });
+  await main.waitFor({ state: "attached", timeout: 8000 });
+  for (const id of ["b", "c"]) await page.locator(`.fy[data-fy="${id}"] summary`).click();
   assert.equal((await main.textContent()).trim(), "Start test");
   assert.equal((await page.locator('[data-fy="a"] [data-fy-act="act"]').textContent()).trim(), "Do it", "no label: Do it");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
   await page.locator('.fy[data-fy="c"]').waitFor({ state: "detached" });
-  await page.getByText("You owe it · due").waitFor({ timeout: 8000 });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
 
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
   await page.locator('.fy[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
+  if (!(await page.locator('[data-fy="a"] [data-fy-act="act"]').isVisible())) await page.locator('.fy[data-fy="a"] summary').click();
   await page.locator('[data-fy="a"] [data-fy-act="act"]').click();
   await page.locator('.fy[data-fy="a"]').waitFor({ state: "detached" });
   assert.deepEqual(acted, ["a"]);
@@ -143,28 +146,17 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.locator("#forYouDot").isHidden(), true, "no dot when nothing is pending");
   await page.locator("#forYouOpen").click();
   await page.getByText("All clear").waitFor();
-  assert.ok(await page.getByText("3 handled").isVisible(), "today's handled items stay visible");
-  assert.ok(await page.getByText("Title c").isVisible(), "parked loops stay visible under Later");
+  assert.equal(await page.getByText("Title c").count(), 0, "parked loops stay with the agent, off the page");
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
+  await page.locator('.fy[data-fy="d"] summary').click({ timeout: 8000 });
   await page.locator('.fy[data-fy="d"] [data-fy-act="done"]').click();
   await page.locator('.fy[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
 
-  // A parked loop can be deleted straight from Later (✕), no need to bring it back first.
-  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("p", { status: "later", wakeAt: "2099-01-01T00:00:00Z" })) + "\n");
-  await page.locator('.fy-q[data-fy="p"] [data-fy-act="dismiss"]').click({ timeout: 8000 });
-  await page.locator('.fy-q[data-fy="p"] [data-fy-act]').first().waitFor({ state: "detached", timeout: 8000 });
-  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "p").status, "dismissed");
-  // Quiet rows act too: Now brings a parked loop back; ✓ Done closes one.
-  await page.locator('.fy-q[data-fy="c"] [data-fy-act="now"]').click();
-  await page.locator('.fy[data-fy="c"] [data-fy-act="act"]').waitFor({ timeout: 8000 });
-  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"pending","wakeAt":null/);
-  await page.locator('.fy[data-fy="c"] [data-fy-act="later"]').click();
-  await page.locator('.fy-q[data-fy="c"] [data-fy-act="done"]').click();
-  await page.getByText("Done by you").waitFor({ timeout: 8000 });
-  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "c").status, "done");
+  // Finished work shows as one calm line, so brook sees it is done and not coming back.
+  await page.getByText("✓ 1 done today").waitFor({ timeout: 8000 });
   assert.deepEqual(errors, []);
 });
 
@@ -233,8 +225,7 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
   await page.locator("#menu").click();
   await page.locator('.row[data-id="pix-foryou"] [aria-label="For you card waiting"]').waitFor();
   assert.equal(await page.locator('.row[data-id="s1"] [aria-label="For you card waiting"]').count(), 0);
-  await page.keyboard.press("Escape");
-  await page.locator("#forYouOpen").click();
+  await page.locator('.row[data-id="pix-foryou"]').click();
   const quiet = page.locator('.job-min[data-job="j1"]');
   await quiet.waitFor();
   assert.equal(await page.locator(".job-card").count(), 0, "quiet by default: one line, no full card");
