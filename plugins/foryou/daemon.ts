@@ -21,7 +21,7 @@ import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
-import { Paused, adapterFor, expandSources } from "./proactive-sources.ts";
+import { adapterFor, expandSources } from "./proactive-sources.ts";
 import { actItem, finishedItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
 const P = paths();
@@ -119,7 +119,7 @@ async function tick(cfg: Config) {
 	try {
 		sources = await expandSources(cfg.sources, {
 			onSuccess: src => fine.push(src.name),
-			onError: (src, e) => { if (e instanceof Paused) { log(`${src.name}: paused (${e.message})`); return; } failed.push({ source: src.name, error: e.message }); log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },
+			onError: (src, e) => { failed.push({ source: src.name, error: e.message }); log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },
 		});
 	} catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
@@ -188,7 +188,7 @@ async function tick(cfg: Config) {
 				// Proactive: For you prepares the next step now, so the card brings a draft, not only a notice.
 				if (!parked) log(`prepare: ${it.id} ${(await hubPrepare(preparePrompt(it))) ? "queued in For you" : "For you not open; skipped"}`);
 			}
-		} catch (e) { if (e instanceof Paused) continue; failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
+		} catch (e) { failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
 	}
 	// Sources that keep failing show at the top of For you (phone and Mac) until they work again.
 	if (!dry) {
