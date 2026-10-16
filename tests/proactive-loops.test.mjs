@@ -2,6 +2,7 @@
 // Later / ✕ / "on it" from every view.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { forYouHub, forYouRelayAllowed } from "../plugins/foryou/hub.ts";
 import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,7 +89,7 @@ test("store: Later parks a loop, ✕ drops it, @ takes it 'on it'; the view spli
 });
 
 test("relay allows Later from the phone", () => {
-	assert.ok(relayAllowed("/api/foryou/abc_1/later", "POST"));
+	assert.ok(forYouRelayAllowed("/api/foryou/abc_1/later", "POST"));
 });
 
 test("routing: the main button goes to the coordinator; the loops tool can send it to a live, own, or new session", async () => {

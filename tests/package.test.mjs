@@ -21,7 +21,7 @@ test("slash commands stay minimal", async () => {
   const smartEditor = await readFile(new URL("plugins/editor/index.ts", root), "utf8");
   for (const dependency of ["pi-subagents", "@narumitw/pi-lsp"]) assert.match(upstream, new RegExp(dependency));
   // Web access is Pix's own engine now, not a bundled upstream package.
-  assert.match(upstream, /registerWebTools/);
+  assert.match(await readFile(new URL("plugins/web/index.ts", root), "utf8"), /registerWebTools/);
   assert.doesNotMatch(upstream, /pi-web-access/);
   assert.match(upstream, /property === "registerCommand"/);
   assert.match(upstream, /PI_SUBAGENT_MAX_DEPTH/);

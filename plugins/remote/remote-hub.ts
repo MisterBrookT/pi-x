@@ -17,25 +17,10 @@ import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "../de
 import { createDesktopCredentialStore, type DesktopCredentialStore } from "../desktop/remote-desktop-credentials.ts";
 import { createDesktopInput, createDesktopInputController, type DesktopInputController } from "../desktop/remote-desktop-input.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
-import { watchFile, unwatchFile } from "node:fs";
-import { paths as proactivePaths } from "../foryou/proactive.ts";
-import { actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "../foryou/proactive-store.ts";
+import { registeredHubPlugins, type HubPlugin, type HubContext } from "../core/hub-plugin.ts";
 
-export const remoteHost = "127.0.0.1";
-export const remoteDefaultPort = 8787;
-export const remoteTokenPath = join(homedir(), ".pi/agent/pix-remote/token");
-/** Bookmarks shown in the phone sidebar: [{ "label": "Book", "url": "https://..." }]. Local only, never in Git. */
-export const remoteUploadsDir = join(homedir(), ".pi/agent/pix-remote/uploads");
-export const remoteLinksPath = join(homedir(), ".pi/agent/pix-remote/links.json");
-export async function readRemoteLinks(path = remoteLinksPath): Promise<{ label: string; url: string }[]> {
-  try {
-    const raw = JSON.parse(await readFile(path, "utf8"));
-    return (Array.isArray(raw) ? raw : []).flatMap((l: any) => {
-      const label = String(l?.label ?? "").trim().slice(0, 60), url = String(l?.url ?? "").trim();
-      return label && /^https?:\/\//.test(url) ? [{ label, url: url.slice(0, 2000) }] : [];
-    }).slice(0, 20);
-  } catch { return []; }
-}
+export { remoteHost, remoteDefaultPort, remoteTokenPath, remoteUploadsDir, remoteLinksPath, readRemoteLinks } from "../core/hub-paths.ts";
+import { remoteHost, remoteDefaultPort, remoteTokenPath, remoteUploadsDir, remoteLinksPath, readRemoteLinks } from "../core/hub-paths.ts";
 
 import type { RemoteHelper } from "./remote-helpers.ts";
 export interface RemoteSnapshot {
@@ -180,10 +165,8 @@ export interface RemoteHubOptions {
   desktopInput?: DesktopInputController;
   /** Tests only: a broker wired to a fake VNC server; production always uses the fixed 127.0.0.1:5900 broker. */
   desktopBroker?: DesktopBroker;
-  /** Proactive list folder ("For you"); defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
-  proactiveDir?: string;
-  proactiveStart?: (prompt: string) => Promise<unknown>;
-  proactiveAct?: (id: string, focus?: boolean, into?: string, cwd?: string) => Promise<unknown>;
+  /** Features that add their own routes, phone events and session fields (For you, …). */
+  plugins?: HubPlugin[];
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -254,41 +237,30 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
       // The step it is on now: For you uses this to see what brook is working on.
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
-      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...(id === forYouSession.id && card ? { card: true } : {}), ...(question ? { asks: true } : {}) };
+      return { id, name, named, cwd, busy, waiting, nextLook, updatedAt, preview, ...(todo ? { todo } : {}), ...extraSummary(id), ...(question ? { asks: true } : {}) };
     });
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
   };
-  // "For you": the same proactive list the Mac pill shows. Phones get it as an event, and a push
-  // when a new item appears (title only, like session pushes).
-  const proactiveFile = proactivePaths(options.proactiveDir).inbox;
-  const liveSessions = () => [...sessions.values()].map(({ id, name, cwd, busy }) => ({ id, name, cwd, busy }));
-  // The page shows each loop with its real buttons and where each one goes (same as the card).
-  const forYou = () => ({ ...forYouView(options.proactiveDir), cards: waitingCards(options.proactiveDir, liveSessions(), Date.now(), 50) });
-  // The card: the oldest loop that needs brook, shown in the For you session (one at a time).
-  const cardNow = () => currentCard(options.proactiveDir, liveSessions());
-  let card: Card | undefined = cardNow();
-  let cards: Card[] = waitingCards(options.proactiveDir, liveSessions());
-  let knownItems = new Set(forYou().pending.map(i => i.id));
-  const onProactive = () => {
-    const view = forYou(), list = view.pending;
-    publish("foryou", view);
-    for (const it of list) if (!knownItems.has(it.id) && !it.quiet && push) notifyPhones({ title: "For you", body: it.title, session: forYouSession.id, tag: `foryou-${it.id}`, foryou: true });
-    knownItems = new Set(list.map(i => i.id));
-    const before = JSON.stringify(cards); card = cardNow(); cards = waitingCards(options.proactiveDir, liveSessions());
-    if (before !== JSON.stringify(cards)) {
-      const fy = sessions.get(forYouSession.id);
-      if (fy) publish("session", publicSession(fy));
-      publish("sessions", summary());
-    }
+  // Plugins: each gets the hub's shared pieces and adds routes, phone events and session fields.
+  const ctx: HubContext = {
+    publish: (event, data) => publish(event, data),
+    notify: message => { if (push) notifyPhones(message); },
+    liveSessions: () => [...sessions.values()].map(({ id, name, cwd, busy }) => ({ id, name, cwd, busy })),
+    queue: (sid, text) => {
+      const live = sessions.get(sid);
+      if (!live) return false;
+      live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
+      if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
+      return true;
+    },
+    refreshSession: id => { const s = sessions.get(id); if (s) publish("session", publicSession(s)); publish("sessions", summary()); },
   };
-  watchFile(proactiveFile, { interval: 2000 }, onProactive);
-  const healthFile = proactivePaths(options.proactiveDir).health;
-  watchFile(healthFile, { interval: 5000 }, onProactive);
-  // Parked loops come back by time, not by a file change: re-check every minute.
-  const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
-  wake.unref();
+  const hubPlugins = (options.plugins ?? registeredHubPlugins()).map(p => p(ctx));
+  const extras = () => hubPlugins.flatMap(p => p.initial?.() ?? []);
+  function extraSummary(id: string) { return Object.assign({}, ...hubPlugins.map(p => p.summary?.(id) ?? {})); }
+  function extraSession(id: string) { return Object.assign({}, ...hubPlugins.map(p => p.session?.(id) ?? {})); }
   const sessionPatch = (old: Registered | undefined, next: Registered) => {
     if (!old) return undefined;
     const { messages: a, ...oldMeta } = publicSession(old), { messages: b, ...meta } = publicSession(next);
@@ -300,7 +272,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     if (keep === a.length && keep === b.length && same(oldMeta, meta)) return null;
     return { ...meta, keep, base: a.length, tail: b.slice(keep) };
   };
-  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...(s.id === forYouSession.id && card ? { card, cards } : {}) });
+  const publicSession = ({ prompts: _p, waiter: _w, seenAt: _s, ...s }: Registered) => ({ ...s, messages: s.messages, streaming: s.streaming, streamingHtml: s.streamingHtml, updatedAt: s.updatedAt, ...extraSession(s.id) });
   const drop = (id: string) => {
     const session = sessions.get(id);
     if (!session) return;
@@ -346,7 +318,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (req.method === "GET" && path === "/api/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         res.write(`event: sessions\ndata: ${JSON.stringify(summary())}\n\n`);
-        res.write(`event: foryou\ndata: ${JSON.stringify(forYou())}\n\n`);
+        for (const [event, data] of extras()) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
         phones.add(res);
         req.on("close", () => phones.delete(res));
         return;
@@ -381,52 +353,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (verb === "close" && req.method === "POST") { desktopInput.close(id); const r = desktop.close(id); return send(res, r.status, r.body); }
       }
       if (req.method === "GET" && path === "/api/sessions") return send(res, 200, summary());
-      if (req.method === "GET" && path === "/api/foryou") return send(res, 200, forYou());
-      // A card answer (phone or Mac): first answer wins. Do it / Discuss / Something else run in For you;
-      // a session button hands the loop to that session (live: queued there; "new": a session in its project).
-      const cardMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/card$/);
-      if (req.method === "POST" && cardMatch) {
-        const input = await body(req).catch(() => ({})) as any;
-        const answer = String(input?.answer ?? "") as CardAnswer;
-        const r = answerCard(cardMatch[1], answer, { choice: typeof input?.choice === "number" ? input.choice : undefined, to: typeof input?.to === "string" ? input.to : undefined, live: liveSessions(), text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir: options.proactiveDir });
-        if (!r) { onProactive(); return send(res, 409, { error: "This card was already answered" }); }
-        const queue = (sid: string, text: string) => {
-          const live = sessions.get(sid);
-          if (!live) return false;
-          live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
-          if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
-          return true;
-        };
-        try {
-          if (r.here && !queue(forYouSession.id, r.here)) await (options.proactiveStart ?? startForYou)(r.here);
-          if (r.into) await (options.proactiveAct ?? ((x: string, f: boolean, i?: string) => actItem(x, { dir: options.proactiveDir, send: queue, live: liveSessions(), into: i })))(r.item.id, false, r.into, undefined);
-        } catch (error) { onProactive(); return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
-        onProactive();
-        return send(res, 200, { ok: true });
-      }
-      const forYouMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
-      if (req.method === "POST" && forYouMatch) {
-        const input = await body(req).catch(() => ({})) as any;
-        const [, id, verb] = forYouMatch;
-        if (verb !== "act") { const ok = ({ later: laterItem, dismiss: dismissItem, done: doneItem, now: nowItem } as const)[verb as "later"](id, options.proactiveDir); onProactive(); return send(res, ok ? 200 : 404, ok ? { ok } : { error: "already handled" }); }
-        try {
-          // Live For you session: queue the task into it, like a phone prompt. Otherwise actItem opens a tab.
-          const sendLive = (sid: string, text: string) => {
-            const live = sessions.get(sid);
-            if (!live) return false;
-            live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
-            if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
-            return true;
-          };
-          const focus = input?.focus === true;
-          // Phone and pill send nothing: the coordinator gets it. The coordinator's loops tool sends
-          // `into` (a session id or "new") and maybe `cwd` to hand it on.
-          const into = typeof input?.into === "string" && /^[\w.-]{1,80}$/.test(input.into) ? input.into : undefined;
-          const cwd = typeof input?.cwd === "string" && input.cwd.startsWith("/") || typeof input?.cwd === "string" && input.cwd.startsWith("~/") ? input.cwd : undefined;
-          const it = await (options.proactiveAct ?? ((x, f, i, c) => actItem(x, { dir: options.proactiveDir, send: sendLive, focus: f, live: liveSessions(), into: i, cwd: c })))(id, focus, into, cwd);
-          onProactive();
-          return it ? send(res, 202, { started: true, session: typeof (it as any).session === "string" ? (it as any).session : "" }) : send(res, 404, { error: "already handled" });
-        } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
+      if (req.method === "GET" && path === "/api/extras") return send(res, 200, extras());
+      for (const p of hubPlugins) {
+        const r = await p.route?.(req.method ?? "GET", path, () => body(req));
+        if (r) return send(res, r.status, r.body);
       }
       if (req.method === "GET" && path === "/api/folders") {
         const browse = await listFolders(url.searchParams.get("path") ?? "", options.home);
@@ -586,7 +516,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           sessions.set(id, next);
           notifyChanges(old, next);
           // A session joining can add a "Send to" button to the card.
-          if (!old && id !== forYouSession.id) onProactive();
+          if (!old) for (const p of hubPlugins) p.sessionJoined?.(id);
           // Phones get only what changed: messages after the first difference, plus the small fields.
           // A heartbeat with nothing new sends nothing, so the phone never re-draws for no reason.
           const patch = sessionPatch(old, next);
@@ -634,9 +564,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
     port,
     close: () => new Promise<void>((resolve) => {
       clearInterval(sweep);
-      unwatchFile(proactiveFile, onProactive);
-      unwatchFile(healthFile, onProactive);
-      clearInterval(wake);
+      for (const p of hubPlugins) p.close?.();
       desktopInput.dispose();
       desktop.dispose();
       for (const timer of heldBack) clearTimeout(timer);

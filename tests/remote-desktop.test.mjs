@@ -28,7 +28,7 @@ test("desktop destination is fixed to local Screen Sharing", () => {
 
 test("desktop routes need the hub token and the relay allows only them", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-desk-")); t.after(() => rm(dir, { recursive: true, force: true }));
-  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir }); t.after(() => hub.close());
+  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub") }); t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, id = "a".repeat(24);
   for (const [path, method] of [["/api/desktop/open", "POST"], [`/api/desktop/${id}/read?seq=0`, "GET"], [`/api/desktop/${id}/write`, "POST"], [`/api/desktop/${id}/close`, "POST"]]) {
     const res = await fetch(base + path, { method, headers: { authorization: "Bearer wrong" }, body: method === "POST" ? "{}" : undefined });
@@ -138,7 +138,7 @@ test("closed VNC connection is reported after queued data drains", async t => {
 
 test("authenticated wrong-method desktop routes are not served", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-desk-")); t.after(() => rm(dir, { recursive: true, force: true }));
-  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir }); t.after(() => hub.close());
+  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub") }); t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, id = "a".repeat(24), auth = { authorization: "Bearer hub-token-1234567890abcdef" };
   for (const [path, method] of [["/api/desktop/open", "GET"], [`/api/desktop/${id}/read?seq=0`, "POST"], [`/api/desktop/${id}/write`, "GET"], [`/api/desktop/${id}/close`, "GET"]]) {
     const res = await fetch(base + path, { method, headers: auth, body: method === "POST" ? "{}" : undefined });

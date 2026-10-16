@@ -4,8 +4,8 @@ import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { renderTodoGraph } from "./todo-graph.ts";
 import { Type } from "typebox";
 import { createStateReminder } from "../core/state-reminder.ts";
-import { BACKGROUND_JOB_END } from "../background/background-state.ts";
-import { subagentRoles } from "../subagents/subagent-policy.ts";
+import { BACKGROUND_JOB_END } from "../core/background-state.ts";
+import { subagentRoles } from "../core/subagent-policy.ts";
 
 type Status = "pending" | "active" | "done";
 /** Who is planned to do an item: the main assistant, or a subagent role. */

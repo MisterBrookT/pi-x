@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { backgroundState } from "../background/background-state.ts";
+import { backgroundState } from "../core/background-state.ts";
 
 /** One status query at the idle boundary, never a polling loop. */
 export async function hasPendingGoalWork(pi: Pick<ExtensionAPI, "events" | "getAllTools">): Promise<boolean> {

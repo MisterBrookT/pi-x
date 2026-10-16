@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { addAnthropicFastBeta, applyFastMode, clearFastModeFallbacks, consumeFastModeFallbackFeedback, fastModeActiveFor, fastModeTarget, isFastModeEnabled, setFastModeEnabled } from "./fast-mode.js";
+import { addAnthropicFastBeta, applyFastMode, clearFastModeFallbacks, consumeFastModeFallbackFeedback, fastModeActiveFor, fastModeTarget, isFastModeEnabled, setFastModeEnabled } from "../core/fast-mode.js";
 
 const configPath = join(homedir(), ".pi/agent/pix-fast.json");
 const targetLabels = { openai: "OpenAI priority", anthropic: "Anthropic fast", google: "Google priority" } as const;

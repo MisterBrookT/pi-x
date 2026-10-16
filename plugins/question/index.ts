@@ -40,10 +40,8 @@ const QuestionParams = Type.Object({
 	options: Type.Array(OptionSchema, { description: "Options for the user to choose from" }),
 });
 
-/** Shared-bus events so Pix Remote can show and answer a pending question from the phone. */
-export const QUESTION_OPEN = "pix:question:open";
-export const QUESTION_CLOSE = "pix:question:close";
-export const QUESTION_ANSWER = "pix:question:answer";
+import { QUESTION_OPEN, QUESTION_CLOSE, QUESTION_ANSWER } from "../core/question-events.ts";
+export { QUESTION_OPEN, QUESTION_CLOSE, QUESTION_ANSWER };
 
 /** The printable character a key sends, also under the Kitty keyboard protocol (CSI code u). */
 export const keyChar = (data: string) => { const m = /^\x1b\[(\d+)u$/.exec(data); return m ? String.fromCodePoint(Number(m[1])) : data; };

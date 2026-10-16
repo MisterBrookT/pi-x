@@ -2,6 +2,7 @@
 // the daily pile check, and the judgment log.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { forYouHub, forYouRelayAllowed } from "../plugins/foryou/hub.ts";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -123,8 +124,8 @@ test("regression: the pile check sees each loop's latest progress, so it can clo
 
 test("regression: ✓ Done and Now work from the phone through the relay", async () => {
 	const { relayAllowed } = await import("../plugins/remote/remote-relay-agent.ts");
-	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(relayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
-	assert.ok(!relayAllowed("/api/foryou/abc123/rm", "POST"));
+	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(forYouRelayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
+	assert.ok(!forYouRelayAllowed("/api/foryou/abc123/rm", "POST"));
 });
 
 test("health: a source failing 3 checks in a row shows in For you; one success clears it", async () => {

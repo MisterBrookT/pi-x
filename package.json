@@ -90,6 +90,7 @@
       "./plugins/terminal-support/index.ts",
       "./plugins/todo/index.ts",
       "./plugins/subagents/index.ts",
+      "./plugins/web/index.ts",
       "./plugins/core/tool.ts",
       "./plugins/foryou/index.ts"
     ]

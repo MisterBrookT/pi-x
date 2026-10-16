@@ -19,7 +19,7 @@ test("real upstream registration omits bg_wait but retains delegation and other 
 	});
 	const bus = createEventBus();
 	for (let reload = 0; reload < 2; reload++) {
-		const loaded = await loadExtensions([resolve("plugins/subagents/index.ts")], dir, bus);
+		const loaded = await loadExtensions([resolve("plugins/subagents/index.ts"), resolve("plugins/web/index.ts")], dir, bus);
 		t.after(() => loaded.runtime.invalidate());
 		assert.deepEqual(loaded.errors, []);
 		const tools = loaded.extensions.flatMap((extension) => [...extension.tools.keys()]);
@@ -48,7 +48,7 @@ test("the installed subagent completion notifier wakes without registering any w
 });
 
 test("the supervisor channel is described by when to use it, not by upstream internals", async () => {
-	const { supervisorDescription } = await import("../plugins/subagents/subagent-policy.ts");
+	const { supervisorDescription } = await import("../plugins/core/subagent-policy.ts");
 	assert.match(supervisorDescription, /^Answer a subagent that has paused for a decision/);
 	assert.doesNotMatch(supervisorDescription, /pi-intercom|Native/);
 	for (const action of ["pending", "reply", "send", "ask", "list", "status"]) assert.ok(supervisorDescription.includes(action), action);

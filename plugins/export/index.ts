@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { InteractiveMode, type AgentSession } from "@earendil-works/pi-coding-agent";
-import { openInBrowser } from "../context/index.ts";
+import { openInBrowser } from "../core/open-browser.ts";
 
 interface ExportMode {
   session: Pick<AgentSession, "exportToHtml" | "state" | "systemPrompt">;

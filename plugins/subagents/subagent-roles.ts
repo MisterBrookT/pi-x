@@ -6,7 +6,7 @@ import {
   type AgentConfig,
 } from "../../node_modules/pi-subagents/src/agents/agents.ts";
 
-import { subagentRoles } from "./subagent-policy.ts";
+import { subagentRoles } from "../core/subagent-policy.ts";
 
 export const effortLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 

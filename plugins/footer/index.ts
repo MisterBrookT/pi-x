@@ -4,10 +4,10 @@ import { join, relative, resolve, sep } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getSettingsListTheme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type SettingItem } from "@earendil-works/pi-tui";
-import { fastModeActiveFor } from "../fast-mode/fast-mode.js";
-import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../subagents/subagent-spinner.js";
+import { fastModeActiveFor } from "../core/fast-mode.js";
+import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../core/subagent-spinner.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "./footer.js";
-import { readRemoteLinks } from "../remote/remote-hub.js";
+import { readRemoteLinks } from "../core/hub-paths.ts";
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
 const labels: Record<keyof FooterOptions, string> = {

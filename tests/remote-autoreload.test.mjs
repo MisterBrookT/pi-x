@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "../plugins/remote/remote-autoreload.ts";
-import { BACKGROUND_STATE_QUERY, backgroundState } from "../plugins/background/background-state.ts";
+import { BACKGROUND_STATE_QUERY, backgroundState } from "../plugins/core/background-state.ts";
 
 test("pixCodeVersion changes when plugins/ files change, not other files", async t => {
   const root = await mkdtemp(join(tmpdir(), "pix-version-"));

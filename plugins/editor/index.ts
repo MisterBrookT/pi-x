@@ -14,8 +14,6 @@ import {
 	shouldCompactPaste,
 } from "./smart-editor.ts";
 import { WordCompletion } from "./word-completion.ts";
-import { expandForYou, withForYou } from "../foryou/foryou-mention.ts";
-import { readOpen } from "../foryou/proactive-store.ts";
 import registerAiCompletion, { type CompletionService } from "./ai-completion-ui.ts";
 import registerHistoryCompletion from "./history-completion.ts";
 
@@ -73,7 +71,6 @@ export default function smartEditor(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.mode !== "tui") return;
-		ctx.ui.addAutocompleteProvider?.((current) => withForYou(current, () => readOpen()));
 
 		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 			class SmartEditor extends CustomEditor {
@@ -192,10 +189,8 @@ export default function smartEditor(pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("input", (event, ctx) => {
-		let text = expandSmartMarkers(event.text, images, pastes);
-		// "@" makes this session the loop's home: later taps on the loop come back here.
-		try { text = expandForYou(text, ctx?.sessionManager?.getSessionId?.() ?? "pi", undefined, ctx?.cwd); } catch { /* list unreadable: keep text */ }
+	pi.on("input", (event) => {
+		const text = expandSmartMarkers(event.text, images, pastes);
 		if (text !== event.text) return { action: "transform", text };
 		return { action: "continue" };
 	});

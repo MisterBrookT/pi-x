@@ -47,7 +47,7 @@ import {
 	stripClaudeToolPrefix,
 	wrapFetchForCch,
 } from "./fingerprint.ts";
-import { fastModeActiveFor, recordFastModeFallback } from "../fast-mode/fast-mode.ts";
+import { fastModeActiveFor, recordFastModeFallback } from "../core/fast-mode.ts";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../background/background-state.ts";
+import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../core/background-state.ts";
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "./goal-state.ts";
 import { hasPendingGoalWork } from "./goal-work.ts";
 import { createStateReminder } from "../core/state-reminder.ts";

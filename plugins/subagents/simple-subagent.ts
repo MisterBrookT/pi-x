@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { subagentRoles, subagentRoleGuidance } from "./subagent-policy.ts";
+import { subagentRoles, subagentRoleGuidance } from "../core/subagent-policy.ts";
 
 type Tool = Parameters<ExtensionAPI["registerTool"]>[0];
 export const simpleSubagentParameters = Type.Object({

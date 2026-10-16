@@ -8,15 +8,18 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../remote/remote-state.ts";
+import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../core/loop-message.ts";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "./proactive-store.ts";
+import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
-import { remoteDefaultPort, remoteTokenPath } from "../remote/remote-hub.ts";
+import { registerHubPlugin } from "../core/hub-plugin.ts";
+import { forYouHub, forYouRelayAllowed } from "./hub.ts";
+import { expandForYou, withForYou } from "./foryou-mention.ts";
+import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 
 const TOOL = "loops";
 
@@ -95,6 +98,8 @@ export function cardReply(text: string, buttons: number): { answer: CardAnswer; 
 }
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
+	// The phone side: the bell page, cards on the For you session, and its /api/foryou routes.
+	registerHubPlugin("foryou", forYouHub(), forYouRelayAllowed);
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
 	const sessions = deps.sessions ?? hubSessions;
 
@@ -251,5 +256,13 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		apply(ctx);
 		if (!isCoordinator(ctx)) return undefined;
 		try { return { systemPrompt: `${event.systemPrompt}\n\n${coordinatorContext(deps.dir, await sessions())}` }; } catch { return undefined; }
+	});
+	// "@foryou:<id>" in any session: completion in the input box, and the full loop on send.
+	pi.on("session_start", (_e, ctx) => { if (ctx.mode === "tui") ctx.ui.addAutocompleteProvider?.(current => withForYou(current, () => readOpen())); });
+	pi.on("input", (event, ctx) => {
+		// "@" makes this session the loop's home: later taps on the loop come back here.
+		let text = event.text;
+		try { text = expandForYou(text, ctx?.sessionManager?.getSessionId?.() ?? "pi", undefined, ctx?.cwd); } catch { /* list unreadable: keep text */ }
+		return text !== event.text ? { action: "transform", text } : { action: "continue" };
 	});
 }

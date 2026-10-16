@@ -1,4 +1,5 @@
 import test from "node:test";
+import { forYouHub, forYouRelayAllowed } from "../plugins/foryou/hub.ts";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -50,11 +51,11 @@ test("store: ✕ and the main button both leave needs-you; a loop without a proj
 });
 
 test("relay lets the phone use For you, and nothing broader", () => {
-  assert.ok(relayAllowed("/api/foryou", "GET"));
-  assert.ok(relayAllowed("/api/foryou/abc_1/act", "POST"));
-  assert.ok(relayAllowed("/api/foryou/abc_1/dismiss", "POST"));
-  assert.ok(!relayAllowed("/api/foryou/abc/delete", "POST"));
-  assert.ok(!relayAllowed("/api/foryou/../x/act", "POST"));
+  assert.ok(forYouRelayAllowed("/api/foryou", "GET"));
+  assert.ok(forYouRelayAllowed("/api/foryou/abc_1/act", "POST"));
+  assert.ok(forYouRelayAllowed("/api/foryou/abc_1/dismiss", "POST"));
+  assert.ok(!forYouRelayAllowed("/api/foryou/abc/delete", "POST"));
+  assert.ok(!forYouRelayAllowed("/api/foryou/../x/act", "POST"));
 });
 
 test("hub: For you shows the same list, pushes new items, and Do it / Not now work from the phone", async t => {
@@ -63,7 +64,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   const pushes = [];
   const push = { notify: async m => { pushes.push(m); }, add: async () => {}, publicKey: "k" };
   const started = [];
-  const hub = await startRemoteHub({ token, port: 0, home: dir, push, proactiveDir: dir, proactiveStart: async p => { started.push(p); }, proactiveAct: async id => dismissItem(id, dir) || undefined });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, push, plugins: [forYouHub({ dir, start: async p => { started.push(p); }, act: async id => dismissItem(id, dir) || undefined })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -163,7 +164,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
 test("hub: Do it with a live For you session queues the task into it (no new tab)", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a")) + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -178,7 +179,7 @@ test("hub: Do it with a live For you session queues the task into it (no new tab
 test("phone composer: typing @ suggests For you items and a tap inserts the mention that is sent", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("a1"), item("b2", { title: "Knight backtest" })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
@@ -207,12 +208,12 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
 test("phone card: lives in the For you session; the bell opens it; the judge's session button hands the loop there", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader", choices: [{ label: "Switch loader", run: "s1" }, { label: "Discuss", run: "discuss" }] })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "backtest", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [] }) });
-  assert.ok(relayAllowed("/api/foryou/j1/card", "POST"), "the phone can answer through the relay");
+  assert.ok(forYouRelayAllowed("/api/foryou/j1/card", "POST"), "the phone can answer through the relay");
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
@@ -270,7 +271,7 @@ test("phone card: lives in the For you session; the bell opens it; the judge's s
 test("phone card: a session that fits the loop is one direct button that hands it over", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("r1", { suggest: { session: "s2" }, choices: [{ label: "Discuss", run: "discuss" }] })) + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s2`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [] }) });
@@ -292,7 +293,7 @@ test("phone card: a session that fits the loop is one direct button that hands i
 test("phone card: Something else runs brook's words in For you; Later parks the next card", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
@@ -326,7 +327,7 @@ test("phone card: Something else runs brook's words in For you; Later parks the 
 test("phone regression: the other waiting cards stay visible while For you works on the one just answered", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("w1", { at: "2026-10-01T00:00:00Z" }), item("w2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, proactiveDir: dir });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   const put = busy => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy, messages: [{ role: "user", text: "hi" }] }) });

@@ -94,7 +94,7 @@ test("runSecurity passes stdin, kills on timeout, and captures stdout only", asy
 test("hub credential routes need the token and a live desktop session; relay allows exactly them", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-cred-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const kc = fakeKeychain();
-  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir, desktopBroker: fakeBroker(t), desktopCredentials: createDesktopCredentialStore(kc.run) });
+  const hub = await startRemoteHub({ token: "hub-token-1234567890abcdef", port: 0, home: dir, memoryRoot: join(dir, "hub"), desktopBroker: fakeBroker(t), desktopCredentials: createDesktopCredentialStore(kc.run) });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: "Bearer hub-token-1234567890abcdef" }, ghost = "a".repeat(24);
   for (const [path, method] of [[`/api/desktop/${ghost}/credentials`, "GET"], [`/api/desktop/${ghost}/credentials`, "POST"], ["/api/desktop/credentials", "DELETE"]])
@@ -137,7 +137,7 @@ test("relay agent never serves credential replies from its request cache", async
   const { startRemoteRelayAgent, sealRelayFrame, openRelayFrame } = await import("../plugins/remote/remote-relay-agent.ts");
   const dir = await mkdtemp(join(tmpdir(), "pix-cred-relay-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const kc = fakeKeychain(), token = "r".repeat(32), relaySecret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
-  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir, desktopBroker: fakeBroker(t), desktopCredentials: createDesktopCredentialStore(kc.run) });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), desktopBroker: fakeBroker(t), desktopCredentials: createDesktopCredentialStore(kc.run) });
   t.after(() => hub.close());
   const { id } = await (await fetch(`http://127.0.0.1:${hub.port}/api/desktop/open`, { method: "POST", headers: auth, body: "{}" })).json();
   const server = new WebSocketServer({ port: 0, host: "127.0.0.1" }); t.after(() => server.close());

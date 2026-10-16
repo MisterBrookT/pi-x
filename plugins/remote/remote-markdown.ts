@@ -1,5 +1,5 @@
 import { Marked } from "marked";
-import { renderFitted } from "../mermaid/mermaid.ts";
+import { renderFitted } from "../core/mermaid.ts";
 import { formatSize, mentionedFolders, resolveMention, type MentionContext } from "./remote-files.ts";
 
 // Phone column width in monospace cells; wider diagrams scroll horizontally.

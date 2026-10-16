@@ -65,15 +65,8 @@ export const HTML_EXPORT_PATH = join(".pix", "context.html");
  * the page on screen. Failing to open is not a failed export, so the caller
  * reports the file either way.
  */
-export const openInBrowser = async (path: string, run = promisify(execFile)): Promise<boolean> => {
-	const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-	try {
-		await run(command, [path]);
-		return true;
-	} catch {
-		return false;
-	}
-};
+import { openInBrowser } from "../core/open-browser.ts";
+export { openInBrowser };
 
 export const exportHtml = async (pi: ExtensionAPI, ctx: ExtensionContext): Promise<string> => {
 	const path = resolve(ctx.cwd, HTML_EXPORT_PATH);

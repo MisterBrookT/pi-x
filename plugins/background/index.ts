@@ -1,7 +1,7 @@
 import { createBashToolDefinition, type ExtensionAPI, truncateTail } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { BACKGROUND_CHANGED, BACKGROUND_JOB_END, BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "./background-state.ts";
+import { BACKGROUND_CHANGED, BACKGROUND_JOB_END, BACKGROUND_STATE_QUERY, backgroundState, type BackgroundState } from "../core/background-state.ts";
 
 type State = "running" | "completed" | "failed" | "stopped";
 type Reminder = "off" | "fixed" | "exponential";

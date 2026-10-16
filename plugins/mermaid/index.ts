@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { colorize, renderFitted } from "./mermaid.ts";
+import { colorize, renderFitted } from "../core/mermaid.ts";
 
 /**
  * Render ```mermaid blocks with the current `lovely-mermaid` instead of the

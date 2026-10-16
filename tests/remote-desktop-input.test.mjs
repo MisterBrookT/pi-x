@@ -132,7 +132,7 @@ test("hub input route: bearer, live id, nativeInput flag, ack, close; relay allo
   const dir = await mkdtemp(join(tmpdir(), "pix-input-hub-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const broker = createDesktopBroker({ connect: () => new Socket() }); t.after(() => broker.dispose());
   const c = fakeController(), token = "hub-token-1234567890abcdef", auth = { authorization: `Bearer ${token}` };
-  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir, desktopBroker: broker, desktopInput: c });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), desktopBroker: broker, desktopInput: c });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, ghost = "a".repeat(24);
   const post = (path, value, headers = auth) => fetch(base + path, { method: "POST", headers, body: JSON.stringify(value) });
@@ -158,7 +158,7 @@ test("hub open omits nativeInput when the controller is disabled", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-input-off-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const broker = createDesktopBroker({ connect: () => new Socket() }); t.after(() => broker.dispose());
   const token = "hub-token-1234567890abcdef";
-  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), proactiveDir: dir, desktopBroker: broker, desktopInput: { enabled: false, run: async () => assert.fail() } });
+  const hub = await startRemoteHub({ token, port: 0, home: dir, memoryRoot: join(dir, "hub"), desktopBroker: broker, desktopInput: { enabled: false, run: async () => assert.fail() } });
   t.after(() => hub.close());
   const opened = await (await fetch(`http://127.0.0.1:${hub.port}/api/desktop/open`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: "{}" })).json();
   assert.equal(opened.nativeInput, undefined);

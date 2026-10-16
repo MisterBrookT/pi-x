@@ -140,7 +140,9 @@ test("on hello the Mac sends only the shown session, tailed, not every transcrip
   const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
   const { startRemoteRelayAgent, relayTail } = await import("../plugins/remote/remote-relay-agent.ts");
   const token = "r".repeat(32), secret = "s".repeat(43), auth = { authorization: `Bearer ${token}` };
-  const hub = await startRemoteHub({ token, port: 0 });
+  const { forYouHub } = await import("../plugins/foryou/hub.ts");
+  const fyDir = await (await import("node:fs/promises")).mkdtemp(join(tmpdir(), "pix-relay-fy-"));
+  const hub = await startRemoteHub({ token, port: 0, plugins: [forYouHub({ dir: fyDir })] });
   t.after(() => hub.close());
   // 25 turns of 4 messages: a user prompt, then assistant/tool messages.
   const messages = Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`, role: i % 4 ? "assistant" : "user", text: `msg ${i}` }));

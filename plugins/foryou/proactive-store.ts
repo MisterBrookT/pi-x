@@ -5,8 +5,8 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
-import { focusOttyTab, launchPi, type RemoteMode } from "../remote/remote-mac.ts";
-import { relayConfigPath } from "../remote/remote-relay-agent.ts";
+import { focusOttyTab, launchPi, type RemoteMode } from "../core/launch.ts";
+import { relayConfigPath } from "../core/hub-paths.ts";
 import { memoryAll, memoryDir } from "./proactive-memory.ts";
 
 export function readPending(dir?: string): Item[] {

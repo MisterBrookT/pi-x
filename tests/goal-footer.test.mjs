@@ -5,7 +5,7 @@ import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { FooterDataProvider } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/footer-data-provider.js";
 import registerGoal from "../plugins/goal/index.ts";
-import { BACKGROUND_STATE_QUERY } from "../plugins/background/background-state.ts";
+import { BACKGROUND_STATE_QUERY } from "../plugins/core/background-state.ts";
 
 const registerFooter = await createJiti(import.meta.url).import("../plugins/footer/index.ts", { default: true });
 

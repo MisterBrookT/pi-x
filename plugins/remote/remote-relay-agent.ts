@@ -4,6 +4,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { readRemoteToken, tailSession } from "./remote-hub.ts";
+import { pluginRelayAllowed } from "../core/hub-plugin.ts";
 
 /** Turns (user messages and everything after) a phone gets per session at first; older ones load on request. */
 export const relayTail = 5;
@@ -13,7 +14,8 @@ export const relayRequestLimit = 1_300_000;
 /** Cloudflare Worker frame cap in relay/src/index.ts. */
 export const relayFrameLimit = 2_000_000;
 export const relayKeyPath = join(homedir(), ".pi", "agent", "pix-remote", "relay-key");
-export const relayConfigPath = join(homedir(), ".pi", "agent", "pix-remote", "relay.json");
+export { relayConfigPath } from "../core/hub-paths.ts";
+import { relayConfigPath } from "../core/hub-paths.ts";
 
 /** No shared relay is bundled with Pix. A self-hosted origin is an explicit local choice. */
 export async function readRelayOrigin(path = relayConfigPath): Promise<string> {
@@ -48,7 +50,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
 };
 
 export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
-  || method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path)
+  || pluginRelayAllowed(path, method)
   || method === "GET" && (path === "/api/folders" || path === "/api/links" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume")
   || method === "POST" && path === "/api/desktop/open" || method === "GET" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/read$/.test(path) || method === "POST" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/(write|close|input)$/.test(path)
   || (method === "GET" || method === "POST") && desktopCredentialPath.test(path) || method === "DELETE" && path === "/api/desktop/credentials"; };
@@ -74,17 +76,17 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     headers: { authorization: `Bearer ${localToken}`, "content-type": "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
-  // On hello: the list, For you, and only the session the phone shows (its tail). Others load on open,
+  // On hello: the list, plugin events (For you…), and only the session the phone shows (its tail). Others load on open,
   // so a reconnect costs tens of KB instead of every transcript. Older phones send no `active`: all, tailed.
   const publishSessions = async (active?: string) => {
     // Fetch everything at once, and send the session the phone shows first: it is what Brook is looking at.
     const json = async (path: string) => { try { const r = await local(path); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
     const one = (id: string) => json(`/api/sessions/${encodeURIComponent(id)}?tail=${relayTail}`);
-    const [sessions, forYou, shown] = await Promise.all([json("/api/sessions") as Promise<{ id: string }[] | undefined>, json("/api/foryou"), active ? one(active) : undefined]);
+    const [sessions, extras, shown] = await Promise.all([json("/api/sessions") as Promise<{ id: string }[] | undefined>, json("/api/extras") as Promise<[string, unknown][] | undefined>, active ? one(active) : undefined]);
     if (!sessions) return;
     send({ kind: "event", event: "sessions", data: sessions });
     if (shown && sessions.some(s => s.id === active)) send({ kind: "event", event: "session", data: shown });
-    if (forYou) send({ kind: "event", event: "foryou", data: forYou });
+    for (const [event, data] of extras ?? []) send({ kind: "event", event, data });
     if (typeof active !== "string") for (const s of await Promise.all(sessions.map(s => one(s.id)))) if (s) send({ kind: "event", event: "session", data: s });
   };
   const listen = async (controller: AbortController) => {
@@ -98,7 +100,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         let end: number;
         while ((end = buffer.indexOf("\n\n")) >= 0) {
           const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
-          const type = block.match(/^event: (sessions|session|sessionPatch|stream|foryou)$/m)?.[1];
+          const type = block.match(/^event: ([\w-]+)$/m)?.[1];
           const data = block.match(/^data: (.+)$/m)?.[1];
           if (type && data) { try { const value = JSON.parse(data); send({ kind: "event", event: type, data: type === "session" ? tailSession(value, relayTail) : value }); } catch {} }
         }

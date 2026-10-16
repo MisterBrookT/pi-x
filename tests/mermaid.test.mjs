@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorize, preprocessEntities, renderFitted, renderMermaid, stylesToClassDefs } from "../plugins/mermaid/mermaid.ts";
+import { colorize, preprocessEntities, renderFitted, renderMermaid, stylesToClassDefs } from "../plugins/core/mermaid.ts";
 import { transformMermaidBlocks } from "../plugins/mermaid/index.ts";
 
 const AUTH_DIAGRAM = `flowchart TD
@@ -288,7 +288,7 @@ test("a sequence diagram with unsupported statements keeps the original fallback
 });
 
 test("renderFitted: a wide top-down flowchart with a subgraph and long labels still fits a narrow pane", async () => {
-  const { renderFitted, wrapLabels, flattenSubgraphs, dropEdgeLabels } = await import("../plugins/mermaid/mermaid.ts");
+  const { renderFitted, wrapLabels, flattenSubgraphs, dropEdgeLabels } = await import("../plugins/core/mermaid.ts");
   const src = `flowchart TB
   subgraph S["Always running on the Mac (no window)"]
     D["Daemon: receive and judge"]
