@@ -13,7 +13,7 @@ export interface ForYouHubOptions {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && path === "/api/foryou" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path);
+	method === "GET" && path === "/api/foryou" || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
@@ -49,6 +49,13 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); clearInterval(wake); },
 		async route(method, path, body) {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
+			// The bell page's chat box: talk to For you (queued if it is open, else it starts with this message).
+			if (method === "POST" && path === "/api/foryou/chat") {
+				const text = String((await body().catch(() => ({})) as any)?.text ?? "").trim().slice(0, 8000);
+				if (!text) return { status: 400, body: { error: "empty" } };
+				try { if (!hub.queue(forYouSession.id, text)) await (options.start ?? startForYou)(text); } catch (error) { return failed(error); }
+				return { status: 200, body: { ok: true } };
+			}
 			// A card answer (phone or Mac): first answer wins. Do it / Discuss / Something else run in For you;
 			// a session button hands the loop to that session (live: queued there; "new": a session in its project).
 			const cardMatch = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/card$/);
