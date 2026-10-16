@@ -463,3 +463,13 @@ test("proactive: a new loop is prepared under the hood (read-only) and the resul
 	assert.ok(preparedItem("n", "Draft: 44 categories, top 10 below…", d));
 	assert.equal(currentCard(d).prepared, "Draft: 44 categories, top 10 below…");
 });
+
+test("regression: WeChat reads wait while the Mac is locked, and a failed read restarts the stuck wx daemon", async () => {
+	const { wechatRead, Paused } = await import("../src/proactive-sources.ts");
+	const calls = [];
+	await assert.rejects(wechatRead(["msg", "x"], { locked: async () => true, exec: async (...a) => { calls.push(a); return { stdout: "{}" }; } }), e => e instanceof Paused);
+	assert.equal(calls.length, 0, "locked: no read, not a failure");
+	await assert.rejects(wechatRead(["msg", "x"], { locked: async () => false, exec: async (c, a) => { calls.push([c, ...a]); if (c === "wechat-cli") throw new Error("Command failed"); return { stdout: "" }; } }), /Command failed/);
+	assert.deepEqual(calls.map(c => c.slice(0, 3).join(" ")), ["wechat-cli msg x", "wx daemon stop"], "a failed read stops the daemon so the next check starts fresh");
+	assert.deepEqual(await wechatRead(["a"], { locked: async () => false, exec: async () => ({ stdout: '{"code":0}' }) }), { code: 0 });
+});

@@ -83,10 +83,8 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator("#forYouOpen").click();
   await page.getByText("Title a").waitFor();
   assert.equal(await page.locator("#form #forYou").count(), 0, "not in the composer");
-  // One quiet row per loop: the why shows only after a tap.
-  assert.equal(await page.getByText("Why a").isVisible(), false, "rows are titles only");
-  await page.locator('.fy[data-fy="a"] summary').click();
-  assert.ok(await page.getByText("Why a").isVisible(), "tap opens the row");
+  // Cards: each loop shows source, why, and its buttons at once (brook prefers cards to bare rows).
+  assert.ok(await page.getByText("Why a").isVisible(), "card shows why");
   // Lines of work stay inside the agent: the page never shows them.
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "train", name: "Jev training", state: "Round 1 done", updated: "x" }]));
   await page.waitForTimeout(500);
@@ -126,7 +124,6 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
   const main = page.locator('[data-fy="c"] [data-fy-choice="0"]');
   await main.waitFor({ state: "attached", timeout: 8000 });
-  for (const id of ["a", "b", "c"]) await page.locator(`.fy[data-fy="${id}"] summary`).click();
   assert.match(await page.locator('.fy[data-fy="c"] .fy-from').textContent(), /Group · now · due/);
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
   await page.locator('.fy[data-fy="a"] .fy-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
@@ -150,7 +147,6 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
-  await page.locator('.fy[data-fy="d"] summary').click({ timeout: 8000 });
   await page.locator('.fy[data-fy="d"] [data-fy-act="done"]').click();
   await page.locator('.fy[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);

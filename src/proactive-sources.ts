@@ -119,7 +119,22 @@ export function parseWechat(json: unknown): Msg[] {
 		.map(m => ({ id: String(m.local_id), time: String(m.time ?? ""), sender: String(m.sender || d.chat || "?").trim(), text: String(m.content ?? "").slice(0, 1500) }));
 }
 
-const wechatCli = async (args: string[]) => JSON.parse((await run("wechat-cli", args, { maxBuffer: 1 << 24, timeout: 60_000 })).stdout);
+/** macOS blocks WeChat's data folder while the screen is locked: reads hang, so wait for unlock instead of failing. */
+export const screenLocked = async (): Promise<boolean> => {
+	try { return /"CGSSessionScreenIsLocked"=Yes/.test((await run("ioreg", ["-n", "Root", "-d1"], { maxBuffer: 1 << 22, timeout: 5000 })).stdout); } catch { return false; }
+};
+export class Paused extends Error {}
+/**
+ * Read WeChat robustly: skip while the Mac is locked (not an error), and when a read fails or hangs,
+ * stop the wx daemon so the next check starts a fresh one (a stuck daemon otherwise fails every check).
+ */
+export async function wechatRead(args: string[], deps: { locked?: () => Promise<boolean>; exec?: (cmd: string, a: string[], o: object) => Promise<{ stdout: string }> } = {}) {
+	const exec = deps.exec ?? run;
+	if (await (deps.locked ?? screenLocked)()) throw new Paused("Mac is locked");
+	try { return JSON.parse((await exec("wechat-cli", args, { maxBuffer: 1 << 24, timeout: 45_000 })).stdout); }
+	catch (e) { await exec("wx", ["daemon", "stop"], { timeout: 10_000 }).catch(() => {}); throw e; }
+}
+const wechatCli = (args: string[]) => wechatRead(args);
 
 const wechat: Adapter = {
 	fetch: async src => parseWechat(await wechatCli(["msg", "get_message", JSON.stringify({ talker: src.id, limit: 30 })])),
