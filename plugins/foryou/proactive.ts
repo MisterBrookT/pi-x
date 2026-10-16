@@ -417,7 +417,10 @@ Prepare this under the hood before brook looks, read-only: read the original mes
 then draft the reply / find the facts / outline the plan, so he only has to check and confirm.
 Do not send, submit, or change anything outside; no long or expensive runs.
 When ready, call the loops tool: action "prepared", id ${it.id}, text = the result he will see (the draft itself, or the
-facts in 1-5 short lines). If you also know the best buttons, set them with action "choices". Then end your turn.`;
+facts in 1-5 short lines). Then ALWAYS set his buttons with action "choices", built from what you found: the 1-3 next
+moves your preparation points to, best first. If an open Pi session already works on this (e.g. a project session that
+has the data), one choice should run there, labelled with what it will do (e.g. "Ask Minara to confirm data").
+Not generic buttons. Then end your turn.`
 }
 
 export function actPrompt(it: Item, dir = PROACTIVE_DIR): string {

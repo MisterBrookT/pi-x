@@ -342,3 +342,26 @@ test("phone regression: the other waiting cards stay visible while For you works
   await page.waitForTimeout(1500);
   assert.equal(await page.locator('.job-min[data-job="w1"]').isVisible(), true, "card line does not vanish while busy");
 });
+
+test("bell page: every card has Something else; brook's words go to For you", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("e1", { prepared: "Facts found", choices: [{ label: "Ask Minara", run: "s2" }] })) + "\n");
+  const started = [];
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir, start: async p => { started.push(p); } })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  const card = page.locator('#forYou [data-fy="e1"]');
+  await card.locator("[data-fy-else]").click();
+  const box = card.locator(".fy-else textarea");
+  await box.fill("Ask Minara for the newest data snapshot first");
+  const h = await card.locator("[data-fy-else-send]").boundingBox();
+  assert.ok(h.height >= 40, "touch target");
+  await card.locator("[data-fy-else-send]").click();
+  for (let i = 0; i < 40 && !started.length; i++) await new Promise(r => setTimeout(r, 50));
+  assert.match(started[0], /own instruction[\s\S]*Ask Minara for the newest data snapshot first/);
+});
