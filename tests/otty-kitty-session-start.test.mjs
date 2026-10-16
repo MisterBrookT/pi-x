@@ -44,7 +44,7 @@ test("Otty images stay outside synchronized output at session start and after re
 
   const writes = [];
   const terminal = { columns: 80, rows: 24, kittyProtocolActive: false, start() {}, stop() {}, drainInput: async () => {}, write: (d) => writes.push(d),
-    moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {}, clearScreen() {}, setTitle() {}, setProgress() {} };
+    moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {}, clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {} };
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, quietStartup: true });
   const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, modelsStorePath: join(dir, "models.json"), refreshOnCreate: false });
   const createRuntime = async ({ cwd, sessionManager, sessionStartEvent }) => {

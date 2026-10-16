@@ -7,12 +7,15 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createJiti } from 'jiti';
 import { subagentRequest } from '../src/simple-subagent.ts';
 
 // Pi provides its bundled packages to extensions at load time; mirror that for the executor import.
-const piModules = resolve('node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works');
+// Pi 1.3 hoists them to the top-level node_modules; older Pi nested them under pi-coding-agent.
+const nested = resolve('node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works');
+const piModules = existsSync(join(nested, 'pi-agent-core')) ? nested : resolve('node_modules/@earendil-works');
 const jiti = createJiti(import.meta.url, { alias: { '@earendil-works/pi-agent-core': join(piModules, 'pi-agent-core') } });
 const upstream = resolve('node_modules/pi-subagents/src');
 const reuse = await jiti.import(join(upstream, 'workflows/workflow-reuse.ts'));
