@@ -128,6 +128,8 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await main.waitFor({ state: "attached", timeout: 8000 });
   for (const id of ["a", "b", "c"]) await page.locator(`.fy[data-fy="${id}"] summary`).click();
   assert.match(await page.locator('.fy[data-fy="c"] .fy-from').textContent(), /Group · now · due/);
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
+  await page.locator('.fy[data-fy="a"] .fy-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
   assert.equal(await main.textContent(), "Start testNew session in nd: Run the Databento test");
   assert.equal(await page.locator('[data-fy="a"] [data-fy-choice="0"]').textContent(), "Do it hereFor you does it: Draft a reply", "no judge buttons: the default says it stays in For you");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();

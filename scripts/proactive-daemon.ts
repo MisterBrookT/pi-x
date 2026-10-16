@@ -18,7 +18,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
-import { applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
+import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "../src/proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "../src/proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "../src/proactive-lines.ts";
 import { adapterFor, expandSources } from "../src/proactive-sources.ts";
@@ -185,6 +185,8 @@ async function tick(cfg: Config) {
 				// The judge thinks a live session is already on this: offer a job card there (brook decides).
 				const target = to ? work.find(w => w.id === to) : undefined;
 				if (target && !parked) { suggestItem(it.id, { id: target.id, name: target.name }); log(`card: ${it.id} -> ${target.name}`); }
+				// Proactive: For you prepares the next step now, so the card brings a draft, not only a notice.
+				if (!parked) log(`prepare: ${it.id} ${(await hubPrepare(preparePrompt(it))) ? "queued in For you" : "For you not open; skipped"}`);
 			}
 		} catch (e) { failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
 	}
@@ -206,6 +208,14 @@ async function tick(cfg: Config) {
 	await housekeeping(cfg, state, work);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
+}
+
+async function hubPrepare(prompt: string): Promise<boolean> {
+	try {
+		const token = readFileSync(remoteTokenPath, "utf8").trim();
+		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/sessions/pix-foryou/prompt`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ text: prompt, mode: "followUp" }), signal: AbortSignal.timeout(5000) });
+		return res.ok;
+	} catch { return false; }
 }
 
 async function hubAct(id: string, focus: boolean): Promise<boolean | undefined> {

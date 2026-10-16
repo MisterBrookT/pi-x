@@ -74,6 +74,8 @@ export interface Item extends Alert { id: string; at: string; source: string; so
 	sessionCwd?: string;
 	/** The loop's brief: dated progress lines written by whoever worked on it. Survives any chat. */
 	note?: string;
+	/** What For you already prepared under the hood (a draft, the facts found), shown on the card. */
+	prepared?: string;
 	/** A job card offered in a session: brook answers there (Do it / Discuss / Later / No / Something else). */
 	suggest?: { session: string; name?: string; at: string; answer?: "do" | "discuss" | "later" | "no" | "notnow" | "else"; text?: string; answeredAt?: string; by?: string } }
 
@@ -392,7 +394,7 @@ export function pruneLog(text: string, now: number, days = 30): string {
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
+export const publicItem = (i: Item) => ({ prepared: i.prepared ?? "", line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
 
 /** A note line appended to a loop's brief, keeping the brief short (newest lines win). */
 export function addNote(old: string | undefined, text: string, now = new Date()): string {
@@ -401,6 +403,23 @@ export function addNote(old: string | undefined, text: string, now = new Date())
 }
 
 /** The task a session gets for a loop: the loop, its brief so far, and how to leave progress behind. */
+/**
+ * Proactive, not only a notice: when a new loop arrives, For you prepares the next step read-only
+ * (reads the messages and files, drafts the reply, finds the facts) and puts the result on the card.
+ */
+export function preparePrompt(it: Item): string {
+	return `New loop ${it.id} from ${it.source}${it.project ? ` (project: ${it.project})` : ""}: **${it.title}**
+Why: ${it.why}
+Suggested next step: ${it.action}
+Original items: ${it.howToRead}
+
+Prepare this under the hood before brook looks, read-only: read the original messages and any project files you need,
+then draft the reply / find the facts / outline the plan, so he only has to check and confirm.
+Do not send, submit, or change anything outside; no long or expensive runs.
+When ready, call the loops tool: action "prepared", id ${it.id}, text = the result he will see (the draft itself, or the
+facts in 1-5 short lines). If you also know the best buttons, set them with action "choices". Then end your turn.`;
+}
+
 export function actPrompt(it: Item, dir = PROACTIVE_DIR): string {
 	const cli = `${dir === join(homedir(), ".pix", "proactive") ? "" : `PIX_PROACTIVE_DIR=${dir} `}node ${daemonScript}`;
 	return `${it.session && it.status === "onit" ? `(Picked up again; earlier work is in Pi session ${it.session}.)\n\n` : ""}A proactive loop from ${it.source}${it.project ? ` (project: ${it.project})` : ""}:

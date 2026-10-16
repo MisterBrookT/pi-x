@@ -451,3 +451,15 @@ test("lines of work: the judge reads the map, files loops under lines, and moves
 	assert.deepEqual(r.lines.map(l => [l.id, l.state]), [["train", "Backtest +3%"], ["bench", "started"]], "progress moves the line; a new line needs a name");
 	assert.equal(applyLineEdits(r.lines, [{ id: "bench", retire: true }]).lines[1].hidden, true);
 });
+
+test("proactive: a new loop is prepared under the hood (read-only) and the result shows on its card", async () => {
+	const { preparePrompt } = await import("../src/proactive.ts");
+	const { preparedItem } = await import("../src/proactive-store.ts");
+	const p = preparePrompt(loop("n", { title: "Send 44 categories", howToRead: "lark-cli x" }));
+	assert.match(p, /read-only[\s\S]*Do not send, submit/);
+	assert.match(p, /action "prepared", id n/);
+	const d = tmp(loop("n"));
+	assert.equal(preparedItem("n", "  ", d), false);
+	assert.ok(preparedItem("n", "Draft: 44 categories, top 10 below…", d));
+	assert.equal(currentCard(d).prepared, "Draft: 44 categories, top 10 below…");
+});

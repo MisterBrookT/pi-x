@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { actItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
+import { actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "../src/proactive-store.ts";
 import type { CardAnswer } from "../src/proactive-store.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../src/remote-hub.ts";
 
@@ -77,11 +77,12 @@ export const cardLines = (it: { title: string; why?: string; source: string; lef
 export const sendLabel = (x: { id: string; name: string; cwd?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
-export const cardTitle = (it: { title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
+export const cardTitle = (it: { prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
 	it.title,
 	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
 	"",
 	...(it.why ? [it.why, ""] : []),
+	...(it.prepared ? [`Prepared: ${it.prepared}`, ""] : []),
 	...(it.task ?? it.action ? [`Plan: ${it.task ?? it.action}`] : []),
 ].join("\n");
 
@@ -100,9 +101,9 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
+			action: StringEnum(["prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.String({ description: "Loop id" }),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
 			cwd: Type.Optional(Type.String({ description: "handoff into \"new\": the project folder (default: the loop's project)" })),
@@ -114,6 +115,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		}),
 		async execute(_id, p) {
 			const done = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
+			if (p.action === "prepared") return done(preparedItem(p.id, p.text ?? "", deps.dir) ? "On brook's card. End your turn." : `No open loop ${p.id}, or empty text.`);
 			if (p.action === "note") return done(noteItem(p.id, p.text ?? "", deps.dir) ? "Noted." : `No loop ${p.id}, or empty note.`);
 			if (p.action === "finished") return done(finishedItem(p.id, p.text ?? "", deps.dir) ? "Back to brook to check and close." : `No open loop ${p.id}, or empty text.`);
 			if (p.action === "choices") return done(publishChoices(p.id, p.choices, { question: p.question, dir: deps.dir }) ? "On brook's card. End your turn; his answer will come back." : `No open loop ${p.id}, or no valid choices.`);
