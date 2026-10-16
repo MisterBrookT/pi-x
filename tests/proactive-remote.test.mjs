@@ -122,13 +122,16 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
   // Transparency: an open row says where it came from, and each button says where it runs and what it does.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
-  const main = page.locator('[data-fy="c"] [data-fy-choice="0"]');
+  const main = page.locator('[data-fy="c"] [data-fy-pick="0"]');
   await main.waitFor({ state: "attached", timeout: 8000 });
   assert.match(await page.locator('.fy[data-fy="c"] .fy-from').textContent(), /Group · now · due/);
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
   await page.locator('.fy[data-fy="a"] .fy-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
-  assert.equal(await main.textContent(), "Start testNew session in nd: Run the Databento test");
-  assert.equal(await page.locator('[data-fy="a"] [data-fy-choice="0"]').textContent(), "Do it hereFor you does it: Draft a reply", "no judge buttons: the default says it stays in For you");
+  // Nested: an action first shows the task, then asks where (here / new session / discuss), like question cards.
+  await page.locator('[data-fy="c"] [data-fy-pick="0"]').click();
+  assert.deepEqual(await page.locator('[data-fy="c"] .fy-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
+  assert.match(await page.locator('[data-fy="c"] [data-fy-pick="0"]').textContent(), /Start test[\s\S]*Run the Databento test/);
+  assert.equal(await page.locator('[data-fy="c"] .fy-src').textContent(), "飞", "source icon");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
   await page.locator('.fy[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
@@ -137,7 +140,8 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('.fy[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
-  await page.locator('[data-fy="a"] [data-fy-choice="0"]').click();
+  await page.locator('[data-fy="a"] [data-fy-pick="0"]').click();
+  await page.locator('[data-fy="a"] .fy-where button', { hasText: "Here, in For you" }).click();
   await page.locator('.fy[data-fy="a"]').waitFor({ state: "detached" });
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
