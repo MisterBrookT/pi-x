@@ -327,7 +327,7 @@ $('toBottom').onclick=()=>{setFollow(true);$("chat").scrollTo({top:$("chat").scr
 let pendingNew=null,missingSince=0;
 const actionNames={reload:'Reload Pi',new:'New chat',compact:'Compact',rewind:'Rewind'};
 function showActions(open){$('actions').hidden=!open;$('actionsShade').hidden=!open;$('attach').setAttribute('aria-expanded',String(open))}
-$('attach').onclick=()=>showActions($('actions').hidden);$('actionsShade').onclick=()=>showActions(false);
+$('attach').onclick=()=>{const box=$('attach').closest('.box-controls')?.parentElement||$('form');$('actions').style.bottom=Math.max(12,innerHeight-box.getBoundingClientRect().top+8)+'px';showActions($('actions').hidden)};$('actionsShade').onclick=()=>showActions(false);
 async function runAction(action){showActions(false);showModel(false);if(action==='photo'){$('file').click();return false}if(action==='file'){$('anyFile').click();return false}if(!current)return false;if(action==='rewind'){if(current.busy){composerStatus('Pi is working. Stop it or wait, then try again.');return false}showRewind();return false}if(current.busy){composerStatus('Pi is working. Stop it or wait, then try again.');return false}
 if(action==='new'&&!confirm('Start a new chat? This conversation stays saved on the Mac.'))return false;
 try{if(action==='new')pendingNew={at:Date.now(),known:new Set(sessions.map(s=>s.id))};await api('/api/sessions/'+encodeURIComponent(current.id)+'/action',{method:'POST',body:JSON.stringify({action})});composerStatus('');return true}catch(err){pendingNew=null;composerStatus(err.message||'Could not run '+actionNames[action]);return false}}

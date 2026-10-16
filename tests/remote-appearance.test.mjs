@@ -136,3 +136,16 @@ function askCardHtml() {
   const esc = x => String(x);
   return new Function("esc", src + "return askCard;")(esc)({ id: "q", question: "Pick?", options: [{ label: "A" }] });
 }
+
+test("regression: the + menu opens right above the input box, even when the todo bar makes the composer taller", async t => {
+  const server = await serve(); t.after(() => server.close());
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  await page.evaluate(() => { document.getElementById("todoBar").hidden = false; document.getElementById("todoNow").textContent = "4/6 a long running todo"; document.getElementById("login").hidden = true; document.getElementById("app").hidden = false; document.getElementById("attach").disabled = false; });
+  await page.locator("#attach").click();
+  const menu = await page.locator("#actions").boundingBox(), box = await page.locator("#form .box").boundingBox(), bar = await page.locator("#todoBar").boundingBox();
+  assert.ok(menu.y + menu.height <= box.y, "menu sits above the input box");
+  assert.ok(box.y - (menu.y + menu.height) <= 16, "and right next to it");
+});
