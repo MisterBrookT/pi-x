@@ -362,7 +362,8 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 	const memory = existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
 	const open = readOpen(dir, now);
 	const loop = (i: Item) => [
-		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}] ${i.title} (${i.source})`,
+		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}${!needsYou(i, now) && i.wakeAt ? `, back ${i.wakeAt.slice(0, 10)}` : ""}] ${i.title} (${i.source})`,
+		i.prepared ? `  prepared: ${i.prepared.replace(/\s+/g, " ").slice(0, 200)}` : "",
 		i.project ? `  project: ${i.project}` : "",
 		i.session ? `  session: ${i.session}${i.session === forYouSession.id ? " (this one)" : ""}` : "",
 		i.note ? i.note.split("\n").map(l => `  ${l}`).join("\n") : "",
@@ -378,6 +379,11 @@ Decisions: when a loop needs brook to choose, do not ask with a blocking questio
 put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
 own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
 Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
+The whole picture: you know every open job (below). When he asks "what's next", "what's left", or similar, answer from it:
+1. Recommend the ONE thing to do now and why (due soonest, blocks others, or he is waiting on it), then offer to do it
+   (put buttons on its card with the loops tool action "choices", or just ask "Do it?").
+2. Then the rest, short, grouped: needs you · Pi on it (which session) · waiting / later (when it comes back).
+Be proactive: when you finish a task or a thread ends, close with one line, "Next: <the next job> — do it?".
 He can also just chat with you about a card ("why this?", "send it to pix", "merge with the other one"): answer, and use
 the loops tool when he asks for a change.
 

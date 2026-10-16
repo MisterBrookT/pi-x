@@ -473,3 +473,13 @@ test("regression: WeChat reads wait while the Mac is locked, and a failed read r
 	assert.deepEqual(calls.map(c => c.slice(0, 3).join(" ")), ["wechat-cli msg x", "wx daemon stop"], "a failed read stops the daemon so the next check starts fresh");
 	assert.deepEqual(await wechatRead(["a"], { locked: async () => false, exec: async () => ({ stdout: '{"code":0}' }) }), { code: 0 });
 });
+
+test("For you knows the whole picture: open jobs with due/back dates and prep, and it recommends what's next", async () => {
+	const { coordinatorContext } = await import("../src/proactive-store.ts");
+	const d = tmp(loop("a", { title: "Submit interview times", due: "2026-10-16", prepared: "Form link: x" }), loop("b", { title: "Benchmark run", status: "later", wakeAt: "2099-01-02T00:00:00Z" }));
+	const c = coordinatorContext(d, []);
+	assert.match(c, /id=a \[needs brook, due 2026-10-16\] Submit interview times[\s\S]*prepared: Form link: x/);
+	assert.match(c, /id=b \[later, back 2099-01-02\] Benchmark run/);
+	assert.match(c, /"what's next"[\s\S]*Recommend the ONE thing to do now and why/);
+	assert.match(c, /Next: <the next job> — do it\?/);
+});
