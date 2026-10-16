@@ -207,7 +207,7 @@ export function choiceTask(it: Item, c: { run: string; prompt?: string }): strin
 }
 export interface Card {
 	/** 1-based position among waiting cards (the Mac picker can step through them). */
-	at?: number; id: string; title: string; why: string; action: string; source: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
+	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
 	sessions: { id: string; name: string; cwd?: string; fits?: boolean }[];
 	/** What "Send to a session…" hands over. */
@@ -249,7 +249,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
 	const at = waiting.length ? skip % waiting.length : 0;
 	const it = waiting[at];
 	if (!it) return undefined;
-	return { at: at + 1, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
+	return { at: at + 1, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**

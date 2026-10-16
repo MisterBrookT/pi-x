@@ -147,7 +147,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
-  await page.getByText("All clear").waitFor();
+  await page.locator("#forYou").getByText("All clear").waitFor();
   assert.equal(await page.getByText("Title c").count(), 0, "parked loops stay with the agent, off the page");
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
@@ -205,58 +205,79 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   assert.deepEqual(errors, []);
 });
 
-test("one place: cards live only on the bell page, never inside a chat; Where? hands the loop to a session", async t => {
+const launch = async () => chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+
+test("one place: the bell opens the For you chat; its card is open, shows source and prepared, one recommended move that says where", async t => {
   const dir = await folder(t);
-  writeFileSync(join(dir, "inbox.jsonl"), [item("j1", { title: "Use the fmp doc", action: "Switch the backtest loader", choices: [{ label: "Switch loader", run: "s1" }, { label: "Discuss", run: "discuss" }] })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("j1", { title: "Send the data", action: "Package it", prepared: "Found tracks.json\nMinara has the snapshot\nline 3", choices: [{ label: "Ask Minara", run: "s1", prompt: "Package the newest data" }, { label: "Discuss", run: "discuss" }] })) + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "backtest", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi foryou" }] }) });
-  assert.ok(forYouRelayAllowed("/api/foryou/j1/card", "POST") && forYouRelayAllowed("/api/foryou/chat", "POST"), "the phone can answer and talk through the relay");
-  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
-  t.after(() => browser.close());
+  const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
-  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
-  await page.getByText("hi foryou").waitFor();
-  await page.waitForTimeout(500);
-  assert.equal(await page.locator("#messages [data-job]").count(), 0, "the For you chat shows no card");
-  await page.locator("#forYouOpen").click();
-  const card = page.locator('#forYou [data-fy="j1"]');
-  await card.getByRole("button", { name: /Switch loader/ }).click();
-  const where = card.locator(".fy-where button");
-  assert.match((await where.allTextContents()).join("|"), /backtest/);
+  await page.getByText("hello there").waitFor();
+  assert.equal(await page.locator("#messages [data-job]").count(), 0, "work sessions show no card");
+  // Sidebar: For you is its own row with a count, not in the session lists.
+  await page.locator("#menu").click();
+  await page.locator("#forYouRow").waitFor();
+  assert.equal(await page.locator("#forYouCount").textContent(), "1");
+  assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
+  await page.locator("#forYouRow").click();
+  const card = page.locator('#messages .job-card[data-job="j1"]');
+  await card.waitFor();
+  assert.equal(await page.locator("#forYouPage").isHidden(), true, "the bell/row opens the chat, not a separate page");
+  assert.match(await card.textContent(), /Feishu|Group|Send the data/);
+  assert.match(await card.locator(".job-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
+  const go = card.locator(".job-go");
+  assert.equal(await go.count(), 1, "one recommended move");
+  assert.match(await go.textContent(), /Ask Minara →[\s\S]*In minara: Package the newest data/);
   for (const b of await card.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(800); await page.screenshot({ path: process.env.PIX_SHOT }); }
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await where.filter({ hasText: "backtest" }).click();
-  assert.match((await next).prompts[0], /Switch the backtest loader/);
+  await go.click();
+  assert.match((await next).prompts[0], /Package the newest data/);
   const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
   assert.equal(it.status, "onit"); assert.equal(it.session, "s1");
   assert.deepEqual(errors, []);
 });
 
-test("bell page: the talk box under the list sends to For you, and Open conversation goes to its chat", async t => {
+test("in-chat card: Something else sends brook's words; Later parks it; ‹ › flips cards", async t => {
   const dir = await folder(t);
-  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c1")) + "\n");
+  writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
-  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "earlier talk" }] }) });
-  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
-  t.after(() => browser.close());
+  const put = (busy = false) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy, messages: [{ role: "user", text: "hi" }] }) });
+  await put();
+  const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  await page.locator("#forYouOpen").click();
-  await page.locator("#fyTalkText").fill("Which of these first?");
+  const card = page.locator('.job-card[data-job="k1"]');
+  await card.waitFor();
+  await card.getByRole("button", { name: "Next card" }).click();
+  await page.locator('.job-card[data-job="k2"]').waitFor();
+  await page.getByRole("button", { name: "Previous card" }).click();
+  await card.waitFor();
+  // Busy For you keeps the card visible.
+  await put(true); await page.waitForTimeout(800);
+  assert.equal(await card.isVisible(), true, "card stays while For you works");
+  await put(false);
+  await card.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await page.locator("#fyTalkSend").click();
-  assert.deepEqual((await next).prompts, ["Which of these first?"]);
-  assert.ok((await page.locator("#fyTalkSend").boundingBox()).height >= 40);
-  await page.locator("#fyTalkOpen").click();
-  await page.getByText("earlier talk").waitFor();
-  assert.equal(await page.locator("#forYouPage").isHidden(), true);
+  await card.getByRole("button", { name: "Send" }).click();
+  assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
+  await put(false);
+  const card2 = page.locator('.job-card[data-job="k2"]');
+  await card2.waitFor({ timeout: 8000 });
+  await card2.getByRole("button", { name: "Later" }).click();
+  await card2.waitFor({ state: "detached", timeout: 8000 });
+  assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });
 
 test("bell page: every card has Something else; brook's words go to For you", async t => {
