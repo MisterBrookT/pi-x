@@ -264,7 +264,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // when a new item appears (title only, like session pushes).
   const proactiveFile = proactivePaths(options.proactiveDir).inbox;
   const liveSessions = () => [...sessions.values()].map(({ id, name, cwd, busy }) => ({ id, name, cwd, busy }));
-  const forYou = () => forYouView(options.proactiveDir);
+  // The page shows each loop with its real buttons and where each one goes (same as the card).
+  const forYou = () => ({ ...forYouView(options.proactiveDir), cards: waitingCards(options.proactiveDir, liveSessions(), Date.now(), 50) });
   // The card: the oldest loop that needs brook, shown in the For you session (one at a time).
   const cardNow = () => currentCard(options.proactiveDir, liveSessions());
   let card: Card | undefined = cardNow();

@@ -60,9 +60,10 @@ test("relay lets the phone use For you, and nothing broader", () => {
 test("hub: For you shows the same list, pushes new items, and Do it / Not now work from the phone", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a")) + "\n");
-  const pushes = [], acted = [];
+  const pushes = [];
   const push = { notify: async m => { pushes.push(m); }, add: async () => {}, publicKey: "k" };
-  const hub = await startRemoteHub({ token, port: 0, home: dir, push, proactiveDir: dir, proactiveAct: async id => { acted.push(id); return dismissItem(id, dir) || undefined; } });
+  const started = [];
+  const hub = await startRemoteHub({ token, port: 0, home: dir, push, proactiveDir: dir, proactiveStart: async p => { started.push(p); }, proactiveAct: async id => dismissItem(id, dir) || undefined });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -121,15 +122,14 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.getByText("Title b").waitFor({ timeout: 8000 });
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
   assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
-  assert.equal(await page.getByText("Draft a reply").count(), 0, "no 'Pi will' block: concise");
-
-  // The main button names the prepared step; Later parks the loop where the phone can still see it.
-  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20" })) + "\n");
-  const main = page.locator('[data-fy="c"] [data-fy-act="act"]');
+  // Transparency: an open row says where it came from, and each button says where it runs and what it does.
+  appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
+  const main = page.locator('[data-fy="c"] [data-fy-choice="0"]');
   await main.waitFor({ state: "attached", timeout: 8000 });
-  for (const id of ["b", "c"]) await page.locator(`.fy[data-fy="${id}"] summary`).click();
-  assert.equal((await main.textContent()).trim(), "Start test");
-  assert.equal((await page.locator('[data-fy="a"] [data-fy-act="act"]').textContent()).trim(), "Do it", "no label: Do it");
+  for (const id of ["a", "b", "c"]) await page.locator(`.fy[data-fy="${id}"] summary`).click();
+  assert.match(await page.locator('.fy[data-fy="c"] .fy-from').textContent(), /Group · now · due/);
+  assert.equal(await main.textContent(), "Start testNew session in nd: Run the Databento test");
+  assert.equal(await page.locator('[data-fy="a"] [data-fy-choice="0"]').textContent(), "Do it hereFor you does it: Draft a reply", "no judge buttons: the default says it stays in For you");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
   await page.locator('.fy[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
@@ -138,13 +138,11 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('.fy[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
-  if (!(await page.locator('[data-fy="a"] [data-fy-act="act"]').isVisible())) await page.locator('.fy[data-fy="a"] summary').click();
-  await page.locator('[data-fy="a"] [data-fy-act="act"]').click();
+  await page.locator('[data-fy="a"] [data-fy-choice="0"]').click();
   await page.locator('.fy[data-fy="a"]').waitFor({ state: "detached" });
-  assert.deepEqual(acted, ["a"]);
-  assert.equal(await page.locator("#forYouPage").isHidden(), true, "Do it leaves the page to show the new session");
-  assert.equal(await page.locator("#forYouDot").isHidden(), true, "no dot when nothing is pending");
-  await page.locator("#forYouOpen").click();
+  assert.equal(started.length, 1, "Do it here goes to For you");
+  assert.match(started[0], /Draft a reply/);
+  assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
   await page.getByText("All clear").waitFor();
   assert.equal(await page.getByText("Title c").count(), 0, "parked loops stay with the agent, off the page");
 
