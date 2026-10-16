@@ -207,7 +207,9 @@ export function choiceTask(it: Item, c: { run: string; prompt?: string }): strin
 }
 export interface Card {
 	/** 1-based position among waiting cards (the Mac picker can step through them). */
-	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
+	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string;
+	/** Other waiting asks in the same line of work, decided together on this card. */
+	related?: { id: string; title: string; source: string; why: string; kind?: string }[]; line?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
 	sessions: { id: string; name: string; cwd?: string; fits?: boolean }[];
 	/** What "Send to a session…" hands over. */
@@ -237,19 +239,34 @@ export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prom
 /** The card For you shows now: the oldest loop that needs brook (undefined when none). */
 /** All waiting cards, oldest first (the phone flips through them like the Mac's ← →). */
 export function waitingCards(dir?: string, live: LiveSession[] = [], now = Date.now(), max = 12): Card[] {
-	const n = readAll(dir).filter(i => needsYou(i, now)).length;
+	const n = waitingHeads(dir, now).length;
 	return Array.from({ length: Math.min(n, max) }, (_, k) => currentCard(dir, live, now, k)!).filter(Boolean);
 }
 
 /** Is this loop still waiting for brook (anywhere in the queue, not only first)? */
 export function stillWaiting(id: string, dir?: string, now = Date.now()) { return readAll(dir).some(i => i.id === id && needsYou(i, now)); }
 
+/** Waiting loops, one per line of work: related asks share a card (the oldest leads). */
+function waitingHeads(dir: string | undefined, now: number): { it: Item; related: Item[] }[] {
+	const all = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+	const out: { it: Item; related: Item[] }[] = [];
+	for (const i of all) {
+		const g = i.line ? out.find(h => h.it.line === i.line) : undefined;
+		if (g) g.related.push(i); else out.push({ it: i, related: [] });
+	}
+	return out;
+}
+/** The other waiting loops that share this loop's card. */
+export const relatedWaiting = (id: string, dir?: string, now = Date.now()) => waitingHeads(dir, now).find(h => h.it.id === id)?.related ?? [];
+
 export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.now(), skip = 0): Card | undefined {
-	const waiting = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+	const heads = waitingHeads(dir, now), waiting = heads.map(h => h.it);
+	const lineOf = (i: Item) => i.line ? liveLines(dir).find(l => l.id === i.line) : undefined;
 	const at = waiting.length ? skip % waiting.length : 0;
 	const it = waiting[at];
 	if (!it) return undefined;
-	return { at: at + 1, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
+	const rel = heads[at].related, ln = lineOf(it);
+	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), at: at + 1, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**
@@ -273,18 +290,25 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
 	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(answer === "send" ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
 	if (c?.run === "later" || c?.run === "no") answer = c.run;
-	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); write(o.dir, { id, status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
-	if (answer === "no") { write(o.dir, { id, status: "dismissed" }); return { item: it }; }
-	if (answer === "done") { write(o.dir, { id, status: "done" }); return { item: it }; }
-	if (answer === "send") return { item: it, into: o.to };
+	const group = relatedWaiting(id, o.dir, at.getTime());
+	const all = (patch: Partial<Item>) => { for (const g of [it, ...group]) write(o.dir, { id: g.id, ...patch }); };
+	const also = group.length ? `\n\nThe same card also covers these related asks (same line of work); handle them together and close each with its id:\n${group.map(g => `- id=${g.id} from ${g.source}: ${g.title} (${g.why})`).join("\n")}` : "";
+	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); all({ status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
+	if (answer === "no") { all({ status: "dismissed" }); return { item: it }; }
+	if (answer === "done") { all({ status: "done" }); return { item: it }; }
+	// Acting on the card acts on the whole group: the lead carries the related asks; the rest wait on it.
+	const take = () => { if (!group.length) return; write(o.dir, { id, note: addNote(it.note, `Same card, handle together: ${group.map(g => `${g.id} ${g.title}`).join("; ")}`) }); for (const g of group) write(o.dir, { id: g.id, status: "waiting", wakeAt: null, note: addNote(g.note, `Handled with ${id} (${it.title})`) }); };
+	if (answer === "send") { take(); return { item: it, into: o.to }; }
 	// His own words on a loop a work session already owns go back to that session, with the loop's context.
-	if (answer === "else" && it.session && it.session !== forYouSession.id) { write(o.dir, { id, action: text }); return { item: it, into: it.session }; }
+	if (answer === "else" && it.session && it.session !== forYouSession.id) { write(o.dir, { id, action: text }); take(); return { item: it, into: it.session }; }
 	if (c && c.run !== "here" && c.run !== "discuss" && c.run !== "later" && c.run !== "no") {
 		if (c.prompt) write(o.dir, { id, action: c.prompt });
+		take();
 		return { item: it, into: c.run };
 	}
 	takeItem(id, forYouSession.id, o.dir, forYouFolder());
-	const base = actPrompt({ ...it, ...(c?.prompt ? { action: c.prompt } : {}), session: undefined }, paths(o.dir).dir);
+	for (const g of group) takeItem(g.id, forYouSession.id, o.dir, forYouFolder());
+	const base = actPrompt({ ...it, ...(c?.prompt ? { action: c.prompt } : {}), session: undefined }, paths(o.dir).dir) + also;
 	const here = c?.run === "discuss" ? `brook tapped "${c.label}" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options you see with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}`
 		: answer === "else" ? `brook answered loop ${id} with his own instruction. Do this instead of the suggested step:\n${text}\n\n(The loop, for context:)\n${base}`
 		: `brook tapped "${c!.label}" on loop ${id}. Do it here.\n\n${base}`;
@@ -379,6 +403,11 @@ Decisions: when a loop needs brook to choose, do not ask with a blocking questio
 put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
 own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
 Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
+Never interrupt: while you and brook are working on something, do not switch to a newly arrived loop. If a new loop is
+about the same thing, fold it in quietly ("also, Lowes just asked about the same curve"). Otherwise, when you finish the
+current thing, end with one line: "<n> new waiting — next: <the most urgent one>. Show it?" Only something due today, or
+someone blocked on him right now, may break in, and then as one line, not a full card.
+Related loops: loops in the same line of work are one card for brook and one decision; handle them together.
 The whole picture: you know every open job (below). When he asks "what's next", "what's left", or similar, answer from it:
 1. Recommend the ONE thing to do now and why (due soonest, blocks others, or he is waiting on it), then offer to do it
    (put buttons on its card with the loops tool action "choices", or just ask "Do it?").

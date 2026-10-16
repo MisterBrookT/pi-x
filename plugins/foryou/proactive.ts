@@ -202,7 +202,8 @@ never start with "Draft" or "Prepare". Good: "Reply to 杨奕辉", "Send wallet 
 Each has "label" (<=4 words, in the loop's language), "run" (what happens: "here" = his For you assistant does it,
 "discuss" = talk it through with him first, an open Pi session id from above when that session is the right place,
 "new" = a fresh session in the project, "later" = remind him in 2 days), and optionally "prompt"
-(one line: what to do, when it differs from "action"). Three buttons are always added after yours, do not repeat
+(one plain line brook reads under the button: the outcome, e.g. "Minara checks the curve, then you send the reply";
+never internal steps, option numbers, file paths or instructions to the agent). Three buttons are always added after yours, do not repeat
 them: "Not important" (drop it), "Send to a session" (he picks any open session), "Something else" (he writes his own). Example: [{"label": "Fix in minara", "run": "<session id>"}, {"label": "Ask Lowes for steps",
 "run": "here", "prompt": "Draft a reply asking Lowes for repro steps"}, {"label": "Not now", "run": "later"}].
 "due" is YYYY-MM-DD when there is a deadline, else omit.
@@ -420,7 +421,9 @@ When ready, call the loops tool: action "prepared", id ${it.id}, text = the resu
 facts in 1-5 short lines). Then ALWAYS set his buttons with action "choices", built from what you found: the 1-3 next
 moves your preparation points to, best first. If an open Pi session already works on this (e.g. a project session that
 has the data), one choice should run there, labelled with what it will do (e.g. "Ask Minara to confirm data").
-Not generic buttons. Then end your turn.`
+Not generic buttons. Each "prompt" is one plain line brook reads (the outcome), never internal steps or file paths.
+If this loop belongs with others in the same line of work (see the loop list), say so in the prepared text and make the
+choices cover them together. Use what you know about brook and earlier work on this line (memory, line state, notes). Then end your turn.`
 }
 
 export function actPrompt(it: Item, dir = PROACTIVE_DIR): string {

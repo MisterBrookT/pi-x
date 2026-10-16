@@ -264,10 +264,13 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   await page.locator('.job-card[data-job="k2"]').waitFor();
   await page.getByRole("button", { name: "Previous card" }).click();
   await card.waitFor();
-  // Busy For you keeps the card visible.
-  await put(true); await page.waitForTimeout(800);
-  assert.equal(await card.isVisible(), true, "card stays while For you works");
+  // Never interrupt: while For you works, the card steps back to one quiet line; it returns when the turn ends.
+  await put(true);
+  await page.locator(".job-waitline").waitFor({ timeout: 8000 });
+  assert.match(await page.locator(".job-waitline").textContent(), /2 things wait/);
+  assert.equal(await card.count(), 0);
   await put(false);
+  await card.waitFor({ timeout: 8000 });
   await card.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await card.getByRole("button", { name: "Send" }).click();
@@ -301,4 +304,35 @@ test("bell page: every card has Something else; brook's words go to For you", as
   await card.locator("[data-fy-else-send]").click();
   for (let i = 0; i < 40 && !started.length; i++) await new Promise(r => setTimeout(r, 50));
   assert.match(started[0], /own instruction[\s\S]*Ask Minara for the newest data snapshot first/);
+});
+
+test("related asks in one line of work share one card, and one answer handles them all", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), [item("g1", { at: "2026-10-01T00:00:00Z", line: "bench", title: "Curve for Lowes" }), item("g2", { at: "2026-10-02T00:00:00Z", line: "bench", title: "Data for 欧阳" }), item("g3", { at: "2026-10-03T00:00:00Z", title: "Other thing" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const { waitingCards, answerCard } = await import("../plugins/foryou/proactive-store.ts");
+  const cards = waitingCards(dir);
+  assert.deepEqual(cards.map(c => c.id), ["g1", "g3"], "one card per line");
+  assert.deepEqual(cards[0].related.map(r => r.title), ["Data for 欧阳"]);
+  assert.equal(cards[0].line, "News bench");
+  const r = answerCard("g1", "choice", { choice: 0, dir });
+  assert.match(r.here, /also covers these related asks[\s\S]*id=g2/);
+  const st = Object.fromEntries(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).map(i => [i.id, i.status]));
+  assert.deepEqual(st, { g1: "onit", g2: "onit", g3: "pending" });
+  answerCard("g3", "later", { dir });
+  assert.equal(waitingCards(dir).length, 0);
+  // The phone shows the related ask on the card.
+  writeFileSync(join(dir, "inbox.jsonl"), [item("h1", { line: "bench", title: "Curve for Lowes" }), item("h2", { line: "bench", title: "Data for 欧阳" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  const rel = page.locator('.job-card[data-job="h1"] .job-rel');
+  await rel.waitFor();
+  assert.match(await rel.textContent(), /News bench · also 1 related[\s\S]*Data for 欧阳/);
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
