@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, type LiveSession } from "./proactive-store.ts";
+import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -106,10 +106,19 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
-			id: Type.String({ description: "Loop id" }),
+			action: StringEnum(["create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
+			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
+			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
+			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
+			source: Type.Optional(Type.String({ description: "create: the source name, as in the forwarded message" })),
+			sourceKey: Type.Optional(Type.String({ description: "create: the source key, as in the forwarded message" })),
+			howToRead: Type.Optional(Type.String({ description: "create: how to read the original messages" })),
+			refs: Type.Optional(Type.Array(Type.String(), { description: "create: message ids" })),
+			line: Type.Optional(Type.String({ description: "create: the line id it belongs to" })),
+			project: Type.Optional(Type.String({ description: "create: project folder" })),
+			due: Type.Optional(Type.String({ description: "create: YYYY-MM-DD" })),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
 			cwd: Type.Optional(Type.String({ description: "handoff into \"new\": the project folder (default: the loop's project)" })),
 			text: Type.Optional(Type.String({ description: "note: the progress line; next: what is done" })),
@@ -120,6 +129,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		}),
 		async execute(_id, p) {
 			const done = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
+			if (p.action === "create") {
+				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text }, deps.dir);
+				return done(it ? `Card ${it.id} is on brook's For you.` : "create needs title, why and source.");
+			}
+			if (!p.id) return done("This action needs id.");
+			p = { ...p, id: p.id } as typeof p & { id: string };
 			if (p.action === "prepared") return done(preparedItem(p.id, p.text ?? "", deps.dir) ? "On brook's card. End your turn." : `No open loop ${p.id}, or empty text.`);
 			if (p.action === "note") return done(noteItem(p.id, p.text ?? "", deps.dir) ? "Noted." : `No loop ${p.id}, or empty note.`);
 			if (p.action === "finished") return done(finishedItem(p.id, p.text ?? "", deps.dir) ? "Back to brook to check and close." : `No open loop ${p.id}, or empty text.`);

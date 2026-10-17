@@ -21,8 +21,9 @@ import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
+import { filterPrompt, forwardPrompt, parseFilter, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
-import { actItem, finishedItem, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
+import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
@@ -116,6 +117,8 @@ async function tick(cfg: Config) {
 	const work = await workSessions();
 	const failed: { source: string; error: string }[] = [], fine: string[] = [];
 	let sources = cfg.sources;
+	const forwards: Forward[] = [];
+	const pendingMarks: (() => void)[] = [];
 	try {
 		sources = await expandSources(cfg.sources, {
 			onSuccess: src => fine.push(src.name),
@@ -138,6 +141,22 @@ async function tick(cfg: Config) {
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); mark(); continue; }
+			// New flow: the cheap model only filters; what passes goes to For you, which decides.
+			if (cfg.mode === "forward") {
+				const memory = existsSync(memoryDir(P.dir)) ? memoryForPrompt(P.dir, { msgs: [...ctx, ...fresh], source: src }) : existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
+				const prompt = filterPrompt({ me: String(src.me ?? cfg.me), source: src, context: ctx, fresh, memory, lines: linesForPrompt(readLines(P.dir)) });
+				let raw = "";
+				try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
+				fine.push("model");
+				const v = parseFilter(raw);
+				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), raw, verdict: v });
+				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
+				log(`${src.name}: ${fresh.length} new -> ${v.pass ? "PASS" : "drop"}: ${v.why}`);
+				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
+				else mark();
+				if (v.pass) pendingMarks.push(mark);
+				continue;
+			}
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.
 			const pending = items.filter(isOpen).slice(-20);
 			const feedback = items.filter(i => !isOpen(i)).slice(-10);
@@ -189,6 +208,13 @@ async function tick(cfg: Config) {
 				if (!parked) log(`prepare: ${it.id} ${(await hubPrepare(preparePrompt(it))) ? "queued in For you" : "For you not open; skipped"}`);
 			}
 		} catch (e) { failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
+	}
+	// Everything that passed goes to For you as one message; cursors move only once it is delivered.
+	if (forwards.length && !dry) {
+		const text = forwardPrompt(forwards);
+		const sent = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
+		log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> ${sent ? "For you" : "not delivered; retry next round"}`);
+		if (sent) for (const m of pendingMarks) m();
 	}
 	// Sources that keep failing show at the top of For you (phone and Mac) until they work again.
 	if (!dry) {

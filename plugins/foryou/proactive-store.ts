@@ -414,6 +414,9 @@ about the same thing, fold it in quietly ("also, Lowes just asked about the same
 current thing, end with one line: "<n> new waiting — next: <the most urgent one>. Show it?" Only something due today, or
 someone blocked on him right now, may break in, and then as one line, not a full card.
 Related loops: loops in the same line of work are one card for brook and one decision; handle them together.
+New messages: a cheap filter reads brook's chats and mail and forwards to you what may matter ("[For you: new messages …]").
+You are the one who decides: update what is already tracked, ignore what is not his, create cards (loops tool "create") for
+what needs him, hand work to sessions, keep lines and memory current. Answer each batch in one short message.
 Tracking: every line has an owner session; when that session ends a turn its status is recorded on the line and its
 loops (you see it below). To hand work to a live session or ask what it is doing, use the chat tool (send kind "handoff"
 or "ask" to its board name); its reply comes back to you. New messages about a line go to that line's owner, not a new session.
@@ -464,4 +467,20 @@ export function trackTurn(session: { id: string; name?: string }, lastText: stri
 	}
 	for (const line of new Set(mine.map(i => i.line).filter(Boolean) as string[])) trackLine(line, { id: session.id, ...(session.name ? { name: session.name } : {}), status }, dir, now.toISOString());
 	return mine.map(i => i.id);
+}
+
+/** For you creates a loop itself (the new flow: the filter forwards, For you decides). */
+export function createItem(a: { title: string; why: string; action?: string; source: string; sourceKey?: string; howToRead?: string; refs?: string[]; line?: string; project?: string; due?: string; choices?: Choice[]; prepared?: string; quiet?: boolean }, dir?: string, now = new Date()): Item | undefined {
+	const title = a.title?.trim(), why = a.why?.trim();
+	if (!title || !why || !a.source?.trim()) return undefined;
+	const it: Item = {
+		id: Math.random().toString(16).slice(2, 10), at: now.toISOString(), title: title.slice(0, 80), why: why.slice(0, 200), action: (a.action ?? "").trim().slice(0, 300) || title,
+		source: a.source.trim().slice(0, 80), sourceKey: a.sourceKey ?? "", howToRead: a.howToRead ?? "", refs: (a.refs ?? []).map(String).slice(0, 20), status: "pending",
+		...(a.line ? { line: a.line } : {}), ...(a.project ? { project: a.project } : {}), ...(a.due && /^\d{4}-\d{2}-\d{2}$/.test(a.due) ? { due: a.due } : {}),
+		...(a.prepared?.trim() ? { prepared: a.prepared.trim().slice(0, 4000) } : {}), ...(a.quiet ? { quiet: true } : {}),
+	};
+	const clean = cleanChoices(a.choices ?? []);
+	if (clean?.length) it.choices = clean;
+	appendFileSync(paths(dir).inbox, JSON.stringify(it) + "\n");
+	return it;
 }

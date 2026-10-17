@@ -21,7 +21,9 @@ export const paths = (dir = PROACTIVE_DIR) => ({
 
 /** One watched channel. `kind` picks the adapter in proactive-sources.ts; extra keys are adapter-specific. */
 export interface Source { kind: string; id: string; name: string; project?: string; chat?: "group" | "private"; [key: string]: unknown }
-export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; maxPerHour: number }
+export interface Config { me: string; sources: Source[]; intervalSec: number; model: string; maxPerHour: number;
+	/** "forward": the cheap model only filters and For you decides (default: the old judge). */
+	mode?: "judge" | "forward" }
 export const defaultConfig: Config = { me: "", sources: [], intervalSec: 600, model: "openai-codex/gpt-6-luna", maxPerHour: 4 };
 
 export interface Msg { id: string; time: string; sender: string; text: string }
