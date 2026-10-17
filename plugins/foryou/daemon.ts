@@ -76,7 +76,8 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 		if (now - Date.parse(state["@review"] ?? "0") > 3_600_000) {
 			const open = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "").filter(isOpen);
 			if (open.length) {
-				const ok = await hubPrepare(reviewPrompt({ open, since: state["@review"] }));
+				const text = reviewPrompt({ open, since: state["@review"] });
+				const ok = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
 				log(`review: ${open.length} open -> ${ok ? "For you" : "For you not open; next hour"}`);
 			}
 			state["@review"] = new Date(now).toISOString();
