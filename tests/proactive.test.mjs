@@ -168,11 +168,11 @@ test("regression: one failing expansion (DingTalk) keeps the other expansions an
   adapters["dingtalk-all"].expand = async () => { throw new Error("DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk"); };
   try {
     const errors = [], ok = [];
-    const out = await expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }, { kind: "feishu", id: "oc_2", name: "B", project: "~/p" }, { kind: "feishu-all", id: "all", name: "Feishu" }], { onError: (s, e) => errors.push([s.name, e.message]), onSuccess: s => ok.push(s.name) });
+    const out = await expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }, { kind: "feishu", id: "oc_2", name: "B", project: "~/p" }, { kind: "feishu-all", id: "all", name: "Feishu" }], { guard: async () => undefined, onError: (s, e) => errors.push([s.name, e.message]), onSuccess: s => ok.push(s.name) });
     assert.deepEqual(out.map(s => [s.id, s.project]), [["oc_2", "~/p"], ["oc_1", undefined]]);
     assert.deepEqual(errors.map(e => e[0]), ["DingTalk"]);
     assert.deepEqual(ok, ["Feishu"]);
-    await assert.rejects(expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }]), /timed out/, "without hooks errors still throw");
+    await assert.rejects(expandSources([{ kind: "dingtalk-all", id: "all", name: "DingTalk" }], { guard: async () => undefined }), /timed out/, "without hooks errors still throw");
   } finally { adapters["feishu-all"].expand = orig.f; adapters["dingtalk-all"].expand = orig.d; }
 });
 

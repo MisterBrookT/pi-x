@@ -9,6 +9,8 @@ import type { Msg, Source } from "./proactive.ts";
 import { fetchGmailImap } from "./imap.ts";
 import type { DingChat } from "./dingtalk-local.ts";
 import { readDingTalkIsolated } from "./dingtalk-worker.ts";
+import { probeApp, reapWxDaemons, sealedReason } from "./access.ts";
+import { isLocked } from "./unlock.ts";
 
 const run = promisify(execFile);
 
@@ -230,15 +232,24 @@ export function dingAdapters(load: (root?: string, account?: string) => DingChat
 const dingtalk = dingAdapters();
 export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat };
 
-export interface ExpandHooks { onError?: (src: Source, error: Error) => void; onSuccess?: (src: Source) => void }
+export interface ExpandHooks { onError?: (src: Source, error: Error) => void; onSuccess?: (src: Source) => void; guard?: (app: string) => Promise<string | undefined> }
 /**
  * Config sources with any "many chats" entries expanded. Explicit entries win (they may carry a project).
  * One failing expansion (e.g. DingTalk without Mac permission) is reported via `onError` and skipped; the rest still run.
  */
 export async function expandSources(sources: Source[], hooks: ExpandHooks = {}): Promise<Source[]> {
 	const out: Source[] = [];
+	const access = new Map<string, Promise<string | undefined>>();
+	const guard = hooks.guard ?? guardApp;
+	if (sources.some(x => /^wechat/.test(x.kind))) await reapWxDaemons().catch(() => 0);
 	for (const src of sources) {
 		const a = adapterFor(src);
+		const app = /^wechat/.test(src.kind) ? "wechat" : /^dingtalk/.test(src.kind) ? "dingtalk" : undefined;
+		if (app) {
+			if (!access.has(app)) access.set(app, guard(app));
+			const why = await access.get(app);
+			if (why) { const err = new Error(why); if (!hooks.onError) throw err; hooks.onError(src, err); continue; }
+		}
 		if (!a.expand) { out.push(src); continue; }
 		try { out.push(...await a.expand(src)); hooks.onSuccess?.(src); }
 		catch (e) { const err = e instanceof Error ? e : new Error(String(e)); if (!hooks.onError) throw err; hooks.onError(src, err); }
@@ -252,4 +263,10 @@ export function adapterFor(src: Source): Adapter {
 	const a = adapters[src.kind];
 	if (!a) throw new Error(`unknown source kind "${src.kind}" (known: ${Object.keys(adapters).join(", ")})`);
 	return a;
+}
+
+/** Undefined when the app's data can be read; otherwise why not (sealed by a lock or a pending macOS prompt). */
+export async function guardApp(app: string): Promise<string | undefined> {
+	const a = await probeApp(app);
+	return a === "sealed" ? sealedReason(app, await isLocked()) : undefined;
 }
