@@ -13,8 +13,8 @@ import { Type } from "typebox";
 import { board, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 
 const MSG = "pix-chat";
-/** Sessions that never join chat (brook's personal session). */
-const OFF = new Set(["for-you"]);
+/** Sessions that never join chat. (For you joins: it hands work out and gets replies back here.) */
+const OFF = new Set<string>();
 
 const HOW = {
   note: "FYI only; no answer expected.",

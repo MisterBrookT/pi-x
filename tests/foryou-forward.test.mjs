@@ -67,3 +67,24 @@ test("notebook: turn ends go to the activity page; the prompt carries only the m
   assert.doesNotMatch(p, /SECRET-DETAIL/, "but not loaded");
   assert.match(p, /activity\.jsonl: what every Pi session did lately/);
 });
+
+test("handoff: a live session on the chat board gets a chat handoff from for-you, not the hub queue", async t => {
+  const { actItem } = await import("../plugins/foryou/proactive-store.ts");
+  const { sendChat, boardNameFor } = await import("../plugins/core/chat-board.ts");
+  const { mkdirSync, writeFileSync, readdirSync } = await import("node:fs");
+  const dir = await mkdtemp(join(tmpdir(), "fy-ho-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const chat = join(dir, "chat");
+  mkdirSync(join(chat, "minara-2"), { recursive: true });
+  writeFileSync(join(chat, "minara-2", "me.json"), JSON.stringify({ name: "minara-2", cwd: "/w/minara", pid: process.pid, at: 1 }));
+  assert.equal(boardNameFor({ name: "minara", cwd: "/w/minara" }, chat), "minara-2");
+  assert.equal(boardNameFor({ name: "minara", cwd: "/elsewhere" }, chat), undefined);
+  const it = createItem({ title: "Run backtest", why: "Lowes asks", source: "群", project: "/w/minara" }, dir);
+  const queued = [];
+  const done = await actItem(it.id, { dir, live: [{ id: "s1", name: "minara", cwd: "/w/minara" }], into: "s1", send: (s, x) => (queued.push(s), true),
+    boardName: s => boardNameFor(s, chat), chat: (f, to, k, x) => sendChat(f, to, k, x, chat) });
+  assert.equal(done.status, "onit");
+  assert.deepEqual(queued, [], "hub queue not used");
+  const [f] = readdirSync(join(chat, "minara-2", "inbox"));
+  const note = JSON.parse(readFileSync(join(chat, "minara-2", "inbox", f), "utf8"));
+  assert.equal(note.from, "for-you"); assert.equal(note.kind, "handoff"); assert.match(note.text, /Run backtest/);
+});

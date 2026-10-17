@@ -1,4 +1,4 @@
-import { readBoard } from "../core/chat-board.ts";
+import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { linesForPrompt, liveLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
@@ -353,13 +353,22 @@ export function routeFor(it: Item, live: LiveSession[], into?: string, cwd?: str
  * loop and decides; the coordinator's `loops` tool calls this with `into` to route it elsewhere.
  * A live session gets the task queued (via `send`); otherwise a tab starts or resumes that session id.
  */
-export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean; live?: LiveSession[]; into?: string; cwd?: string; home?: string } = {}): Promise<Item | undefined> {
+export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean; chat?: typeof sendChat; boardName?: (s: LiveSession) => string | undefined; live?: LiveSession[]; into?: string; cwd?: string; home?: string } = {}): Promise<Item | undefined> {
 	const before = readAll(options.dir).find(i => i.id === id && isOpen(i));
 	if (!before) return undefined;
 	const route = routeFor(before, options.live ?? [], options.into, options.cwd, options.home);
 	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
 	// "Picked up again" only when this same session already had the loop.
 	const prompt = route.coordinator ? coordinatorTask(before, options.dir) : actPrompt(before.session === route.session ? it : { ...it, session: undefined }, paths(options.dir).dir);
+	// A live session on the chat board gets a chat handoff from For you; its reply comes back to For you.
+	const target = route.coordinator ? undefined : (options.live ?? []).find(l => l.id === route.session);
+	const boardName = target && (options.boardName ?? boardNameFor)(target);
+	if (boardName) {
+		(options.chat ?? sendChat)("for-you", boardName, "handoff", prompt);
+		write(options.dir, { id, note: addNote(it.note, `Handed to ${boardName} over chat`) });
+		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
+		return it;
+	}
 	if (options.send?.(route.session, prompt)) {
 		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
 		return it;
@@ -465,7 +474,7 @@ Its buttons: ${c.choices.map(x => `"${x.label}" -> ${x.run}`).join(", ")}; plus 
 ${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}
 
 ### Session board (chat): what each live session says it is doing
-${readBoard().map(b => `- ${b.name} in ${b.cwd}: ${b.doing || b.status || "(nothing posted)"}${b.claims?.length ? `; claims ${b.claims.slice(0, 4).join(", ")}` : ""}`).join("\n") || "(empty)"}`;
+${readBoard().filter(b => b.name !== "for-you").map(b => `- ${b.name} in ${b.cwd}: ${b.doing || b.status || "(nothing posted)"}${b.claims?.length ? `; claims ${b.claims.slice(0, 4).join(", ")}` : ""}`).join("\n") || "(empty)"}`;
 }
 
 /** One line from a turn's last reply: its first sentence or line, plain. */
