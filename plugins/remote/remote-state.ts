@@ -100,8 +100,9 @@ function subagentBackground(text: string): RemoteBackground | undefined {
 }
 
 const escapeText = (v: string) => v.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../core/loop-message.ts";
+import { LOOP_MESSAGE, loopMessage, loopPromptSummary, quietSummary } from "../core/loop-message.ts";
 export { LOOP_MESSAGE, loopMessage, loopPromptSummary };
+const quietHtml = (line: string, text: string) => `<details class="loop-ctx quiet"><summary>${escapeText(line)}</summary><pre>${escapeText(text)}</pre></details>`;
 const loopPromptHtml = (s: { title: string; you?: string }, text: string) => `<p><b>${escapeText(s.title)}</b>${s.you ? `<br>You: ${escapeText(s.you)}` : ""}</p><details class="loop-ctx"><summary>Details</summary><pre>${escapeText(text)}</pre></details>`;
 
 /** Build remote messages from Pi agent messages; tool results attach to the assistant call that produced them. */
@@ -114,7 +115,8 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
     if (message?.role === "user") {
       const text = textOf(message.content);
       const images = imagesOf(message.content);
-      const loop = loopPromptSummary(text);
+      const loop = loopPromptSummary(text), quiet = !loop && !images.length ? quietSummary(text) : undefined;
+      if (quiet) { result.push({ id, role: "system", text: clip(text), html: quietHtml(quiet, clip(text)), timestamp }); return; }
       if (text || images.length) result.push({ id, role: "user", text: clip(text), html: loop ? loopPromptHtml(loop, clip(text)) : renderRemoteMarkdown(clip(text), files), images: images.length ? images : undefined, timestamp });
     } else if (message?.role === "assistant") {
       const parts = Array.isArray(message.content) ? message.content : [];
@@ -124,6 +126,7 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       for (const call of calls) tools.set(call.id, call);
       const text = textOf(parts);
       const error = message.stopReason === "error" && message.errorMessage ? `Error: ${message.errorMessage}` : "";
+      if (!calls.length && !error && /^\s*No change\.?\s*$/i.test(text)) return;
       if (text || calls.length || error) result.push({ id, role: "assistant", text: clip(text || error), html: renderRemoteMarkdown(clip(text || error), files), tools: calls.length ? calls : undefined, timestamp });
     } else if (message?.role === "toolResult") {
       const call = tools.get(String(message.toolCallId));
@@ -140,6 +143,8 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
     } else if (message?.role === "custom" && message.display !== false) {
       const text = textOf(message.content);
       if (!text) return;
+      const quiet = quietSummary(text);
+      if (quiet) { result.push({ id, role: "system", text: clip(text), html: quietHtml(quiet, clip(text)), timestamp }); return; }
       const details = message.customType === "pix-background" ? message.details : undefined;
       const valid = details && typeof details.id === "string" && ["running", "completed", "failed", "stopped"].includes(details.state)
         && typeof details.command === "string" && typeof details.output === "string";

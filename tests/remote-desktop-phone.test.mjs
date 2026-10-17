@@ -182,7 +182,9 @@ test('Mac screen types live from the iPhone keyboard, with no Send step', async 
   const vp = () => page.evaluate(() => ({ ...desktopRfb._display._viewportLoc }));
   const v0 = await vp(), sentDrag = rfb.received.length;
   await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy, id: 3 }] });
-  for (let i = 1; i <= 8; i++) await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx - i * 10, y: cy - i * 5, id: 3 }] });
+  await page.waitForTimeout(300); // noVNC waits briefly for a possible second finger
+  // The test screen is tiny and zoomed far in, so each step must cover a few Mac pixels.
+  for (let i = 1; i <= 4; i++) { await page.waitForTimeout(30); await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx - i * 40, y: cy - i * 20, id: 3 }] }); }
   await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const v1 = await vp();
   assert.ok(v1.x !== v0.x || v1.y !== v0.y, `one-finger drag pans (${JSON.stringify(v0)} -> ${JSON.stringify(v1)})`);

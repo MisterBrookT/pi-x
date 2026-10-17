@@ -68,9 +68,11 @@ export default function (pi: ExtensionAPI) {
       `When the owner allows it, it sends chat with grant=["${abs}"] (or drops the claim), and the edit will pass.` };
   });
 
-  pi.registerMessageRenderer(MSG, (message, _opts, theme) => {
+  pi.registerMessageRenderer(MSG, (message, { expanded }, theme) => {
     const n = message.details as Note;
-    return new Text(`${theme.fg("accent", `✉ ${n.kind} from ${n.from}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
+    // One quiet line; the text shows when expanded (the model always gets all of it).
+    const head = `${theme.fg("dim", `↳ ${n.kind} from ${n.from}`)}`;
+    return new Text(expanded ? `${head}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", ` · ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
   });
 
   const show = (ps: Peer[]) => ps.map((p) =>

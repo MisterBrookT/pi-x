@@ -8,7 +8,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { LOOP_MESSAGE, loopMessage, loopPromptSummary } from "../core/loop-message.ts";
+import { LOOP_MESSAGE, loopMessage, loopPromptSummary, quietSummary } from "../core/loop-message.ts";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -106,6 +106,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// The phone side: the bell page, cards on the For you session, and its /api/foryou routes.
 	registerHubPlugin("foryou", forYouHub(), forYouRelayAllowed);
 	const isCoordinator = (ctx: any) => ctx?.sessionManager?.getSessionId?.() === forYouSession.id;
+	let isForYouProcess = false;
 	const sessions = deps.sessions ?? hubSessions;
 
 	pi.registerTool({
@@ -248,7 +249,10 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
 	// Older loop prompts were stored as plain user messages: fold them the same way when drawn.
 	pi.registerMarkdownTransformer?.((md, c) => {
+		if (c.messageType === "assistant" && isForYouProcess && /^\s*No change\.?\s*$/i.test(md)) return "";
 		if (c.messageType !== "user") return md;
+		const q = quietSummary(md);
+		if (q) return `↳ ${q}`;
 		const f = loopPromptSummary(md);
 		return f ? `↳ loop **${f.title}**${f.you ? ` · you: ${f.you}` : ""}` : md;
 	});
@@ -283,6 +287,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		return { action: "handled" as const };
 	});
 	pi.on("session_start", (_e, ctx) => {
+		isForYouProcess = isCoordinator(ctx);
 		apply(ctx);
 		clearInterval(timer);
 		timer = setInterval(() => void check(ctx).catch(() => {}), deps.cardPollMs ?? 4000);

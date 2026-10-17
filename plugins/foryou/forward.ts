@@ -62,7 +62,7 @@ Decide with everything you know (memory, lines, open loops, the session board):
   it is cheap and read-only (read the thread, check the owner session or project), so the card brings facts or a draft.
 - Work for a session? Hand it over with the chat tool (handoff to the line's owner); its reply comes back to you.
 Then reply to brook in ONE short message: what came in and what you did, e.g. "3 new: 1 needs you (card), 2 noted".
-If nothing needs him, say so in one line.`;
+If nothing needs him, reply only "No change." (it is hidden from him).`;
 }
 
 /**

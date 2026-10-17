@@ -79,7 +79,9 @@ const desktopScreenEl=$("desktopScreen");
 desktopScreenEl.addEventListener("touchstart",e=>{if(e.touches.length<2&&!desktopPinch)return;e.preventDefault();e.stopImmediatePropagation();if(e.touches.length>=2){const m=desktopTouchMid(e.touches);desktopPinch={d:m.d,x:m.x,y:m.y,s:desktopLevel||desktopFitScale()}}},{capture:true,passive:false});
 desktopScreenEl.addEventListener("touchmove",e=>{if(!desktopPinch)return;e.preventDefault();e.stopImmediatePropagation();if(e.touches.length<2)return;const m=desktopTouchMid(e.touches),d=desktopRfb?._display;
   const next=desktopPinch.s*m.d/Math.max(1,desktopPinch.d);if(desktopLevel&&d){const k=desktopLevel;d.viewportChangePos((desktopPinch.x-m.x)/k,(desktopPinch.y-m.y)/k)}desktopPinch.x=m.x;desktopPinch.y=m.y;desktopSetLevel(next,m.x,m.y)},{capture:true,passive:false});
-const desktopPinchEnd=e=>{if(!desktopPinch)return;e.preventDefault();e.stopImmediatePropagation();if(e.touches.length===0)desktopPinch=null};
+// noVNC never sees a pinch's fingers lift (we keep them from clicking), so reset its touch tracker after one; otherwise the
+// next one-finger drag is ignored.
+const desktopPinchEnd=e=>{if(!desktopPinch)return;e.preventDefault();e.stopImmediatePropagation();if(e.touches.length===0){desktopPinch=null;const g=desktopRfb?._gestures;if(g){g._stopLongpressTimeout?.();g._stopTwoTouchTimeout?.();g._tracked=[];g._ignored=[];g._waitingRelease=false;g._state=127}}};
 desktopScreenEl.addEventListener("touchend",desktopPinchEnd,{capture:true,passive:false});desktopScreenEl.addEventListener("touchcancel",desktopPinchEnd,{capture:true,passive:false});
 addEventListener("orientationchange",()=>{if(desktopLevel){desktopLevel=0;desktopZoom(false)}setTimeout(desktopFitView,250)});
 // Live typing: a hidden input owns the iPhone keyboard; every character goes to the Mac at once and the input stays empty,

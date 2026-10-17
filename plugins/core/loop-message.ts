@@ -19,3 +19,19 @@ export const loopMessage = (text: string) => {
 	const s = loopPromptSummary(text);
 	return s ? { customType: LOOP_MESSAGE, content: text, display: true, details: s } : undefined;
 };
+
+/**
+ * Automatic inputs to For you (new-message batches, the hourly review, chat from other sessions) read as one quiet
+ * line on screen; the model still gets the full text, and Details shows it. brook's own prose never matches.
+ */
+export function quietSummary(text: string): string | undefined {
+	const fy = text.match(/^\[For you: (new messages|hourly review)[^\]]*\]/);
+	if (fy) {
+		if (fy[1] === "hourly review") return "Hourly review of open cards";
+		const n = (text.match(/^\s*▸/gm) ?? []).length, src = [...new Set([...text.matchAll(/^### (.+?)(?: \(|$)/gm)].map(m => m[1]))];
+		return `New messages${src.length ? ` · ${src.slice(0, 3).join(", ")}${src.length > 3 ? ` +${src.length - 3}` : ""}` : ""}${n ? ` · ${n} marked` : ""}`;
+	}
+	const chat = text.match(/^\[chat (\w+) from session "([^"]+)"/);
+	if (chat) return `${chat[1] === "reply" ? "Reply" : chat[1] === "handoff" ? "Handoff" : chat[1] === "ask" ? "Question" : "Note"} from ${chat[2]}`;
+	return undefined;
+}
