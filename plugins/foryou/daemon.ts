@@ -21,6 +21,7 @@ import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
+import { ensureUnlocked } from "./unlock.ts";
 import { filterPrompt, forwardPrompt, parseFilter, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
@@ -120,6 +121,7 @@ async function tick(cfg: Config) {
 	const forwards: Forward[] = [];
 	const pendingMarks: (() => void)[] = [];
 	try {
+		if (!dry && cfg.sources.some(x => /wechat|dingtalk/i.test(x.kind))) { const u = await ensureUnlocked(); if (u !== "open") log(`mac: ${u}`); }
 		sources = await expandSources(cfg.sources, {
 			onSuccess: src => fine.push(src.name),
 			onError: (src, e) => { failed.push({ source: src.name, error: e.message }); log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },

@@ -296,7 +296,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			if (!id || id === forYouSession.id) return;
 			const last = [...(event?.messages ?? [])].reverse().find((m: any) => m?.role === "assistant");
 			const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n");
-			trackTurn({ id, name: ctx?.sessionManager?.getSessionName?.() }, text, deps.dir);
+			trackTurn({ id, name: ctx?.sessionManager?.getSessionName?.(), cwd: ctx?.cwd }, text, deps.dir);
 		} catch { /* tracking never breaks a turn */ }
 	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });

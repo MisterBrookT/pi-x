@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { filterPrompt, parseFilter, forwardPrompt } from "../plugins/foryou/forward.ts";
-import { remindItem, createItem, waitingCards, coordinatorContext } from "../plugins/foryou/proactive-store.ts";
+import { trackTurn, activityFile, remindItem, createItem, waitingCards, coordinatorContext } from "../plugins/foryou/proactive-store.ts";
 import { parseInbox } from "../plugins/foryou/proactive.ts";
 
 const src = { name: "新闻群", kind: "feishu", chat: "group", project: "~/w/news" };
@@ -50,4 +50,20 @@ test("remind: a done loop comes back as a card at the set time; past or bad time
   assert.equal(remindItem(it.id, "2026-10-17T05:55:00Z", "Interview at 14:15", dir, now), true);
   const last = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === it.id);
   assert.equal(last.status, "later"); assert.equal(last.wakeAt, "2026-10-17T05:55:00.000Z"); assert.equal(last.action, "Interview at 14:15");
+});
+
+test("notebook: turn ends go to the activity page; the prompt carries only the memory index plus where to read more", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "fy-nb-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const { writeFileSync, mkdirSync } = await import("node:fs");
+  mkdirSync(join(dir, "memory", "people"), { recursive: true });
+  writeFileSync(join(dir, "memory", "index.md"), "# brook\n- Prefers Cmd shortcuts\n");
+  writeFileSync(join(dir, "memory", "people", "Knight.md"), "# Knight\n- Works on Kairos\n- SECRET-DETAIL prefers mornings\n");
+  trackTurn({ id: "s1", name: "minara", cwd: "/w/minara" }, "Backtest finished. More text.", dir, new Date("2026-10-17T05:00:00Z"));
+  const [e] = readFileSync(activityFile(dir), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(e, { at: "2026-10-17T05:00:00.000Z", session: "minara", cwd: "/w/minara", did: "Backtest finished." });
+  const p = coordinatorContext(dir);
+  assert.match(p, /Prefers Cmd shortcuts/);
+  assert.match(p, /people\/Knight/, "the card is listed");
+  assert.doesNotMatch(p, /SECRET-DETAIL/, "but not loaded");
+  assert.match(p, /activity\.jsonl: what every Pi session did lately/);
 });

@@ -2,13 +2,13 @@ import { readBoard } from "../core/chat-board.ts";
 import { linesForPrompt, liveLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "../core/launch.ts";
 import { relayConfigPath } from "../core/hub-paths.ts";
-import { memoryAll, memoryDir } from "./proactive-memory.ts";
+import { listCards, memoryDir, readIndex, withCardList } from "./proactive-memory.ts";
 
 export function readPending(dir?: string): Item[] {
 	const { inbox } = paths(dir);
@@ -389,7 +389,7 @@ Decide where this is best done: here, in a session already open or already on th
  */
 export function coordinatorContext(dir?: string, live: LiveSession[] = [], now = Date.now()): string {
 	const P = paths(dir);
-	const memory = existsSync(memoryDir(P.dir)) ? memoryAll(P.dir) : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
+	const memory = existsSync(memoryDir(P.dir)) ? withCardList(readIndex(P.dir), listCards(P.dir)).trim() || "(empty)" : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
 	const open = readOpen(dir, now);
 	const loop = (i: Item) => [
 		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}${!needsYou(i, now) && i.wakeAt ? `, back ${i.wakeAt.slice(0, 10)}` : ""}] ${i.title} (${i.source})`,
@@ -408,6 +408,12 @@ Treat him with care and respect: his attention is the scarce thing you protect. 
   no longer true. Learn from what he skips or drops. Do this quietly, without announcing it each time.
 - Keep the map: move lines of work with the loops tool "line" when their state changes; retire ended ones.
 - Speak plainly, in his mix of Chinese and English when he uses it; recommend one next step when there is a clear best.
+
+## Your notebook (read it when you need it; only the essentials are below)
+- ${memoryDir(P.dir)}/: memory cards. index.md is shown below; read people/<name>.md or projects/<name>.md before acting on them.
+- ${activityFile(dir)}: what every Pi session did lately (one JSON line per turn end). Read the tail for "what's going on" or "what did I do today".
+- ${P.inbox}: every loop's full history (JSON lines; later lines update earlier ones by id).
+- ${P.dir}/lines.json: lines of work. ~/.pi/agent/chat/<name>/me.json: what each session says it is doing.
 
 ## Proactive coordinator
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
@@ -445,7 +451,7 @@ the loops tool when he asks for a change.
 ### Lines of work (the map; ~/.pix/proactive/lines.json, edit it when brook asks)
 ${linesForPrompt(readLines(dir), open)}
 
-### Memory
+### Memory (index)
 ${memory}
 
 ### Open loops
@@ -469,9 +475,10 @@ export const turnStatus = (text: string) => text.replace(/[*_`#>|]/g, "").replac
  * Tracking without asking the agent: when a session that owns open loops ends a turn, each loop gets a short note
  * of where it stands, and its line records this session as owner with the same status. Returns the loop ids touched.
  */
-export function trackTurn(session: { id: string; name?: string }, lastText: string, dir?: string, now = new Date()): string[] {
+export function trackTurn(session: { id: string; name?: string; cwd?: string }, lastText: string, dir?: string, now = new Date()): string[] {
 	const status = turnStatus(lastText);
 	if (!status) return [];
+	logActivity({ at: now.toISOString(), session: session.name ?? session.id, ...(session.cwd ? { cwd: session.cwd } : {}), did: status }, dir);
 	const mine = readAll(dir).filter(i => i.session === session.id && i.status === "onit");
 	for (const i of mine) {
 		const last = i.note?.split("\n").at(-1) ?? "";
@@ -504,4 +511,12 @@ export function remindItem(id: string, at: string, text: string, dir?: string, n
 	if (!it || !Number.isFinite(t) || t <= now.getTime()) return false;
 	write(dir, { id, status: "later", wakeAt: new Date(t).toISOString(), ...(text.trim() ? { action: text.trim().slice(0, 300) } : {}), note: addNote(it.note, `Reminder set for ${new Date(t).toISOString()}: ${text.trim()}`) });
 	return true;
+}
+
+/** The notebook's activity page: what every session did lately (one line per turn end), newest last; kept to 500 lines. */
+export const activityFile = (dir?: string) => join(paths(dir).dir, "activity.jsonl");
+export function logActivity(e: { at: string; session: string; cwd?: string; did: string }, dir?: string): void {
+	const f = activityFile(dir);
+	const old = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean) : [];
+	writeFileSync(f, [...old.slice(-499), JSON.stringify(e)].join("\n") + "\n");
 }
