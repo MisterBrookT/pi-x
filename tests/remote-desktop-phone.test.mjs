@@ -35,7 +35,7 @@ function rfbFixture({ securityTypes }) {
   return s;
 }
 
-async function setup(t, securityTypes, { failReads = 0, keychain, native } = {}) {
+async function setup(t, securityTypes, { failReads = 0, keychain, native, auto = false } = {}) {
   const home = await mkdtemp(join(tmpdir(), 'pix-desktop-'));
   const token = 'fixture-token-not-real';
   const hub = await startRemoteHub({ token, port: 0, home, sessionsDir: join(home, 'sessions'), memoryRoot: join(home, 'memory') });
@@ -43,6 +43,8 @@ async function setup(t, securityTypes, { failReads = 0, keychain, native } = {})
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(async () => { await browser.close(); await hub.close(); await rm(home, { recursive: true, force: true }); });
   const page = await browser.newPage({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 } });
+  // Most tests drive Connect by hand: start with auto-connect off (as after a Disconnect).
+  if (!auto) await page.addInitScript(() => { window.pixDesktopNoAuto = true; });
   const errors = [], logs = [];
   page.on('pageerror', e => errors.push(e.message));
   page.on('console', m => logs.push(m.text()));
@@ -516,9 +518,9 @@ test('Mac screen native typing fails closed when the hub ack is not the next seq
   }
 });
 
-test('Mac screen stays connected after Close and reconnects by itself once this phone has connected', async t => {
-  const { page, rfb, errors, opens } = await setup(t, [1]);
-  await page.locator('#desktopConnect').click();
+test('Mac screen connects on open, stays connected after Close, and reconnects by itself until Disconnect', async t => {
+  const { page, rfb, errors, opens } = await setup(t, [1], { auto: true });
+  // First open connects with no tap.
   await page.locator('#desktopKeys').waitFor({ state: 'visible' });
   assert.equal(opens(), 1);
   // Close only hides: no hub close, same connection on reopen, no Connect tap.

@@ -87,6 +87,7 @@ async function setup(t, opts) {
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(async () => { await browser.close(); await hub.close(); for (const s of fake.sockets) s.destroy(); await new Promise(r => fake.server.close(r)); await rm(home, { recursive: true, force: true }); });
   const page = await browser.newPage({ ...devices['iPhone 13'], viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => { window.pixDesktopNoAuto = true; }); // this test taps Connect itself
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${hub.port}`);
