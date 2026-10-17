@@ -22,6 +22,7 @@ import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseIn
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
+import { readStatus, statusBoard } from "./session-status.ts";
 import { filterPrompt, forwardPrompt, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
@@ -76,7 +77,7 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 		if (now - Date.parse(state["@review"] ?? "0") > 3_600_000) {
 			const open = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "").filter(isOpen);
 			if (open.length) {
-				const text = reviewPrompt({ open, since: state["@review"] });
+				const text = reviewPrompt({ open, since: state["@review"], board: statusBoard(readStatus()) });
 				const ok = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
 				log(`review: ${open.length} open -> ${ok ? "For you" : "For you not open; next hour"}`);
 			}

@@ -69,7 +69,7 @@ If nothing needs him, reply only "No change." (it is hidden from him).`;
  * The hourly review: For you wakes by itself and brings every card up to date with what changed since
  * (brook did it, a session moved on, a date passed). Silent unless something needs him.
  */
-export function reviewPrompt(o: { open: { id: string; title: string; status: string; at: string; due?: string; session?: string; wakeAt?: string }[]; since?: string; now?: Date }): string {
+export function reviewPrompt(o: { board?: string; open: { id: string; title: string; status: string; at: string; due?: string; session?: string; wakeAt?: string }[]; since?: string; now?: Date }): string {
 	const now = o.now ?? new Date();
 	const list = o.open.map(i => `- id=${i.id} [${i.status}${i.due ? `, due ${i.due}` : ""}${i.wakeAt ? `, back ${i.wakeAt.slice(0, 16)}` : ""}${i.session ? `, ${i.session}` : ""}] ${i.title}`).join("\n");
 	return `[For you: hourly review, ${now.toISOString().slice(0, 16).replace("T", " ")}${o.since ? `; last review ${o.since.slice(0, 16).replace("T", " ")}` : ""}]
@@ -84,5 +84,8 @@ Do not start work and do not send anything. When nothing changed, reply only "No
 Otherwise reply with one short line per changed card.
 
 Open cards:
-${list || "(none)"}`;
+${list || "(none)"}${o.board ? `
+
+Where each session stands now:
+${o.board}` : ""}`;
 }

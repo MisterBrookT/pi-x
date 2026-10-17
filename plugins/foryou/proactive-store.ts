@@ -420,6 +420,7 @@ Treat him with care and respect: his attention is the scarce thing you protect. 
 
 ## Your notebook (read it when you need it; only the essentials are below)
 - ${memoryDir(P.dir)}/: memory cards. index.md is shown below; read people/<name>.md or projects/<name>.md before acting on them.
+- ${join(paths(dir).dir, "status.json")}: where every session stands now, one short line each (a cheap model writes it after each turn). Read this first.
 - ${activityFile(dir)}: what every Pi session did lately (one JSON line per turn end). Read the tail for "what's going on" or "what did I do today".
 - ${P.inbox}: every loop's full history (JSON lines; later lines update earlier ones by id).
 - ${P.dir}/lines.json: lines of work. ~/.pi/agent/chat/<name>/me.json: what each session says it is doing.

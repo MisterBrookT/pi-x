@@ -17,6 +17,7 @@ import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
+import { summarizeTurn } from "./session-status.ts";
 import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
@@ -46,7 +47,7 @@ async function handOff(id: string, into: string, cwd?: string): Promise<boolean>
 	return !!(await actItem(id, { into, cwd }));
 }
 
-export interface ForYouDeps { sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number; badge?: (waiting: boolean) => void }
+export interface ForYouDeps { summarize?: typeof summarizeTurn; sessions?: () => Promise<LiveSession[]>; handOff?: typeof handOff; answer?: typeof answerViaHub; dir?: string; cardPollMs?: number; badge?: (waiting: boolean) => void }
 
 /** Answer through the hub when it runs (it queues work into sessions and updates the phone). */
 async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: number; to?: string; text?: string }): Promise<"ok" | "gone" | "nohub"> {
@@ -101,6 +102,11 @@ export function cardReply(text: string, buttons: number): { answer: CardAnswer; 
 }
 
 const memoryDirOf = (dir?: string) => proactivePaths(dir).dir;
+
+/** The cheap model for session status: the filter's model from config.json (cfg.statusModel overrides; "" turns it off). */
+function statusModel(dir?: string): string | undefined {
+	try { const c = JSON.parse(readFileSync(join(proactivePaths(dir).dir, "config.json"), "utf8")); return c.statusModel ?? c.model; } catch { return undefined; }
+}
 
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// The phone side: the bell page, cards on the For you session, and its /api/foryou routes.
@@ -301,7 +307,13 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			if (!id || id === forYouSession.id) return;
 			const last = [...(event?.messages ?? [])].reverse().find((m: any) => m?.role === "assistant");
 			const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n");
-			trackTurn({ id, name: ctx?.sessionManager?.getSessionName?.(), cwd: ctx?.cwd }, text, deps.dir);
+			const name = ctx?.sessionManager?.getSessionName?.();
+			trackTurn({ id, name, cwd: ctx?.cwd }, text, deps.dir);
+			// Beside the session: a cheap model writes its one-line status (not awaited; no context or time taken from the turn).
+			const user = [...(event?.messages ?? [])].reverse().find((m: any) => m?.role === "user");
+			const ask = typeof user?.content === "string" ? user.content : (user?.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n");
+			const model = statusModel(deps.dir);
+			if (model && !process.env.PIX_STATUS_OFF) void (deps.summarize ?? summarizeTurn)({ session: id, name, cwd: ctx?.cwd, ask, reply: text, model, dir: deps.dir });
 		} catch { /* tracking never breaks a turn */ }
 	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
