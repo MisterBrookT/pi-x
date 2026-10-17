@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, type LiveSession } from "./proactive-store.ts";
+import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -250,6 +250,16 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		timer.unref?.();
 	});
 	pi.on("agent_end", (_e, ctx) => void check(ctx).catch(() => {}));
+	// Job tracking: a session that owns a loop reports where it stands on every turn end, without being asked.
+	pi.on("agent_end", (event: any, ctx) => {
+		try {
+			const id = ctx?.sessionManager?.getSessionId?.();
+			if (!id || id === forYouSession.id) return;
+			const last = [...(event?.messages ?? [])].reverse().find((m: any) => m?.role === "assistant");
+			const text = typeof last?.content === "string" ? last.content : (last?.content ?? []).filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n");
+			trackTurn({ id, name: ctx?.sessionManager?.getSessionName?.() }, text, deps.dir);
+		} catch { /* tracking never breaks a turn */ }
+	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
 	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
 	pi.on("before_agent_start", async (event, ctx) => {

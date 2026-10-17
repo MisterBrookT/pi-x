@@ -134,6 +134,10 @@ Messages marked (me) are ${o.me}'s own.
 In a group chat, a question or request is for ${o.me} only with evidence: it @mentions or names him, quotes/replies to his message,
 answers something he just said, or memory says it is his job. A question that follows someone else's share or message
 (e.g. "你接入claude是用cli吗？" after another person posted their bot workflow) is for that person, not him: no loop.
+Read each question separately: when a message @mentions someone else (e.g. "@黄恩浩 训练时是不是这样"), that question is
+theirs, even if an earlier message in the same burst was addressed to ${o.me}. Only the part addressed to him can be his loop.
+Before creating a loop, check the lines and open loops: if the same work is already tracked or already done there (its state
+or notes say so), do not create a new loop; update that line's state instead.
 When unsure who it is for, create nothing. Project updates, deadlines, and promises that matter to his projects (see memory) still count.
 
 Now: ${o.now}

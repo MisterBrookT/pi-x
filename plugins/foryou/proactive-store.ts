@@ -1,4 +1,5 @@
-import { linesForPrompt, liveLines, readLines } from "./proactive-lines.ts";
+import { readBoard } from "../core/chat-board.ts";
+import { linesForPrompt, liveLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -40,7 +41,11 @@ export function forYouView(dir?: string, now = Date.now()) {
 		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
-		lines: liveLines(dir).map(({ id, name, state, next, updated }) => ({ id, name, state, next: next ?? "", updated })),
+		lines: liveLines(dir).map(({ id, name, state, next, updated, owner }) => {
+			const open = all.filter(i => i.line === id && isOpen(i));
+			const waitsOnYou = open.some(i => needsYou(i, now));
+			return { id, name, state, next: next ?? "", updated, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
+		}),
 		watching,
 		problems,
 	};
@@ -409,6 +414,11 @@ about the same thing, fold it in quietly ("also, Lowes just asked about the same
 current thing, end with one line: "<n> new waiting — next: <the most urgent one>. Show it?" Only something due today, or
 someone blocked on him right now, may break in, and then as one line, not a full card.
 Related loops: loops in the same line of work are one card for brook and one decision; handle them together.
+Tracking: every line has an owner session; when that session ends a turn its status is recorded on the line and its
+loops (you see it below). To hand work to a live session or ask what it is doing, use the chat tool (send kind "handoff"
+or "ask" to its board name); its reply comes back to you. New messages about a line go to that line's owner, not a new session.
+Sending outward: never decide alone. When something is ready to go out, ask brook on the card with two buttons:
+"Send now" (the owner sends it as drafted) and "Show me first" (you show the exact text; he edits or approves).
 The whole picture: you know every open job (below). When he asks "what's next", "what's left", or similar, answer from it:
 1. Recommend the ONE thing to do now and why (due soonest, blocks others, or he is waiting on it), then offer to do it
    (put buttons on its card with the loops tool action "choices", or just ask "Do it?").
@@ -431,5 +441,27 @@ ${(() => { const c = currentCard(dir, live, now); return c ? `id=${c.id} "${c.ti
 Its buttons: ${c.choices.map(x => `"${x.label}" -> ${x.run}`).join(", ")}; plus Later, No, Something else.` : "(none)"; })()}
 
 ### Pi sessions open now
-${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}`;
+${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}
+
+### Session board (chat): what each live session says it is doing
+${readBoard().map(b => `- ${b.name} in ${b.cwd}: ${b.doing || b.status || "(nothing posted)"}${b.claims?.length ? `; claims ${b.claims.slice(0, 4).join(", ")}` : ""}`).join("\n") || "(empty)"}`;
+}
+
+/** One line from a turn's last reply: its first sentence or line, plain. */
+export const turnStatus = (text: string) => text.replace(/[*_`#>|]/g, "").replace(/\s+/g, " ").trim().split(/(?<=[.!?。！？])\s/)[0].slice(0, 200);
+
+/**
+ * Tracking without asking the agent: when a session that owns open loops ends a turn, each loop gets a short note
+ * of where it stands, and its line records this session as owner with the same status. Returns the loop ids touched.
+ */
+export function trackTurn(session: { id: string; name?: string }, lastText: string, dir?: string, now = new Date()): string[] {
+	const status = turnStatus(lastText);
+	if (!status) return [];
+	const mine = readAll(dir).filter(i => i.session === session.id && i.status === "onit");
+	for (const i of mine) {
+		const last = i.note?.split("\n").at(-1) ?? "";
+		if (!last.endsWith(status)) write(dir, { id: i.id, note: addNote(i.note, `${session.name ?? "session"}: ${status}`, now) });
+	}
+	for (const line of new Set(mine.map(i => i.line).filter(Boolean) as string[])) trackLine(line, { id: session.id, ...(session.name ? { name: session.name } : {}), status }, dir, now.toISOString());
+	return mine.map(i => i.id);
 }

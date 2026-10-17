@@ -10,7 +10,9 @@ import { join } from "node:path";
 
 const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
 
-export interface Line { id: string; name: string; project?: string; state: string; next?: string; updated: string; hidden?: boolean }
+export interface Line { id: string; name: string; project?: string; state: string; next?: string; updated: string; hidden?: boolean;
+	/** The Pi session working on this line, and what it last said (tracked on every turn end). */
+	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean } }
 /** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
 export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean }
 
@@ -63,6 +65,15 @@ export function linesForPrompt(lines: Line[], loops: { id: string; title: string
 	if (!live.length) return "(none yet)";
 	return live.map(l => {
 		const mine = loops.filter(i => i.line === l.id);
-		return `- line=${l.id} "${l.name}"${l.project ? ` (${l.project})` : ""}: ${l.state}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
+		return `- line=${l.id} "${l.name}"${l.project ? ` (${l.project})` : ""}: ${l.state}${l.owner ? `; owner session ${l.owner.name ?? l.owner.id} (${l.owner.id}), last: ${l.owner.status}` : ""}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
 	}).join("\n");
+}
+
+/** A session that owns loops on a line finished a turn: record it as the line's owner with its latest status. */
+export function trackLine(lineId: string, owner: { id: string; name?: string; status: string }, dir?: string, now = new Date().toISOString()): boolean {
+	const lines = readLines(dir), l = lines.find(x => x.id === lineId);
+	if (!l) return false;
+	l.owner = { ...owner, at: now }; l.updated = now;
+	writeLines(lines, dir);
+	return true;
 }

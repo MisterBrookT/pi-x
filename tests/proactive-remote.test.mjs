@@ -336,3 +336,34 @@ test("related asks in one line of work share one card, and one answer handles th
   assert.match(await rel.textContent(), /Same thread · News bench[\s\S]*Data for 欧阳/);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
+
+test("tracking: a session that owns a loop records where it stands on each turn end; its line shows owner and status on the phone", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "old", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), [item("w1", { line: "bench", status: "onit", session: "s1" }), item("w2", { status: "onit", session: "s9" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const { trackTurn, forYouView } = await import("../plugins/foryou/proactive-store.ts");
+  assert.deepEqual(trackTurn({ id: "s1", name: "minara" }, "**All 5 fixes are done.** The backtest is live.", dir), ["w1"]);
+  trackTurn({ id: "s1", name: "minara" }, "All 5 fixes are done.", dir);
+  const w1 = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "w1");
+  assert.equal(w1.note.split("\n").length, 1, "same status is not repeated");
+  assert.match(w1.note, /minara: All 5 fixes are done\./);
+  const ln = forYouView(dir).lines[0];
+  assert.equal(ln.owner.name, "minara"); assert.equal(ln.mode, "working"); assert.equal(ln.open, 1);
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator(".ln-box summary").click();
+  assert.match(await page.locator(".ln-row").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done/);
+});
+
+test("judge prompt: a question @-addressed to someone else is theirs; already-tracked work updates its line instead of a new loop", async () => {
+  const { judgePrompt } = await import("../plugins/foryou/proactive.ts");
+  const p = judgePrompt({ me: "brook", memory: "", source: { name: "g", kind: "feishu" }, context: [], fresh: [], pending: [], now: "x" });
+  assert.match(p, /@mentions someone else[\s\S]*that question is\s+theirs/);
+  assert.match(p, /already tracked or already done[\s\S]*do not create a new loop/);
+});
