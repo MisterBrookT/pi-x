@@ -157,6 +157,26 @@ test('Mac screen types live from the iPhone keyboard, with no Send step', async 
   assert.ok(ptr.includes(1) && ptr.at(-1) === 0, 'tap sends button down then up');
   await page.locator('#desktopFit').click();
   assert.deepEqual(await props(), [true, false, false]);
+  // Pinch: two fingers zoom in around the fingers (no click reaches the Mac); pinching back out returns to Fit.
+  const pinchCdp = await page.context().newCDPSession(page);
+  const sb = await page.locator('#desktopScreen').boundingBox();
+  const cx = sb.x + sb.width / 2, cy = sb.y + sb.height / 2;
+  const pts = d => [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }];
+  const pinch = async (from, to) => {
+    await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(from) });
+    for (let i = 1; i <= 5; i++) await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(from + (to - from) * i / 5) });
+    await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const sent = rfb.received.length;
+  const fit = await page.evaluate(() => desktopRfb._display.scale);
+  await pinch(20, 120);
+  const zoomed = await page.evaluate(() => desktopRfb._display.scale);
+  assert.ok(zoomed > fit * 3, `pinch out zooms in (${fit} -> ${zoomed})`);
+  assert.equal(await page.locator('#desktopFit').getAttribute('aria-pressed'), 'true');
+  const pk = rfb.received.subarray(sent); let clicks = 0; for (let j = 0; j + 6 <= pk.length; j++) if (pk[j] === 5 && pk[j + 1] === 1) clicks++;
+  assert.equal(clicks, 0, 'a pinch never clicks the Mac');
+  await pinch(120, 10);
+  assert.deepEqual(await props(), [true, false, false], 'pinching back in returns to Fit');
   // The Mac side ending the link returns the view to its Connect state.
   rfb.closed = true;
   await page.locator('#desktopIntro').waitFor({ state: 'visible' });
