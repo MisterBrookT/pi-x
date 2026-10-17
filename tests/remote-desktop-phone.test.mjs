@@ -177,6 +177,17 @@ test('Mac screen types live from the iPhone keyboard, with no Send step', async 
   assert.equal(await page.locator('#desktopFit').getAttribute('aria-pressed'), 'true');
   const pk = rfb.received.subarray(sent); let clicks = 0; for (let j = 0; j + 6 <= pk.length; j++) if (pk[j] === 5 && pk[j + 1] === 1) clicks++;
   assert.equal(clicks, 0, 'a pinch never clicks the Mac');
+  // While zoomed, a one-finger drag moves the view (no click sent).
+  await pinch(20, 120);
+  const vp = () => page.evaluate(() => ({ ...desktopRfb._display._viewportLoc }));
+  const v0 = await vp(), sentDrag = rfb.received.length;
+  await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy, id: 3 }] });
+  for (let i = 1; i <= 8; i++) await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx - i * 10, y: cy - i * 5, id: 3 }] });
+  await pinchCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const v1 = await vp();
+  assert.ok(v1.x !== v0.x || v1.y !== v0.y, `one-finger drag pans (${JSON.stringify(v0)} -> ${JSON.stringify(v1)})`);
+  const dk = rfb.received.subarray(sentDrag); let dclicks = 0; for (let j = 0; j + 6 <= dk.length; j++) if (dk[j] === 5 && dk[j + 1] === 1) dclicks++;
+  assert.equal(dclicks, 0, 'a drag never clicks the Mac');
   await pinch(120, 10);
   assert.deepEqual(await props(), [true, false, false], 'pinching back in returns to Fit');
   // The Mac side ending the link returns the view to its Connect state.
