@@ -442,10 +442,12 @@ test('Mac screen native typing: Close cancels queued keys and an execution failu
   for (let i = 0; i < 40 && !native.posts.length; i++) await page.waitForTimeout(50);
   await page.keyboard.type('yz');
   await page.keyboard.press('Enter');
+  await page.locator('#desktopMore').click();
+  await page.locator('#desktopDisconnect').click();
   await page.locator('#desktopClose').click();
   native.gate = null; release();
   await page.waitForTimeout(500);
-  assert.deepEqual(native.executed, [{ text: 'x' }], 'queued keys after Close are dropped');
+  assert.deepEqual(native.executed, [{ text: 'x' }], 'queued keys after Disconnect are dropped');
   assert.equal(native.posts.length, 1);
   // Reconnect starts a fresh seq; a 422 ends the session instead of retyping.
   Object.assign(native, { seq: 0, posts: [], executed: [], failNext: 1 });
@@ -512,4 +514,36 @@ test('Mac screen native typing fails closed when the hub ack is not the next seq
     assert.deepEqual(native.posts, [{ seq: 0, text: 'a' }], `ack ${JSON.stringify(ack)}: no further sends`);
     assert.deepEqual(errors, []);
   }
+});
+
+test('Mac screen stays connected after Close and reconnects by itself once this phone has connected', async t => {
+  const { page, rfb, errors, opens } = await setup(t, [1]);
+  await page.locator('#desktopConnect').click();
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  assert.equal(opens(), 1);
+  // Close only hides: no hub close, same connection on reopen, no Connect tap.
+  await page.locator('#desktopClose').click();
+  await page.waitForTimeout(200);
+  assert.equal(rfb.closeCalls ?? 0, 0, 'Close keeps the link');
+  await page.locator('#menu').click();
+  await page.locator('#desktopOpen').click();
+  assert.equal(await page.locator('#desktopKeys').isVisible(), true);
+  assert.equal(opens(), 1, 'no new connection');
+  // After a real drop (app backgrounded), opening reconnects without the Connect tap.
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  resetRfb(rfb);
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  assert.equal(opens(), 2, 'came back by itself');
+  // Disconnect (in ⋯) really ends it and turns auto-connect off.
+  await page.locator('#desktopMore').click();
+  await page.locator('#desktopDisconnect').click({ force: true });
+  await page.locator('#desktopIntro').waitFor({ state: 'visible' });
+  await page.locator('#desktopClose').click();
+  await page.locator('#menu').click();
+  await page.locator('#desktopOpen').click();
+  await page.waitForTimeout(300);
+  assert.equal(opens(), 2, 'no auto-connect after Disconnect');
+  assert.deepEqual(errors, []);
 });
