@@ -431,6 +431,7 @@ what needs him, hand work to sessions, keep lines and memory current. Answer eac
 Tracking: every line has an owner session; when that session ends a turn its status is recorded on the line and its
 loops (you see it below). To hand work to a live session or ask what it is doing, use the chat tool (send kind "handoff"
 or "ask" to its board name); its reply comes back to you. New messages about a line go to that line's owner, not a new session.
+Reminders: when brook asks to be reminded, use the loops tool "remind" with an exact time; a note alone never fires.
 Sending outward: never decide alone. When something is ready to go out, ask brook on the card with two buttons:
 "Send now" (the owner sends it as drafted) and "Show me first" (you show the exact text; he edits or approves).
 The whole picture: you know every open job (below). When he asks "what's next", "what's left", or similar, answer from it:
@@ -494,4 +495,13 @@ export function createItem(a: { title: string; why: string; action?: string; sou
 	if (clean?.length) it.choices = clean;
 	appendFileSync(paths(dir).inbox, JSON.stringify(it) + "\n");
 	return it;
+}
+
+/** A real reminder: the loop comes back as a card at `at` (reopened if it was done). A note is not a reminder. */
+export function remindItem(id: string, at: string, text: string, dir?: string, now = new Date()): boolean {
+	const it = readAll(dir).find(i => i.id === id);
+	const t = Date.parse(at);
+	if (!it || !Number.isFinite(t) || t <= now.getTime()) return false;
+	write(dir, { id, status: "later", wakeAt: new Date(t).toISOString(), ...(text.trim() ? { action: text.trim().slice(0, 300) } : {}), note: addNote(it.note, `Reminder set for ${new Date(t).toISOString()}: ${text.trim()}`) });
+	return true;
 }

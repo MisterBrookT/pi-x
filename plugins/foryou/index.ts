@@ -17,7 +17,7 @@ import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
-import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, type LiveSession } from "./proactive-store.ts";
+import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -111,10 +111,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). remind: bring a loop back as a card at an exact time (at, text = what to remind). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["remember", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
+			action: StringEnum(["remind", "remember", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
+			at: Type.Optional(Type.String({ description: "remind: ISO time with timezone, when the card comes back" })),
 			card: Type.Optional(Type.String({ description: "remember: the memory card, e.g. index, people/Knight, projects/newsdecision" })),
 			add: Type.Optional(Type.Array(Type.String(), { description: "remember: short lasting facts to add" })),
 			remove: Type.Optional(Type.Array(Type.String(), { description: "remember: exact lines no longer true" })),
@@ -156,6 +157,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(it ? `Card ${it.id} is on brook's For you.` : "create needs title, why and source.");
 			}
 			if (!p.id) return done("This action needs id.");
+			if (p.action === "remind") return done(remindItem(p.id, p.at ?? "", p.text ?? "", deps.dir) ? `Reminder set; the card comes back at ${p.at}.` : `No loop ${p.id}, or the time is missing or past.`);
 			p = { ...p, id: p.id } as typeof p & { id: string };
 			if (p.action === "prepared") return done(preparedItem(p.id, p.text ?? "", deps.dir) ? "On brook's card. End your turn." : `No open loop ${p.id}, or empty text.`);
 			if (p.action === "note") return done(noteItem(p.id, p.text ?? "", deps.dir) ? "Noted." : `No loop ${p.id}, or empty note.`);
