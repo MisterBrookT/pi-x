@@ -64,3 +64,25 @@ Decide with everything you know (memory, lines, open loops, the session board):
 Then reply to brook in ONE short message: what came in and what you did, e.g. "3 new: 1 needs you (card), 2 noted".
 If nothing needs him, say so in one line.`;
 }
+
+/**
+ * The hourly review: For you wakes by itself and brings every card up to date with what changed since
+ * (brook did it, a session moved on, a date passed). Silent unless something needs him.
+ */
+export function reviewPrompt(o: { open: { id: string; title: string; status: string; at: string; due?: string; session?: string; wakeAt?: string }[]; since?: string; now?: Date }): string {
+	const now = o.now ?? new Date();
+	const list = o.open.map(i => `- id=${i.id} [${i.status}${i.due ? `, due ${i.due}` : ""}${i.wakeAt ? `, back ${i.wakeAt.slice(0, 16)}` : ""}${i.session ? `, ${i.session}` : ""}] ${i.title}`).join("\n");
+	return `[For you: hourly review, ${now.toISOString().slice(0, 16).replace("T", " ")}${o.since ? `; last review ${o.since.slice(0, 16).replace("T", " ")}` : ""}]
+
+Bring brook's cards up to date. For each open card below, check what changed since it was made:
+- the activity log (what sessions did), the owner session's latest state, the session board, and the source thread if cheap;
+- brook may have done it himself (a reply already sent, a file already submitted): then close it (loops "done") with a one-line note;
+- the task changed (new ask, new date, someone else took it): update it (loops "note", "next", "choices", or "remind");
+- a passed date or a stale wait: "later", or ask him once.
+Also update lines of work and memory if you learn something lasting.
+Do not start work and do not send anything. When nothing changed, reply only "No change." (brook is not told).
+Otherwise reply with one short line per changed card.
+
+Open cards:
+${list || "(none)"}`;
+}

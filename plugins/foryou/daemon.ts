@@ -22,7 +22,7 @@ import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseIn
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
-import { filterPrompt, forwardPrompt, parseFilter, type Forward } from "./forward.ts";
+import { filterPrompt, forwardPrompt, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
@@ -71,6 +71,18 @@ const DAY = 86_400_000;
  */
 async function housekeeping(cfg: Config, state: Record<string, string>, work: WorkSession[]) {
 	const now = Date.now();
+	// Forward mode: For you itself reviews its cards every hour, with its full context (activity, board, sessions).
+	if (cfg.mode === "forward") {
+		if (now - Date.parse(state["@review"] ?? "0") > 3_600_000) {
+			const open = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "").filter(isOpen);
+			if (open.length) {
+				const ok = await hubPrepare(reviewPrompt({ open, since: state["@review"] }));
+				log(`review: ${open.length} open -> ${ok ? "For you" : "For you not open; next hour"}`);
+			}
+			state["@review"] = new Date(now).toISOString();
+		}
+		return;
+	}
 	// Hourly: close finished loops and offer job cards for loops that match a session open now.
 	if (now - Date.parse(state["@pile"] ?? "0") > 3_600_000) {
 		const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");

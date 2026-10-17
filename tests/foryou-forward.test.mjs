@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { filterPrompt, parseFilter, forwardPrompt } from "../plugins/foryou/forward.ts";
+import { filterPrompt, parseFilter, forwardPrompt, reviewPrompt } from "../plugins/foryou/forward.ts";
 import { trackTurn, activityFile, remindItem, createItem, waitingCards, coordinatorContext } from "../plugins/foryou/proactive-store.ts";
 import { parseInbox } from "../plugins/foryou/proactive.ts";
 
@@ -87,4 +87,13 @@ test("handoff: a live session on the chat board gets a chat handoff from for-you
   const [f] = readdirSync(join(chat, "minara-2", "inbox"));
   const note = JSON.parse(readFileSync(join(chat, "minara-2", "inbox", f), "utf8"));
   assert.equal(note.from, "for-you"); assert.equal(note.kind, "handoff"); assert.match(note.text, /Run backtest/);
+});
+
+test("review: hourly prompt lists every open card and asks For you to check what changed, without acting outward", () => {
+  const p = reviewPrompt({ open: [{ id: "a1", title: "Reply Lowes", status: "pending", at: "x", due: "2026-10-18" }, { id: "b2", title: "Backtest", status: "onit", at: "x", session: "minara" }], since: "2026-10-17T06:00:00Z", now: new Date("2026-10-17T07:00:00Z") });
+  assert.match(p, /^\[For you: hourly review, 2026-10-17 07:00; last review 2026-10-17 06:00\]/);
+  assert.match(p, /id=a1 \[pending, due 2026-10-18\] Reply Lowes/);
+  assert.match(p, /id=b2 \[onit, minara\] Backtest/);
+  assert.match(p, /brook may have done it himself[\s\S]*close it/);
+  assert.match(p, /Do not start work and do not send anything/);
 });
