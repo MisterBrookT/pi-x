@@ -17,6 +17,7 @@ function fakePi() {
 		on: (e, h) => { (handlers[e] ??= []).push(h); },
 	};
 }
+process.env.PIX_CHAT_DIR ??= mkdtempSync(join(tmpdir(), "pix-chat-empty-"));
 const ctx = id => ({ sessionManager: { getSessionId: () => id } });
 
 test("coordinator: loops tool and context only in the For you session", async () => {
@@ -35,7 +36,7 @@ test("coordinator: loops tool and context only in the For you session", async ()
 	start({}, ctx("pix-foryou"));
 	assert.ok(pi.active.includes("loops"));
 	const { systemPrompt } = await before({ systemPrompt: "BASE" }, ctx("pix-foryou"));
-	assert.match(systemPrompt, /^BASE\n\n## Proactive coordinator/);
+	assert.match(systemPrompt, /^BASE\n\n## Who you are: For you[\s\S]*## Proactive coordinator/);
 	assert.match(systemPrompt, /id=a \[needs brook\] Test Databento[\s\S]*project: ~\/nd/);
 	assert.match(systemPrompt, /nd = ~\/nd/);
 	assert.match(systemPrompt, /- nd \(s1\) in \/x/);
@@ -51,6 +52,13 @@ test("coordinator: loops tool and context only in the For you session", async ()
 	assert.match(await run({ action: "create", title: "Reply to Lowes", why: "He asks for the curve", source: "群", refs: ["m1"], line: "bench" }), /^Card \w+ is on brook's For you\.$/);
 	assert.equal(await run({ action: "create", title: "x" }), "create needs title, why and source.");
 	assert.equal(await run({ action: "note", text: "x" }), "This action needs id.");
+	assert.match(await run({ action: "remember", card: "index", add: ["Prefers Cmd shortcuts, never Option"] }), /^Remembered on index \(\+1 -0\)\.$/);
+	assert.match(readFileSync(join(dir, "memory", "index.md"), "utf8"), /Prefers Cmd shortcuts/);
+	assert.match(await run({ action: "line", name: "Trading Arena", state: "Landing page draft", step: "Wire waitlist" }), /^Line trading-arena updated\.$/);
+	assert.match(await run({ action: "line", id: "trading-arena", state: "Live" }), /updated/);
+	const { systemPrompt: sp2 } = await before({ systemPrompt: "B" }, ctx("pix-foryou"));
+	assert.match(sp2, /## Who you are: For you[\s\S]*not a coding session[\s\S]*"remember"/);
+	assert.match(sp2, /line=trading-arena "Trading Arena"[^\n]*Live/);
 	assert.match(await run({ action: "drop", id: "a" }), /No open loop/);
 	const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
 	assert.equal(it.status, "dismissed"); assert.match(it.note, /signed up/);

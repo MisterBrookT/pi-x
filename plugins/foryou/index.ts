@@ -14,6 +14,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
+import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
+import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
+import { paths as proactivePaths } from "./proactive.ts";
 import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
@@ -97,6 +100,8 @@ export function cardReply(text: string, buttons: number): { answer: CardAnswer; 
 	return quickAnswer(t) ? { answer: "else", text: t } : undefined;
 }
 
+const memoryDirOf = (dir?: string) => proactivePaths(dir).dir;
+
 export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// The phone side: the bell page, cards on the For you session, and its /api/foryou routes.
 	registerHubPlugin("foryou", forYouHub(), forYouRelayAllowed);
@@ -106,10 +111,16 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
+			action: StringEnum(["remember", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
+			card: Type.Optional(Type.String({ description: "remember: the memory card, e.g. index, people/Knight, projects/newsdecision" })),
+			add: Type.Optional(Type.Array(Type.String(), { description: "remember: short lasting facts to add" })),
+			remove: Type.Optional(Type.Array(Type.String(), { description: "remember: exact lines no longer true" })),
+			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
+			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
+			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
 			source: Type.Optional(Type.String({ description: "create: the source name, as in the forwarded message" })),
@@ -129,6 +140,17 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		}),
 		async execute(_id, p) {
 			const done = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
+			if (p.action === "remember") {
+				const ch = p.card ? applyCardEdits(memoryDirOf(deps.dir), [{ card: p.card, add: p.add ?? [], remove: p.remove ?? [] }], { source: "For you" }) : [];
+				if (ch.length) logCardChanges(proactivePaths(deps.dir).memoryLog, ch);
+				return done(ch.length ? `Remembered on ${ch[0].card} (+${ch[0].added.length} -${ch[0].removed.length}).` : "Nothing changed (name a card, and lines to add or remove).");
+			}
+			if (p.action === "line") {
+				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire }]);
+				const r = applyLineEdits(readLines(deps.dir), edits);
+				if (r.changed.length) writeLines(r.lines, deps.dir);
+				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");
+			}
 			if (p.action === "create") {
 				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text }, deps.dir);
 				return done(it ? `Card ${it.id} is on brook's For you.` : "create needs title, why and source.");
