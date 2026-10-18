@@ -357,8 +357,27 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
+  // Quiet until tapped: the box is closed and only says how many are unfinished.
+  assert.equal(await page.locator(".ln-box").getAttribute("open"), null);
+  assert.match(await page.locator(".ln-box summary").textContent(), /Unfinished & lines\s*2 unfinished · 1 working/);
   await page.locator(".ln-box summary").click();
-  assert.match(await page.locator(".ln-row").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done/);
+  const items = page.locator(".ln-item");
+  assert.equal(await items.count(), 2, "every unfinished loop is listed");
+  assert.match(await items.first().textContent(), /On it/);
+  assert.match(await page.locator(".ln-row:not(.ln-item)").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done/);
+  // Tapping one starts a message about it.
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
+  await items.first().click();
+  assert.match(await page.locator("#input").inputValue(), /^@foryou:w\d /);
+});
+
+test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
+  const { unfinishedLines } = await import("../plugins/foryou/index.ts");
+  const rows = unfinishedLines({ pending: [{ id: "a", title: "Reply Lowes", due: "2026-10-20" }], onit: [{ id: "b", title: "Backtest" }], later: [{ id: "c", title: "ZIA prep", wakeAt: "2026-10-17T05:55:00Z" }] });
+  assert.deepEqual(rows.map(r => r.id), ["a", "b", "c"]);
+  assert.match(rows[0].label, /^needs you Reply Lowes · due /);
+  assert.match(rows[1].label, /^on it     Backtest$/);
+  assert.match(rows[2].label, /^later     ZIA prep · back /);
 });
 
 test("judge prompt: a question @-addressed to someone else is theirs; already-tracked work updates its line instead of a new loop", async () => {

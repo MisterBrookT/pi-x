@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { judgePrompt, parseInbox, parsePile, parseVerdict, pilePrompt, publicItem } from "../plugins/foryou/proactive.ts";
 import { applyCardEdits, cardName, listCards, memoryForPrompt, migrateMemory, readIndex, relevantCards } from "../plugins/foryou/proactive-memory.ts";
 import { answerCard, cardChoices, currentCard, sendTargets, suggestItem } from "../plugins/foryou/proactive-store.ts";
-import register, { CARD_ELSE, CARD_NO, choiceLabel } from "../plugins/foryou/index.ts";
+import register, { CARD_ALL, CARD_ELSE, CARD_NO, choiceLabel } from "../plugins/foryou/index.ts";
 
 const loop = (id, extra = {}) => ({ id, at: "2026-10-09T08:34:00Z", title: `Loop ${id}`, why: "W", action: "Switch loader", refs: [], source: "Knight", sourceKey: "feishu:a", howToRead: "", status: "pending", ...extra });
 const tmp = (...items) => { const d = mkdtempSync(join(tmpdir(), "pix-fy-")); writeFileSync(join(d, "inbox.jsonl"), items.map(i => JSON.stringify(i)).join("\n") + (items.length ? "\n" : "")); return d; };
@@ -207,7 +207,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	assert.equal(widgets[0][0], "foryou-card");
 	assert.deepEqual(widgets[0][1], ["● Loop a   ⌘⇧Y"], "one quiet line; details are behind the shortcut");
 	await cardCmd(pi, fy);
-	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO]);
+	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_ALL]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
 });
 
@@ -251,7 +251,7 @@ test("Mac: one flat list. Open sessions are options in it (no second picker); th
 	await cardCmd(pi, macCtx("pix-foryou", ["Do it in backtest ›"], shown));
 	assert.equal(shown.length, 1, "a single picker");
 	assert.match(shown[0].title, /Plan: Switch loader/);
-	assert.deepEqual(shown[0].options, ["Do it here", "Discuss", "Later", "Do it in backtest ›", CARD_ELSE, CARD_NO], "only the session that fits the loop, not every open one");
+	assert.deepEqual(shown[0].options, ["Do it here", "Discuss", "Later", "Do it in backtest ›", CARD_ELSE, CARD_NO, CARD_ALL], "only the session that fits the loop, not every open one");
 	assert.deepEqual(answers, [["a", { answer: "send", choice: undefined, to: "s1", text: undefined }]]);
 });
 
@@ -482,4 +482,20 @@ test("For you knows the whole picture: open jobs with due/back dates and prep, a
 	assert.match(c, /id=b \[later, back 2099-01-02\] Benchmark run/);
 	assert.match(c, /"what's next"[\s\S]*Recommend the ONE thing to do now and why/);
 	assert.match(c, /Next: <the next job> — do it\?/);
+});
+
+test("Mac: ⌘⇧Y with no card waiting lists everything unfinished; picking one talks it through in For you", async () => {
+	const d = tmp(loop("p", { status: "onit", session: "s1" }), loop("q", { status: "later", wakeAt: "2099-01-01T09:00:00Z" }));
+	const pi = fakePi(), shown = [];
+	register(pi, { dir: d, sessions: async () => live, cardPollMs: 60_000 });
+	await cardCmd(pi, macCtx("pix-foryou", [opts => opts[1]], shown));
+	assert.equal(shown[0].title, "Unfinished · 2");
+	assert.match(shown[0].options[0], /^on it +Loop p$/);
+	assert.match(shown[0].options[1], /^later +Loop q · back /);
+	assert.match(pi.sent[0], /^Let's look at loop q: Loop q · back .*\. Where does it stand\?$/);
+	// Nothing open: a short note, no list.
+	const pi2 = fakePi(), notes = [];
+	register(pi2, { dir: tmp(), sessions: async () => live, cardPollMs: 60_000 });
+	await cardCmd(pi2, macCtx("pix-foryou", [], notes));
+	assert.deepEqual(notes, ["Nothing unfinished."]);
 });

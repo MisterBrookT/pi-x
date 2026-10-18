@@ -18,7 +18,7 @@ import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
-import { readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
+import { forYouView, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -60,6 +60,7 @@ async function answerViaHub(id: string, body: { answer: CardAnswer; choice?: num
 
 /** Cmd+Shift+Y (Otty sends Cmd as super via the kitty keyboard protocol; plain Cmd+Y is Otty's Redo). */
 export const CARD_KEY = "super+shift+y";
+export const CARD_ALL = "All unfinished ›";
 
 /** The hand icon on the For you tab in Otty's sidebar while a card waits (like the phone). */
 /** One line per card UI event in ~/.pix/proactive/card-ui.log, so a misbehaving card can be traced later. */
@@ -76,6 +77,13 @@ export const CARD_LATER = "Later", CARD_NO = "Not important, forget it", CARD_EL
 export const choiceLabel = (c: { label: string; run: string; name?: string }) => ["here", "discuss", "later", "no"].includes(c.run) ? c.label : c.run === "new" ? `${c.label} (new session) ›` : `${c.label} (${c.name ?? c.run}) ›`;
 
 /** The waiting card as a few short lines above the editor. */
+/** Every unfinished loop, one line each, for the list brook opens himself (⌘⇧Y when no card waits, or from the card). */
+export function unfinishedLines(v: { pending?: any[]; onit?: any[]; later?: any[] }): { id: string; label: string }[] {
+	const day = (t: string) => t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+	const row = (i: any, tag: string) => ({ id: i.id, label: `${tag.padEnd(9)} ${i.title}${i.due ? ` · due ${day(i.due)}` : ""}${tag === "later" && i.wakeAt ? ` · back ${day(i.wakeAt)}` : ""}` });
+	return [...(v.pending ?? []).map(i => row(i, "needs you")), ...(v.onit ?? []).map(i => row(i, "on it")), ...(v.later ?? []).map(i => row(i, "later"))];
+}
+
 export const cardLines = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
 	`● ${it.title.length > 60 ? `${it.title.slice(0, 59)}…` : it.title}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
 ];
@@ -205,9 +213,17 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (showing && !stillWaiting(showing, deps.dir)) { cardLog(deps.dir, "picker closed: card answered or gone", { id: showing }); close?.abort(); }
 		widget(ctx, it);
 	};
+	// The whole unfinished list, only when brook asks for it; picking one talks it through here.
+	const listAll = async (ctx: any) => {
+		const rows = unfinishedLines(forYouView(deps.dir));
+		if (!rows.length) { ctx.ui.notify("Nothing unfinished.", "info"); return; }
+		const pick = await ctx.ui.select(`Unfinished · ${rows.length}`, rows.map(r => r.label));
+		const row = rows.find(r => r.label === pick);
+		if (row) pi.sendUserMessage(`Let's look at loop ${row.id}: ${row.label.replace(/^\S+(?: you)?\s+/, "")}. Where does it stand?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+	};
 	const answer = async (ctx: any, skip = 0): Promise<void> => {
 		const it = currentCard(deps.dir, await sessions().catch(() => []), Date.now(), skip);
-		if (!it) { cardLog(deps.dir, "shortcut: no card"); ctx.ui.notify("No card waiting.", "info"); return; }
+		if (!it) { cardLog(deps.dir, "shortcut: no card"); return void (await listAll(ctx)); }
 		if (showing) { cardLog(deps.dir, "shortcut ignored: picker already open", { showing }); return; }
 		cardLog(deps.dir, "picker open", { id: it.id, at: it.at, of: it.left + 1, skip });
 		showing = it.id; close = new AbortController();
@@ -227,9 +243,10 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return { consume: true };
 			}) : undefined;
 			let pick: string | undefined;
-			try { pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO], { signal: close.signal }); }
+			try { pick = await ctx.ui.select(title, [...labels, ...sendLabels, CARD_ELSE, ...(taken.has("later") ? [] : [CARD_LATER]), CARD_NO, CARD_ALL], { signal: close.signal }); }
 			finally { flip?.(); }
 			if (step) { showing = undefined; return void (await answer(ctx, skip + step + it.left + 1)); }
+			if (pick === CARD_ALL) { showing = undefined; return void (await listAll(ctx)); }
 			if (!pick) { cardLog(deps.dir, close?.signal.aborted ? "picker closed by code" : "picker closed: esc", { id: it.id }); return; }
 			cardLog(deps.dir, "pick", { id: it.id, pick });
 			const text = pick === CARD_ELSE ? await ctx.ui.input("Your answer (or later / no / done)", "", { signal: close.signal }) : undefined;
