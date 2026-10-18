@@ -637,3 +637,13 @@ test("cua.state still surfaces failures it cannot recover from", async () => {
 	const runtime = createCuaRuntime({ operations });
 	await assert.rejects(() => runtime.cua.state("S4"), /unavailable or was evicted/);
 });
+
+test("regression: a script returning an un-awaited Promise leaves only plain data in tool details (session stays cloneable)", async () => {
+  const { plainValue } = await import("../plugins/computer/index.ts");
+  const v = plainValue({ hits: Promise.resolve([1]), text: "ok", n: 2n, f() {} });
+  assert.deepEqual(v, { hits: "[Promise: not awaited]", text: "ok", n: "2" });
+  assert.doesNotThrow(() => structuredClone(v));
+  assert.equal(plainValue(undefined), undefined);
+  const loop = {}; loop.self = loop;
+  assert.equal(typeof plainValue(loop), "string");
+});

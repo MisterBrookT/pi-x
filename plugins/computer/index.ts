@@ -175,6 +175,12 @@ const suppressChromeKeychainPrompt = () => {
 	}
 };
 
+/** A JSON-safe copy of a script result; anything not serializable becomes its string form. */
+export function plainValue(v: unknown): unknown {
+	if (v === undefined) return undefined;
+	try { const s = JSON.stringify(v, (_k, x) => x instanceof Promise ? "[Promise: not awaited]" : typeof x === "function" ? undefined : typeof x === "bigint" ? String(x) : x); return s === undefined ? String(v) : JSON.parse(s); } catch { return String(v); }
+}
+
 export default function computer(pi: ExtensionAPI, options?: { backend?: BackendModule }) {
 	let backendPromise: Promise<BackendModule | undefined> | undefined;
 	const backendOnce = () => {
@@ -285,7 +291,8 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 			return {
 				content: [{ type: "text", text: renderOutcome(outcome) }],
 				details: {
-					value: outcome.value,
+					// Plain data only: a script can return live objects (an un-awaited Promise), which break session cloning.
+					value: plainValue(outcome.value),
 					actions: outcome.actions,
 					events: outcome.events,
 					error: outcome.error?.message,
