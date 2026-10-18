@@ -10,7 +10,12 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { basename, resolve } from "node:path";
 import { Type } from "typebox";
-import { board, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
+import { board, chatRoot, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
+import { CHAT_WAITING } from "../core/chat-waiting.ts";
+import { loadWaiting, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingPath, waitingText, type Waiting } from "./waiting.ts";
+
+const WAIT_STATUS = "pix-chat";
+const TICK_MS = 30_000;
 
 const MSG = "pix-chat";
 /** Sessions that never join chat. (For you joins: it hands work out and gets replies back here.) */
@@ -37,8 +42,23 @@ export default function (pi: ExtensionAPI) {
   const granted = new Set<string>();  // files other sessions explicitly let me edit
   const hops = new Map<string, number>();  // thread -> hop of the last message seen, so my reply goes one higher
 
+  // Who I wait on (asks/handoffs without a reply), shown quietly in the footer and kept across /reload.
+  let ui: { setStatus?: (key: string, text?: string) => void } | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined, shown: string | undefined;
+  const waitFile = () => me && waitingPath(chatRoot(), me.name);
+  const setWaiting = (next: (w: Waiting) => Waiting) => {
+    const f = waitFile(); if (!f) return;
+    const old = loadWaiting(f), w = next(old);
+    if (!sameWaiting(old, w)) saveWaiting(f, w);
+    const text = waitingText(w);
+    ui?.setStatus?.(WAIT_STATUS, text);
+    if (text !== shown) { shown = text; pi.events?.emit?.(CHAT_WAITING, { text }); }
+  };
+  const check = () => setWaiting(w => tick(w, new Set(board().map(x => x.name))));
+
   const receive = (n: Note) => {
     hops.set(n.thread, n.hop);
+    setWaiting(w => receivedNote(w, n));
     for (const f of n.grant ?? []) granted.add(f);
     pi.sendMessage({ customType: MSG, display: true, details: n, content: format(n) },
       wakes(n) ? { triggerTurn: true, deliverAs: "followUp" } : { deliverAs: "nextTurn" });
@@ -51,10 +71,13 @@ export default function (pi: ExtensionAPI) {
     const name = claimName(base, process.pid);
     me = { name, cwd: ctx.cwd, pid: process.pid, at: Date.now(), status: "idle", doing: "", claims: [] };
     room = join_(me, receive);
+    ui = ctx.hasUI ? ctx.ui : undefined;
+    check();
+    clearInterval(timer); timer = setInterval(check, TICK_MS); timer.unref?.();
   });
   pi.on("agent_start", () => room?.update({ status: "busy" }));
   pi.on("agent_end", () => room?.update({ status: "idle" }));
-  pi.on("session_shutdown", () => { room?.close(); room = undefined; });
+  pi.on("session_shutdown", () => { clearInterval(timer); timer = undefined; room?.close(); room = undefined; });
 
   // Enforce claims on file edits.
   pi.on("tool_call", (event, ctx) => {
@@ -128,6 +151,7 @@ export default function (pi: ExtensionAPI) {
         hops.set(n.thread, hop);
         sent = { ...n, to };
         const live = board().some((x) => x.name === to);
+        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at }, live));
         return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
           (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
       })();

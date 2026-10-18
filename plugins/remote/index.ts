@@ -11,6 +11,7 @@ import { fitRemoteSnapshot, readRemoteToken, remoteTokenPath, remoteDefaultPort,
 import { branchMessages, remoteMedia, remoteMessages } from "./remote-state.ts";
 import { createPushSender } from "./remote-push.ts";
 import { BACKGROUND_CHANGED, backgroundState } from "../core/background-state.ts";
+import { CHAT_WAITING } from "../core/chat-waiting.ts";
 import { runningHelpers } from "./remote-helpers.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "./remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../core/question-events.ts";
@@ -84,6 +85,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let pendingQuestion: { id: string; question: string; options: { label: string; description?: string }[] } | undefined;
   pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) }; schedulePush(); } });
   pi.events.on(BACKGROUND_CHANGED, () => schedulePush());
+  let chatWaiting: string | undefined;
+  pi.events.on(CHAT_WAITING, (data: any) => { chatWaiting = typeof data?.text === "string" && data.text ? data.text.slice(0, 120) : undefined; schedulePush(); });
   pi.events.on(QUESTION_CLOSE, (data: any) => { if (pendingQuestion && data?.id === pendingQuestion.id) { pendingQuestion = undefined; schedulePush(); } });
   const answerQuestion = (answer: string) => { if (!pendingQuestion || !answer.trim()) return false; pi.events.emit(QUESTION_ANSWER, { id: pendingQuestion.id, answer }); return true; };
   let streaming = "";
@@ -173,7 +176,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); return { waiting: busy ? 0 : bg.running, nextLook: bg.running ? bg.nextLook : undefined }; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); return { waiting: busy ? 0 : bg.running, nextLook: bg.running ? bg.nextLook : undefined }; })(), ...(chatWaiting ? { peerWait: chatWaiting } : {}), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {

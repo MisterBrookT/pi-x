@@ -104,7 +104,7 @@ export default function (pi: ExtensionAPI) {
         // Narrow panes: the jobs label alone can be wider than the screen (crash 2026-10-15 at width 22).
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
-        const core = [statuses.get("pix-remote"), statuses.get("pix-goal")].filter(Boolean).join(" · ");
+        const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
         const linkText = links.map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         const withLinks = [core, linkText].filter(Boolean).join(" · ");

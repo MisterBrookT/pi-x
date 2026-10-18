@@ -183,3 +183,13 @@ test("footer never exceeds a narrow pane, even with a background job label", asy
 	h.data.setExtensionStatus("pix-background", "1 job running · look 18:00 · /jobs");
 	for (const w of [10, 22, 40]) for (const line of h.render(w)) assert.ok(visibleWidth(line) <= w, `width ${w}: ${line}`);
 });
+
+test("footer shows a waiting chat as quiet text without the running spinner", async (t) => {
+	const h = await harness(t);
+	h.ctx.ui.setStatus("pix-chat", "Waiting for pix");
+	const lines = h.render();
+	assert.match(lines[0], /Waiting for pix/);
+	assert.doesNotMatch(lines.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, "waiting is not running");
+	h.ctx.ui.setStatus("pix-chat", undefined);
+	assert.doesNotMatch(h.render().join("\n"), /Waiting/);
+});
