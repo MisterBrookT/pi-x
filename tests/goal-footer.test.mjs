@@ -193,3 +193,22 @@ test("footer shows a waiting chat as quiet text without the running spinner", as
 	h.ctx.ui.setStatus("pix-chat", undefined);
 	assert.doesNotMatch(h.render().join("\n"), /Waiting/);
 });
+
+test("footer: Memory shows '+N' for lines For you added since brook last looked, and clears once seen", async (t) => {
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { tmpdir } = await import("node:os");
+	const { memoryUnseen, markMemorySeen } = await import("../plugins/core/memory-badge.ts");
+	const d = mkdtempSync(join(tmpdir(), "fmem-"));
+	writeFileSync(join(d, "memory.log"), "2026-10-18T09:00:00.000Z index + - 2026-10-18: Dislikes em dashes (from For you)\n2026-10-18T09:01:00.000Z index - - old line\n");
+	assert.equal(memoryUnseen(d), 1, "only additions count");
+	markMemorySeen(d, new Date("2026-10-18T09:30:00Z"));
+	assert.equal(memoryUnseen(d), 0);
+	process.env.PIX_PROACTIVE_DIR = d; t.after(() => { delete process.env.PIX_PROACTIVE_DIR; });
+	writeFileSync(join(d, "memory.log"), "2026-10-18T10:00:00.000Z index + - new\n", { flag: "a" });
+	const h = await harness(t);
+	await h.emit("session_start");
+	const line = h.render(200)[0];
+	// Only when the hub token exists (it does on brook's Mac); then Memory sits beside the other links.
+	if (/Memory/.test(line)) assert.match(line, /Memory \+1/);
+});

@@ -2,6 +2,7 @@
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
 import { paths as proactivePaths } from "./proactive.ts";
+import { markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
 import { actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export interface ForYouHubOptions {
@@ -13,13 +14,14 @@ export interface ForYouHubOptions {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && path === "/api/foryou" || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path);
+	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
 	const live = () => hub.liveSessions();
 	// The page shows each loop with its real buttons and where each one goes (same as the card).
-	const forYou = () => ({ ...forYouView(dir), cards: waitingCards(dir, live(), Date.now(), 50) });
+	const pdir = proactivePaths(dir).dir;
+	const forYou = () => ({ ...forYouView(dir), cards: waitingCards(dir, live(), Date.now(), 50), memoryNew: memoryUnseen(pdir) });
 	// The card: the oldest loop that needs brook, shown in the For you session (one at a time).
 	let card: Card | undefined = currentCard(dir, live());
 	let cards: Card[] = waitingCards(dir, live());
@@ -32,9 +34,10 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		const before = JSON.stringify(cards); card = currentCard(dir, live()); cards = waitingCards(dir, live());
 		if (before !== JSON.stringify(cards)) hub.refreshSession(forYouSession.id);
 	};
-	const inbox = proactivePaths(dir).inbox, health = proactivePaths(dir).health;
+	const inbox = proactivePaths(dir).inbox, health = proactivePaths(dir).health, memLog = proactivePaths(dir).memoryLog;
 	watchFile(inbox, { interval: 2000 }, onProactive);
 	watchFile(health, { interval: 5000 }, onProactive);
+	watchFile(memLog, { interval: 3000 }, onProactive);
 	// Parked loops come back by time, not by a file change: re-check every minute.
 	const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
 	wake.unref();
@@ -46,9 +49,18 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		session: id => id === forYouSession.id && card ? { card, cards } : undefined,
 		// A session joining can add a "Send to" button to the card.
 		sessionJoined: id => { if (id !== forYouSession.id) onProactive(); },
-		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); clearInterval(wake); },
+		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); unwatchFile(memLog, onProactive); clearInterval(wake); },
 		async route(method, path, body) {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
+			// Memory: what For you learned, readable and removable by brook. Only the memory folder.
+			if (method === "GET" && path === "/api/foryou/memory") return { status: 200, body: memoryView(pdir) };
+			if (method === "POST" && path === "/api/foryou/memory/seen") { markMemorySeen(pdir); onProactive(); return { status: 200, body: { ok: true } }; }
+			if (method === "POST" && path === "/api/foryou/memory/remove") {
+				const input = await body().catch(() => ({})) as any;
+				const ok = typeof input?.card === "string" && typeof input?.line === "string" && removeMemoryLine(pdir, input.card, input.line.slice(0, 2000));
+				onProactive();
+				return ok ? { status: 200, body: { ok: true } } : { status: 404, body: { error: "line not found" } };
+			}
 			// The bell page's chat box: talk to For you (queued if it is open, else it starts with this message).
 			if (method === "POST" && path === "/api/foryou/chat") {
 				const text = String((await body().catch(() => ({})) as any)?.text ?? "").trim().slice(0, 8000);

@@ -7,6 +7,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Msg, Source } from "./proactive.ts";
+import { markMemorySeen, memorySeenAt, memoryUnseen } from "../core/memory-badge.ts";
 
 export interface CardEdit { card: string; add: string[]; remove: string[] }
 export interface Card { name: string; text: string }
@@ -163,3 +164,28 @@ Rewrite the card "${name}" below so it stays short and true:
 Reply with the full new card text only, no prose, no code fence.
 
 ${text}`;
+
+// What brook sees: recent memory changes (from memory.log), how many he has not looked at, and removing one.
+export interface MemoryChange { at: string; card: string; op: "+" | "-"; line: string }
+export function memoryChanges(dir: string, limit = 40): MemoryChange[] {
+	let text = ""; try { text = readFileSync(join(dir, "memory.log"), "utf8"); } catch { return []; }
+	const out: MemoryChange[] = [];
+	for (const l of text.split("\n")) {
+		const m = l.match(/^(\S+) (\S+) ([+-]) (.+)$/);
+		if (m && cardName(m[2])) out.push({ at: m[1], card: m[2], op: m[3] as "+" | "-", line: m[4] });
+	}
+	return out.slice(-limit).reverse();
+}
+export { markMemorySeen, memorySeenAt, memoryUnseen };
+
+/** The Memory view: every card (index first) and the recent changes. Only this folder; nothing else is readable. */
+export function memoryView(dir: string) {
+	return { cards: [{ name: "index", text: readIndex(dir) }, ...listCards(dir)].filter(c => c.text.trim()), changes: memoryChanges(dir), seenAt: memorySeenAt(dir), unseen: memoryUnseen(dir) };
+}
+
+/** brook removes one line (from the view). Logged like any other change. */
+export function removeMemoryLine(dir: string, card: string, line: string, now = new Date()): boolean {
+	const ch = applyCardEdits(dir, [{ card, add: [], remove: [line] }], { now });
+	if (ch.length) logCardChanges(join(dir, "memory.log"), ch, now);
+	return ch.some(c => c.removed.length > 0);
+}

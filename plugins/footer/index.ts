@@ -7,7 +7,8 @@ import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type Sett
 import { fastModeActiveFor } from "../core/fast-mode.js";
 import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../core/subagent-spinner.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "./footer.js";
-import { readRemoteLinks } from "../core/hub-paths.ts";
+import { readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPath } from "../core/hub-paths.ts";
+import { memoryUnseen } from "../core/memory-badge.ts";
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
 const labels: Record<keyof FooterOptions, string> = {
@@ -34,6 +35,8 @@ export default function (pi: ExtensionAPI) {
   let installFooter: ((ctx: ExtensionContext) => void) | undefined;
   // Same bookmarks as the phone sidebar (~/.pi/agent/pix-remote/links.json), as clickable terminal links (OSC 8).
   let links: { label: string; url: string }[] = [];
+  let memoryUrl: string | undefined, memoryNew = { at: 0, n: 0 };
+  const memoryLabel = () => { if (Date.now() - memoryNew.at > 5000) memoryNew = { at: Date.now(), n: memoryUnseen() }; return memoryNew.n ? `Memory +${memoryNew.n}` : "Memory"; };
 
   pi.on("message_start", (event) => {
     if (event.message.role === "assistant") firstOutputAt = undefined;
@@ -51,6 +54,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     options = await loadOptions();
     links = await readRemoteLinks();
+    // For you's memory, readable on the local hub page (same view as the phone). Dim "+N" until viewed.
+    const token = (await readFile(remoteTokenPath, "utf8").catch(() => "")).trim();
+    memoryUrl = token ? `http://${remoteHost}:${remoteDefaultPort}/#token=${encodeURIComponent(token)}&open=memory` : undefined;
     installFooter?.(ctx);
   });
 
@@ -105,7 +111,7 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const linkText = links.map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...(memoryUrl ? [{ label: memoryLabel(), url: memoryUrl }] : []), ...links].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         const withLinks = [core, linkText].filter(Boolean).join(" · ");
         const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;
