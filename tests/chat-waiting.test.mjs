@@ -90,6 +90,7 @@ test("phone: a session waiting on another shows the same quiet 'Waiting for pix'
   await page.goto(`${base}/#token=${token}`);
   await page.locator(".peer-wait-line").waitFor();
   assert.equal(await page.locator(".peer-wait-line").textContent(), "Waiting for pix");
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await page.locator(".bubble.typing").count(), 0, "not shown as running");
   await page.locator("#menu").click();
   assert.match(await page.locator(".peer-wait").first().textContent(), /Waiting for pix/);
