@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI) {
     const base = pi.getSessionName() || basename(ctx.cwd) || "pi";
     if (OFF.has(slug(base)) || process.env.PIX_CHAT_OFF) return;  // brook's personal session stays out of project chat
     const name = claimName(base, process.pid);
-    me = { name, cwd: ctx.cwd, pid: process.pid, at: Date.now(), status: "idle", doing: "", claims: [] };
+    me = { name, cwd: ctx.cwd, pid: process.pid, session: ctx.sessionManager?.getSessionId?.(), at: Date.now(), status: "idle", doing: "", claims: [] };
     room = join_(me, receive);
     ui = ctx.hasUI ? ctx.ui : undefined;
     check();

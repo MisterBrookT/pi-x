@@ -1,4 +1,5 @@
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
+import { sessionLabeler } from "../core/session-label.ts";
 import { linesForPrompt, liveLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
@@ -217,15 +218,15 @@ export interface Card {
 	when?: string;
 	related?: { id: string; title: string; source: string; why: string; kind?: string }[]; line?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
 	/** Where "Send to a session" can hand it: open sessions, the likeliest first ("new" = a session in its project). */
-	sessions: { id: string; name: string; cwd?: string; fits?: boolean }[];
+	sessions: { id: string; name: string; cwd?: string; fits?: boolean; hint?: string }[];
 	/** What "Send to a session…" hands over. */
 	task?: string }
 
 /** Open sessions to hand a loop to: the judge's pick, then ones in the loop's project, then the rest; "new" when it has a project. */
-export function sendTargets(it: Item, live: LiveSession[], home = homedir()): { id: string; name: string; cwd?: string; fits?: boolean }[] {
+export function sendTargets(it: Item, live: LiveSession[], home = homedir(), label = sessionLabeler()): { id: string; name: string; cwd?: string; fits?: boolean; hint?: string }[] {
 	const dir = it.project ? expandHome(it.project, home) : "";
 	const near = (s: LiveSession) => it.suggest?.session === s.id ? 0 : dir && s.cwd && (s.cwd === dir || dir.startsWith(s.cwd + "/") || s.cwd.startsWith(dir + "/")) ? 1 : 2;
-	const out = live.filter(s => s.id !== forYouSession.id).sort((a, b) => near(a) - near(b)).slice(0, 8).map(s => ({ id: s.id, name: s.name, cwd: s.cwd.replace(home, "~"), ...(near(s) < 2 ? { fits: true } : {}) }));
+	const out = live.filter(s => s.id !== forYouSession.id).sort((a, b) => near(a) - near(b)).slice(0, 8).map(s => ({ id: s.id, ...label(s), cwd: s.cwd.replace(home, "~"), ...(near(s) < 2 ? { fits: true } : {}) }));
 	return it.project ? [...out, { id: "new", name: "New session", cwd: it.project, ...(out.some(s => s.fits) ? {} : { fits: true }) }] : out;
 }
 
@@ -234,9 +235,9 @@ export function sendTargets(it: Item, live: LiveSession[], home = homedir()): { 
  * open becomes "new" (a session in the project); no buttons (or none valid) falls back to "Do it here"
  * and, when the judge suggested a live session, "Send to <it>".
  */
-export function cardChoices(it: Item, live: LiveSession[]): (CardChoice & { prompt?: string })[] {
+export function cardChoices(it: Item, live: LiveSession[], label = sessionLabeler()): (CardChoice & { prompt?: string })[] {
 	const others = live.filter(s => s.id !== forYouSession.id);
-	const fix = (c: Choice) => ["here", "discuss", "new", "later", "no"].includes(c.run) ? c : others.some(s => s.id === c.run) ? { ...c, name: others.find(s => s.id === c.run)!.name } : { ...c, run: "new" };
+	const fix = (c: Choice) => ["here", "discuss", "new", "later", "no"].includes(c.run) ? c : others.some(s => s.id === c.run) ? { ...c, name: label(others.find(s => s.id === c.run)!).name } : { ...c, run: "new" };
 	const own = (it.choices ?? []).map(fix).filter(c => c.run !== "new" || it.project);
 	if (own.length) return own;
 	return [{ label: "Do it here", run: "here" }, { label: "Discuss", run: "discuss" }, { label: "Later", run: "later" }];

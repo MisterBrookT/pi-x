@@ -89,7 +89,7 @@ export const cardLines = (it: { title: string; why?: string; source: string; lef
 ];
 
 /** A session to hand the task to, as one option in the card's list. */
-export const sendLabel = (x: { id: string; name: string; cwd?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name} ›`;
+export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? ` · ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
 export const cardTitle = (it: { prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
@@ -232,7 +232,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			const labels = it.choices.map(choiceLabel);
 			// One flat list: no second picker. Only sessions that fit this loop (same project, or the suggested one) are offered; anything else, type it.
 			const taken = new Set(it.choices.map(c => c.run));
-			const targets = it.sessions.filter(x => x.fits && !taken.has(x.id)).slice(0, 2);
+			const named = it.choices.some(c => !["here", "discuss", "later", "no"].includes(c.run));
+			const targets = named ? [] : it.sessions.filter(x => x.fits && !taken.has(x.id)).slice(0, 2);
 			const sendLabels = targets.map(sendLabel);
 			// ←/→ flip between waiting cards without leaving the picker.
 			let step = 0;

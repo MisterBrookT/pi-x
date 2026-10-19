@@ -251,7 +251,7 @@ function askCard(q){const opt=(o,i,attr)=>'<button type="button" '+attr+'><span 
 let jobOpen=true,jobAt=0,jobWhere=null;
 const jobAct=x=>!['later','no','discuss'].includes(x.run);
 /** Second level for an action: where to run it. Here first; then a new session; then sessions that fit. */
-function jobTargets(c,x){const t=[{to:'here',label:'Here, in For you'}];if(c.sessions?.some(s=>s.id==='new'))t.push({to:'new',label:'New session'});for(const s of c.sessions||[])if(s.id!=='new'&&(s.fits||s.id===x.run)&&!t.some(y=>y.to===s.id))t.push({to:s.id,label:'In '+s.name});return t.slice(0,4)}
+function jobTargets(c,x){const t=[{to:'here',label:'Here, in For you'}];if(c.sessions?.some(s=>s.id==='new'))t.push({to:'new',label:'New session'});const named=(c.choices||[]).some(y=>!['here','discuss','later','no','new'].includes(y.run));for(const s of c.sessions||[])if(s.id!=='new'&&(named?s.id===x.run:(s.fits||s.id===x.run))&&!t.some(y=>y.to===s.id))t.push({to:s.id,label:'In '+s.name+(s.hint?' · '+s.hint:'')});return t.slice(0,4)}
 function jobCards(){const cs=current?.cards?.length?current.cards:current?.card?[current.card]:[];if(jobAt>=cs.length)jobAt=0;return cs}
 function shownCard(){return jobCards()[jobAt]}
 /* While For you works, new cards never interrupt: one quiet line; the card shows when the turn ends. */

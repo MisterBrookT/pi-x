@@ -20,7 +20,7 @@ export const MAX_HOPS = 3;
 export const KINDS = ["note", "ask", "handoff", "reply"] as const;
 export type Kind = (typeof KINDS)[number];
 
-export type Peer = { name: string; cwd: string; pid: number; at: number; status?: string; doing?: string; claims?: string[] };
+export type Peer = { name: string; cwd: string; pid: number; session?: string; at: number; status?: string; doing?: string; claims?: string[] };
 export type Note = { id: string; from: string; kind: Kind; text: string; thread: string; hop: number; at: number; grant?: string[] };
 
 const alive = (pid: number) => { if (!(pid > 0)) return false; try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; } };

@@ -524,3 +524,22 @@ test("Mac: ⌘⇧Y with no card waiting lists everything unfinished; picking one
 	await cardCmd(pi2, macCtx("pix-foryou", [], notes));
 	assert.deepEqual(notes, ["Nothing unfinished."]);
 });
+
+test("session names on cards: three sessions in one folder show their unique board names plus a short 'doing' hint; a card that names a session gets no generic 'Do it in' rows", async () => {
+	const { sessionLabeler } = await import("../plugins/core/session-label.ts");
+	const { sendLabel } = await import("../plugins/foryou/index.ts");
+	const board = [["m1", "minara"], ["m2", "minara-2"], ["m3", "minara-3"]].map(([session, name]) => ({ name, session, cwd: "/w/minara", pid: 1, at: 0 }));
+	const label = sessionLabeler(board, { m2: { line: "Three y2 GPU jobs are running; Kairos waits on Enhao" } });
+	const ses = ["m1", "m2", "m3"].map(id => ({ id, name: "minara", cwd: "/w/minara" }));
+	const it = { ...loop("a"), project: "/w/minara" };
+	const t = sendTargets(it, ses, "/h", label);
+	assert.deepEqual(t.filter(s => s.id !== "new").map(sendLabel), ["Do it in minara ›", "Do it in minara-2 · Three y2 GPU jobs are running… ›", "Do it in minara-3 ›"]);
+	assert.equal(new Set(t.map(sendLabel)).size, t.length, "no two rows read the same");
+	assert.equal(cardChoices({ ...it, choices: [{ label: "Fix", run: "m3" }] }, ses, label)[0].name, "minara-3");
+	// Mac picker: the card's own choice already names a session, so no generic rows are added.
+	const d = tmp({ ...loop("a"), project: "/w/minara", choices: [{ label: "Fix", run: "m3", prompt: "Fix it" }, { label: "Talk", run: "discuss" }] });
+	const pi = fakePi(), shown = [];
+	register(pi, { dir: d, sessions: async () => ses, answer: async () => "ok", cardPollMs: 60_000, badge: () => {} });
+	await cardCmd(pi, macCtx("pix-foryou", [], shown));
+	assert.equal(shown[0].options.filter(o => /^Do it in/.test(o)).length, 0, shown[0].options.join(" | "));
+});

@@ -498,6 +498,25 @@ test("feed: posts like a social For you timeline; Reply is a comment to For you;
   assert.deepEqual(errors, []);
 });
 
+test("phone: session buttons use unique board names with a short hint; a card naming a session offers only that one", async t => {
+  const dir = await folder(t);
+  const chat = join(dir, "chat"); process.env.PIX_CHAT_DIR = chat; process.env.PIX_PROACTIVE_DIR = dir;
+  t.after(() => { delete process.env.PIX_CHAT_DIR; delete process.env.PIX_PROACTIVE_DIR; });
+  for (const [s, n] of [["m1", "minara"], ["m2", "minara-2"], ["m3", "minara-3"]]) { mkdirSync(join(chat, n), { recursive: true }); writeFileSync(join(chat, n, "me.json"), JSON.stringify({ name: n, session: s, cwd: dir, pid: process.pid, at: 0 })); }
+  writeFileSync(join(dir, "status.json"), JSON.stringify({ m2: { line: "Three y2 GPU jobs are running; Kairos waits" } }));
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("k1", { project: dir, choices: [{ label: "Fix it", run: "m2", prompt: "Patch" }] })) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  for (const id of ["m1", "m2", "m3"]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  await page.locator('.fp[data-fy="k1"] [data-fy-pick="0"]').click();
+  assert.deepEqual(await page.locator('.fp[data-fy="k1"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "In minara-2 · Three y2 GPU jobs are running…", "Discuss with For you first"]);
+});
+
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
   const { unfinishedLines } = await import("../plugins/foryou/index.ts");
   const rows = unfinishedLines({ pending: [{ id: "a", title: "Reply Lowes", due: "2026-10-20" }], onit: [{ id: "b", title: "Backtest" }], later: [{ id: "c", title: "ZIA prep", wakeAt: "2026-10-17T05:55:00Z" }] });
