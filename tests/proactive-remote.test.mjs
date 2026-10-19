@@ -95,15 +95,16 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.getByText("Jev training").count(), 0, "no lines on the page");
   // A source that keeps failing shows as one calm line at the top of For you.
   writeFileSync(join(dir, "health.json"), JSON.stringify({ problems: [{ text: "Feishu: login expired (3 chats)", since: "x" }] }));
-  await page.getByText("Can't read Feishu: login expired (3 chats)").waitFor({ timeout: 12000 });
+  await page.locator(".fy-warn", { hasText: /^Feishu paused$/ }).waitFor({ timeout: 12000 });
+  assert.match(await page.locator(".fy-warn").getAttribute("title"), /login expired/, "the detail is one tap/hover away, not on the page");
   // DingTalk without Mac permission shows its own line; it disappears once DingTalk reads again.
   const { trackHealth, healthSummary } = await import("../plugins/foryou/proactive.ts");
   const ding = trackHealth({}, [{ source: "DingTalk", error: "DingTalk local read timed out after 60000ms; grant pix App Data / Full Disk Access permission for DingTalk" }], [], "x");
   writeFileSync(join(dir, "health.json"), JSON.stringify({ state: ding, problems: healthSummary(ding) }));
-  await page.getByText("Can't read DingTalk: Mac permission required (DingTalk)").waitFor({ timeout: 12000 });
+  await page.locator(".fy-warn", { hasText: /^DingTalk paused$/ }).waitFor({ timeout: 12000 });
   const healed = trackHealth(ding, [], ["DingTalk"], "y");
   writeFileSync(join(dir, "health.json"), JSON.stringify({ state: healed, problems: healthSummary(healed) }));
-  await page.getByText("Can't read DingTalk", { exact: false }).waitFor({ state: "detached", timeout: 12000 });
+  await page.locator(".fy-warn").waitFor({ state: "detached", timeout: 12000 });
   // Regression: the dot means "new since you looked". Opening For you calms it; it stays calm after
   // closing (and after a reload) until something new arrives.
   await page.locator("#closeForYou").click();
@@ -151,7 +152,8 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
-  await page.locator("#forYou").getByText("All clear").waitFor();
+  await page.locator('#forYou .fp[data-fy="a"]').waitFor({ state: "detached" });
+  assert.equal(await page.locator("#forYou").getByText("All clear").count(), 0, "no big empty state");
   assert.equal(await page.locator(".fp:not(.fw)", { hasText: "Title c" }).count(), 0, "parked loops leave the feed");
   // Parked loops fold into "Later · N" at the bottom of the same feed.
   assert.match(await page.locator("#forYou .fw-later").textContent(), /Later · 1[\s\S]*Title c[\s\S]*back /);

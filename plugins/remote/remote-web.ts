@@ -117,7 +117,10 @@ textarea{flex:1;min-width:0;border:0;outline:0;resize:none;background:transparen
 .fp-meta b{font-size:15px}.fp-text>b{font-size:15.5px;line-height:1.35}
 .fw-h{position:sticky;top:0;z-index:2;display:flex;align-items:baseline;gap:6px;margin:0 -16px;padding:10px 16px;font-size:15px;font-weight:700;letter-spacing:0;color:var(--text);background:color-mix(in srgb,var(--bg) 85%,transparent);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-bottom:.5px solid var(--line)}.fw-h span{font-size:14px;font-weight:500;color:var(--muted)}
 .fw-st{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-style:normal;font-size:12px;font-weight:600;color:#2f8a50;background:rgba(52,199,89,.13);padding:2px 9px;border-radius:999px;white-space:nowrap}.fw-st .ln-dot{margin:0;width:6px;height:6px}
-.fw.working .fw-st{display:none}.fw.working .fw-st .ln-dot{animation:fwPulse 1.6s ease-in-out infinite}
+.fw.working .fw-st{display:none}.fy-none{margin:24px 0;text-align:center;color:var(--muted);font-size:14px}
+.fy-src.sess{font-size:17px;font-weight:600;color:#fff;letter-spacing:0}.fy-src.shiba{background:#fff}.fy-src.shiba svg{width:30px;height:30px;stroke:#222;stroke-width:3.2}
+.fy-feed .fy-warn,#forYou .fy-warn{display:flex;align-items:center;gap:7px;margin:0 -16px;padding:9px 16px;font-size:13px;color:var(--muted);border-bottom:.5px solid var(--line)}.fy-warn .ln-dot{margin:0;background:#ff9f0a;opacity:1}
+.fw .fw-t{font-weight:500}.fy-done summary,.fw-later summary{text-align:left;font-size:14px;color:var(--muted)}.fw.working .fw-st .ln-dot{animation:fwPulse 1.6s ease-in-out infinite}
 .fy-feed .fp-go,#forYou .fp-go{padding:7px 16px;min-height:40px;border-radius:999px}.fy-feed .fp-go small,#forYou .fp-go small{font-size:12.5px}
 .fw-h{padding-left:16px}.fw .fp-meta{align-items:center}@keyframes fwPulse{50%{opacity:.35}}
 .fw.waiting .fw-st{color:#a3640d;background:rgba(255,159,10,.14)}.fw.quiet .fw-st{color:var(--muted);background:var(--line)}
@@ -226,10 +229,11 @@ const fyLink=t=>esc(t).replace(/https?:\/\/[^\s<]+/g,u=>'<a href="'+u+'" target=
 function fyTrail(note){const L=String(note||'').split('\n').map(x=>x.trim()).filter(Boolean).slice(-3);return L.length?'<ol class="fw-trail">'+L.map((x,k)=>'<li'+(k===L.length-1?' class="now"':'')+'>'+fyLink(x)+'</li>').join('')+'</ol>':''}
 function fyWorking(){const L=(forYou.lines||[]).filter(l=>l.open||l.owner),O=forYou.onit||[],LA=forYou.later||[];
 const ST={working:'Doing',waiting:'Waiting',you:'Needs you',quiet:'Quiet'};
-const post=(av,who,meta,title,trail,mode)=>'<article class="fp fw '+(mode||'working')+'"><span class="fp-av">'+av+'</span><div class="fp-body"><div class="fp-meta"><b>'+esc(who)+'</b><span>· '+esc(meta)+'</span><i class="fw-st"><span class="ln-dot '+(mode||'working')+'"></span>'+(ST[mode||'working']||'')+'</i></div><p class="fw-t">'+esc(title)+'</p>'+trail+'</div></article>';
-const sav=n=>'<span class="fy-src sess" role="img" aria-label="'+esc(n)+'">'+esc((n||'P').slice(0,1).toUpperCase())+'</span>';
+const post=(av,who,meta,title,trail,mode)=>'<article class="fp fw '+(mode||'working')+'"><span class="fp-av">'+av+'</span><div class="fp-body"><div class="fp-meta"><b>'+esc(who)+'</b>'+(meta?'<span>· '+esc(meta)+'</span>':'')+'<i class="fw-st"><span class="ln-dot '+(mode||'working')+'"></span>'+(ST[mode||'working']||'')+'</i></div>'+(title?'<p class="fw-t">'+fyLink(title)+'</p>':'')+''+trail+'</div></article>';
+const GR=[['#5ac8fa','#007aff'],['#ffb340','#ff8a00'],['#7ee08a','#30b158'],['#c18cff','#8e5cf7'],['#ff8fa3','#ff375f'],['#6fe3d6','#20a8a0'],['#9aa7ff','#5856d6']];
+const sav=n=>{if(/^for you$/i.test(n||''))return '<span class="fy-src sess shiba" role="img" aria-label="For you">'+shibaFace+'</span>';let k=0;for(const c of String(n||''))k=(k*31+c.charCodeAt(0))>>>0;const g=GR[k%GR.length],w=String(n||'P').replace(/^[^\p{L}\p{N}]+/u,'');return '<span class="fy-src sess" role="img" aria-label="'+esc(n)+'" style="background:linear-gradient(160deg,'+g[0]+','+g[1]+')">'+esc(Array.from(w)[0]?.toUpperCase()||'·')+'</span>'};
 let h='';const P=new Set((forYou.pending||[]).map(i=>i.id));const W=[...O.filter(i=>!P.has(i.id)).map(i=>{const n=i.session?((sessions.find(s=>s.id===i.session)||{}).name||'A session'):'For you';return post(i.kind?fySrc(i):sav(n),n,fyAgo(i.at_status||i.at),i.title,fyTrail(i.note),'working')}),
-...L.map(l=>post(sav(l.owner?.name||l.name),l.owner?.name||'Line of work',l.owner?.at?fyAgo(l.owner.at):'ongoing',l.name,fyTrail(l.owner?.status||l.state),l.mode||'quiet'))];
+...L.map(l=>{const t=String(l.owner?.status||l.state||'').split('\n').map(x=>x.trim()).filter(x=>x&&!/^ongoing$/i.test(x));return post(sav(l.name),l.name,l.owner?.name?l.owner.name+(l.owner.at?' · '+fyAgo(l.owner.at):''):(l.owner?.at?fyAgo(l.owner.at):''),t.pop()||'',fyTrail(t.join('\n')),l.mode||'quiet')})];
 if(W.length)h+='<h3 class="fw-h">Doing <span>'+W.length+'</span></h3>'+W.join('');
 if(LA.length)h+='<details class="fy-done fw-later"><summary>Later · '+LA.length+'</summary>'+LA.map(i=>'<p>'+esc(i.title)+' <small>'+(i.wakeAt?'back '+fyDay(i.wakeAt):'parked')+'</small></p>').join('')+'</details>';
 return h}
@@ -238,8 +242,8 @@ function renderForYou(){const P=forYou.pending||[],H=forYou.handled||[],n=P.leng
 function fyFeedHtml(inChat){const P=forYou.pending||[],H=forYou.handled||[],n=P.length;
 const probs=forYou.problems||[],CS=forYou.cards||[],nw=(forYou.onit||[]).length+(forYou.lines||[]).filter(l=>l.mode==='working').length;
 let h=inChat?'':fyStatusTop();
-if(probs.length)h+='<p class="fy-warn" role="status">'+probs.map(p=>'Can\'t read '+esc(p.text)).join(' · ')+'</p>';
-{const R=Object.values(fyReplied).map(x=>x.item).filter(i=>i&&!P.some(p=>p.id===i.id));h+=n||R.length?'<h3 class="fw-h">Ready <span>'+(n||R.length)+'</span></h3>'+[...P,...R].map(i=>fyPost(i,CS)).join(''):'<div class="fy-clear"><b>All clear</b><small>Nothing needs you right now</small></div>';h+=fyWorking();const done=H.filter(i=>i.status==='done'||i.status==='resolved');if(done.length)h+='<details class="fy-done"><summary>✓ '+done.length+' done today</summary>'+done.map(i=>'<p>'+esc(i.title)+'</p>').join('')+'</details>'}
+if(probs.length)h+='<p class="fy-warn" role="status" title="'+esc(probs.map(p=>p.text).join('\n'))+'"><span class="ln-dot waiting"></span>'+esc(probs.map(p=>String(p.text).split(/[:\s]/)[0]).filter((x,k,a)=>a.indexOf(x)===k).join(', '))+' paused</p>';
+{const R=Object.values(fyReplied).map(x=>x.item).filter(i=>i&&!P.some(p=>p.id===i.id));const W=fyWorking();h+=n||R.length?'<h3 class="fw-h">Ready <span>'+(n||R.length)+'</span></h3>'+[...P,...R].map(i=>fyPost(i,CS)).join(''):W?'':'<p class="fy-none">Nothing new</p>';h+=W;const done=H.filter(i=>i.status==='done'||i.status==='resolved');if(done.length)h+='<details class="fy-done"><summary>✓ '+done.length+' done today</summary>'+done.map(i=>'<p>'+esc(i.title)+'</p>').join('')+'</details>'}
 if(!inChat)h+='<button type="button" class="fp-compose" data-fy-thread aria-label="Talk to For you">'+FYI.pen+'</button>';return h} function setForYou(open){$("forYouPage").hidden=!open;if(!open)for(const k in fyReplied)delete fyReplied[k];if(open){setDrawer(false);markForYouSeen()}}
 // The dot means "something new since you last looked", not "something is open": opening For you calms it.
 function fyUnseen(){const seen=Number(localStorage.pixForYouSeen||0);return (forYou.pending||[]).filter(i=>Date.parse(i.handledAt||i.at)>seen).length}
