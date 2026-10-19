@@ -372,6 +372,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		record({ kind: "call", name, detail });
 	};
 
+	const fullOutline = new WeakMap<CuaState, string>();
 	const gate = async (summary: string) => {
 		if (approved.has(summary)) return;
 		if (!options.confirm) {
@@ -386,11 +387,12 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	 * Screen-mode state for an app without an accessibility tree. Every act
 	 * re-captures the window, so refs always belong to what is on screen now.
 	 */
-	const makeScreenState = (capture: ScreenCapture, serial: number): CuaState => {
+	const makeScreenState = (capture: ScreenCapture, serial: number, previousOutline?: string): CuaState => {
 		const screen = options.screen;
 		if (!screen) throw new Error("Screen mode is not available on this host.");
 		const id = `screen:${capture.app}:${serial}`;
-		const text = screenOutline(capture);
+		const full = screenOutline(capture);
+		const text = previousOutline === undefined ? full : diffOutline(previousOutline, full, id);
 		const recapture = async (why: string) => {
 			spend("screen_capture", why);
 			return screen.capture(capture.app);
@@ -404,7 +406,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			look: async () => text, // replaced by withLook
 			async search(query) {
 				const needle = (query.text ?? "").toLowerCase();
-				return text.split("\n").slice(1).filter((row) => row.toLowerCase().includes(needle)).join("\n");
+				return full.split("\n").slice(1).filter((row) => row.toLowerCase().includes(needle)).join("\n");
 			},
 			expand: unsupported("expand"),
 			inspect: unsupported("inspect"),
@@ -471,7 +473,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				}
 				serial += 1;
 				const after = await recapture("after act");
-				const next = makeScreenState(after, serial);
+				const next = makeScreenState(after, serial, full);
 				if (expect?.text !== undefined) {
 					const until = expect.until ?? "present";
 					const seen = after.lines.some((line) => line.text.includes(expect.text ?? ""));
@@ -485,6 +487,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		for (const key of Object.keys(state)) {
 			if (typeof state[key as keyof CuaState] === "function") Object.defineProperty(state, key, { enumerable: false });
 		}
+		fullOutline.set(state, full);
 		return trackMethods(withLook(state));
 	};
 	let screenSerial = 0;
@@ -498,7 +501,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		} else if (opts.ref && opts.read) parts.push(await state.read(opts.ref, opts.offset));
 		else if (opts.ref && opts.inspect) parts.push(await state.inspect(opts.ref));
 		else if (opts.ref) parts.push(await state.expand(opts.ref, opts.depth));
-		else if (!opts.wait) parts.push(state.text);
+		else if (!opts.wait) parts.push(fullOutline.get(state) ?? state.text);
 		return parts.join("\n");
 	};
 	const withLook = (state: CuaState): CuaState => {
@@ -506,10 +509,12 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		return state;
 	};
 
-	const makeState = (result: ToolResultLike, previousId?: string): CuaState => {
+	const makeState = (result: ToolResultLike, previousId?: string, previousOutline?: string): CuaState => {
 		const id = stateIdOf(result) ?? previousId;
 		if (!id) throw new Error("Backend returned no stateId; the observation cannot be used.");
-		const text = textOf(result);
+		const full = textOf(result);
+		// After an act the model sees only what changed; the full outline stays for checks and look().
+		const text = previousOutline === undefined ? full : diffOutline(previousOutline, full, id);
 		// Advanced by operations that bump the backend's epoch for this resource.
 		let current = id;
 
@@ -547,7 +552,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 					);
 				}
 				const summary = summarizeActions(list);
-				const risky = isIrreversible(list, text);
+				const risky = isIrreversible(list, full);
 				if (risky) await checkTarget(actOptions?.target, summary, async (target) => {
 					if (target.url !== undefined) {
 						spend("evaluate_browser", "location.href (target check)");
@@ -556,7 +561,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 						const href = String(extractEvaluationValue(textOf(result)) ?? "");
 						if (!urlMatches(href, target.url)) return `page is ${href || "unknown"}, not ${target.url}`;
 					}
-					if (target.title !== undefined && !outlineHasTitle(text, target.title)) {
+					if (target.title !== undefined && !outlineHasTitle(full, target.title)) {
 						return `no window, heading, or title in this state reads exactly ${JSON.stringify(normalizeName(target.title))}`;
 					}
 					return undefined;
@@ -567,7 +572,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
 				try {
 					const result = await operations.act({ stateId: id, actions: list, expect });
-					return makeState(result, id);
+					return makeState(result, id, full);
 				} catch (error) {
 					const raw = error instanceof Error ? error.message : String(error);
 					const explained = describeOcclusion(raw);
@@ -602,6 +607,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				Object.defineProperty(state, key, { enumerable: false });
 			}
 		}
+		fullOutline.set(state, full);
 		return trackMethods(withLook(state));
 	};
 
@@ -689,6 +695,47 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			}
 		},
 	};
+};
+
+/** Above this share of changed lines, a diff is no cheaper than the outline: send it whole. */
+const DIFF_FULL_RATIO = 0.4;
+
+/**
+ * What changed between two outlines, Codex-style: `+` added, `-` removed,
+ * `~` changed (same ref, new content). Lines are matched by ref first, then by
+ * content, so a renumbered but identical element is not reported as a change.
+ * Falls back to the full outline when most of it changed.
+ */
+export const diffOutline = (before: string, after: string, id = "", ratio = DIFF_FULL_RATIO): string => {
+	const parse = (outline: string) =>
+		outline.split("\n").filter((l) => l.trim()).map((line) => {
+			const m = /^\s*(@[a-z]\d+)\b\s*(.*)$/.exec(line);
+			return { line: line.trim(), ref: m?.[1], body: (m ? m[2] : line).trim().replace(/\s+/g, " ") };
+		});
+	const a = parse(before);
+	const b = parse(after);
+	const byRef = new Map(a.filter((x) => x.ref).map((x) => [x.ref, x]));
+	const bodies = new Map<string, number>();
+	for (const x of a) bodies.set(x.body, (bodies.get(x.body) ?? 0) + 1);
+	const out: string[] = [];
+	const kept = new Set<string>();
+	for (const x of b) {
+		const old = x.ref ? byRef.get(x.ref) : undefined;
+		if (old && old.body === x.body) { kept.add(x.ref ?? x.body); bodies.set(x.body, (bodies.get(x.body) ?? 1) - 1); continue; }
+		if ((bodies.get(x.body) ?? 0) > 0) { bodies.set(x.body, (bodies.get(x.body) ?? 1) - 1); if (old) kept.add(old.ref ?? ""); continue; }
+		if (old) { kept.add(old.ref ?? ""); out.push(`~ ${x.line}`); } else out.push(`+ ${x.line}`);
+	}
+	const afterBodies = new Map<string, number>();
+	for (const x of b) afterBodies.set(x.body, (afterBodies.get(x.body) ?? 0) + 1);
+	for (const x of a) {
+		if (x.ref && kept.has(x.ref)) continue;
+		if (x.ref && b.some((y) => y.ref === x.ref)) continue;
+		if ((afterBodies.get(x.body) ?? 0) > 0) { afterBodies.set(x.body, (afterBodies.get(x.body) ?? 1) - 1); continue; }
+		out.push(`- ${x.line}`);
+	}
+	if (out.length === 0) return `No visible change${id ? ` (state ${id})` : ""}; look() for the full outline.`;
+	if (out.length > Math.max(3, b.length * ratio)) return after;
+	return [`Changes${id ? ` in ${id}` : ""} (${out.length} of ${b.length} lines; look() for the full outline):`, ...out].join("\n");
 };
 
 /** Run the target check for an irreversible action, or refuse when it has none. */

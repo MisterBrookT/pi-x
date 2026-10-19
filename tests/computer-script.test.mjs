@@ -674,3 +674,56 @@ test("cua.look targets: app → first window root, url → browser, state → re
 	const again = await runtime.cua.look({ state: "S7" });
 	assert.equal(again.id, "S7");
 });
+
+test("after an act the state text is only what changed; look() still gives the full outline", async () => {
+	const { diffOutline } = await import("../plugins/computer/computer-script.ts");
+	const rows = Array.from({ length: 30 }, (_, i) => `@e${i + 10} cell "row ${i}"`).join("\n");
+	const before = `@e1 window "Notes"\n@e2 textfield "draft"\n${rows}\n@e9 button "Send"`;
+	const after = `@e1 window "Notes"\n@e2 textfield "hello"\n${rows}\n@e9 button "Send"\n@e50 statictext "Saved"`;
+	let n = 0;
+	const { runtime } = runtimeFor({
+		operations: {
+			observe: async () => ({ content: [{ type: "text", text: before }], details: { stateId: "S1" } }),
+			act: async () => ({ content: [{ type: "text", text: after }], details: { stateId: `S${(n += 2)}` } }),
+		},
+	});
+	const s = await runtime.cua.look();
+	assert.equal(s.text, before, "the first look is the full outline");
+	const next = await s.act({ action: "setText", ref: "@e2", text: "hello" });
+	assert.equal(next.text, 'Changes in S2 (2 of 34 lines; look() for the full outline):\n~ @e2 textfield "hello"\n+ @e50 statictext "Saved"');
+	assert.equal(await next.look(), after);
+	assert.match(diffOutline(after, after), /No visible change/);
+	assert.equal(diffOutline(before, "@e1 window \"Other\"\n@e3 button \"x\""), "@e1 window \"Other\"\n@e3 button \"x\"", "mostly new → full outline");
+	assert.match(diffOutline(before, before.replace('@e9 button "Send"\n', "").replace(/\n@e9 button "Send"$/, "")), /^- @e9 button "Send"$/m);
+});
+
+test("the diff never hides an irreversible control from the guard", async () => {
+	const before = '@e1 window "Mail"\n@e9 button "Send"';
+	const { runtime } = runtimeFor({
+		confirm: async () => true,
+		operations: {
+			observe: async () => ({ content: [{ type: "text", text: before }], details: { stateId: "S1" } }),
+			act: async () => ({ content: [{ type: "text", text: before + '\n@e3 statictext "x"' }], details: { stateId: "S2" } }),
+		},
+	});
+	const s = await runtime.cua.look();
+	const next = await s.act({ action: "setText", ref: "@e1", text: "x" });
+	assert.doesNotMatch(next.text, /Send/, "Send is unchanged so the diff omits it");
+	await assert.rejects(() => next.act({ action: "press", ref: "@e9" }), /without a target/, "still recognised as irreversible");
+	await next.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "Mail" } });
+});
+
+test("screen mode diffs OCR lines too", async () => {
+	const lines = [{ text: "brookkk", x: 300, y: 20, w: 80, h: 16 }, { text: "older", x: 300, y: 300, w: 80, h: 16 }];
+	const screen = {
+		activate: async () => {},
+		capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [...lines] }),
+		click: async () => {}, keys: async () => {},
+		paste: async (t) => lines.push({ text: t, x: 300, y: 700, w: 80, h: 16 }),
+	};
+	const { cua } = createCuaRuntime({ operations: {}, screen });
+	const s = await cua.look({ app: "WeChat", mode: "screen" });
+	const next = await s.act({ action: "typeText", text: "hello" });
+	assert.match(next.text, /^\+ @t3 "hello" \(340,708\)$/m);
+	assert.doesNotMatch(next.text, /older/);
+});

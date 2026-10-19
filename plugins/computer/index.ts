@@ -41,7 +41,7 @@ Actions: press | click | setText | typeText | keypress | scroll | drag | moveMou
 
 Irreversible acts (Send/Pay/Delete, Enter in screen mode) need { target: { title } } (exact window/chat title) or { target: { url } }; re-checked before running, refused on mismatch, then confirmed by the user once.
 
-Screen mode (no AX tree, e.g. WeChat): OCR lines as @t refs. Old names still work: cua.roots/observe/state/launchBrowser, state.search/expand/inspect/read/waitFor, cua.observe, act(action | action[], expect), eval(expression).
+After the first look, act results show only what changed. Screen mode (no AX tree, e.g. WeChat): OCR lines as @t refs. Old names still work: cua.roots/observe/state/launchBrowser, state.search/expand/inspect/read/waitFor, cua.observe, act(action | action[], expect), eval(expression).
 `.trim();
 
 const Params = Type.Object({
