@@ -266,8 +266,8 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   await card.waitFor();
   // Never interrupt: while For you works, the card steps back to one quiet line; it returns when the turn ends.
   await put(true);
-  await page.locator(".job-waitline").waitFor({ timeout: 8000 });
-  assert.match(await page.locator(".job-waitline").textContent(), /2 things wait/);
+  await page.locator(".fy-status").waitFor({ timeout: 8000 });
+  assert.match(await page.locator(".fy-status").textContent(), /Thinking… · 2 cards wait/);
   assert.equal(await card.count(), 0);
   await put(false);
   await card.waitFor({ timeout: 8000 });
@@ -397,6 +397,31 @@ test("one element: the top card carries the unfinished header and expands the li
   for (const name of ["Later", "Done", "Not important", "Send"]) assert.equal(await card.getByRole("button", { name, exact: true }).count(), 1, name);
   assert.equal(await card.locator("textarea").count(), 1, "free text stays");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT, fullPage: true }); }
+});
+
+test("For you at work: one steady status line (doing · waiting on · cards); no tool rows, no lines box", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("q1")) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  const put = (extra) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: true, messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "", tools: [{ id: "t1", name: "bash", label: "ls -t ~/.pi/agent/chat", input: "ls", output: "x" }, ...extra] }], ...(extra.length ? {} : { peerWait: "Waiting for pix" }) }) });
+  await put([{ id: "t2", name: "chat", label: "send to pix" }]);
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  const st = page.locator(".fy-status");
+  await st.waitFor();
+  assert.match(await st.textContent(), /^Messaging a session… · 1 card waits$/);
+  for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing"]) assert.equal(await page.locator(sel).count(), 0, sel);
+  assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
+  await put([]);
+  await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector(".fy-status")?.textContent || ""));
+  assert.match(await st.textContent(), /^Thinking… · Waiting for pix · 1 card waits$/);
+  assert.equal(await page.locator(".fy-status").count(), 1, "one steady row, updated in place");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
