@@ -727,3 +727,13 @@ test("screen mode diffs OCR lines too", async () => {
 	assert.match(next.text, /^\+ @t3 "hello" \(340,708\)$/m);
 	assert.doesNotMatch(next.text, /older/);
 });
+
+test("cua.look({ app }) skips an untitled backdrop root and observes the titled window", async () => {
+	const { runtime, calls } = runtimeFor({
+		operations: {
+			find: async () => ({ content: [{ type: "text", text: "Found 2\n- @r1 window Finder pid 1 — (untitled) (z 9)\n- @r2 window Finder pid 1 — Recents (z 0, main)" }] }),
+		},
+	});
+	await runtime.cua.look({ app: "Finder" });
+	assert.equal(calls.find((c) => c.name === "observe").params.root, "@r2");
+});

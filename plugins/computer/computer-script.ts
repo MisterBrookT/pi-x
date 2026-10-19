@@ -618,7 +618,11 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			if (target.mode === "screen") return cua.observe({ app: target.app, mode: "screen" });
 			if (target.app && !target.root) {
 				const roots = await cua.roots({ app: target.app });
-				const root = /@r\d+/.exec(roots)?.[0];
+				// Prefer a real titled window: Finder lists its untitled desktop
+				// backdrop first, and observing that fails ("not owned by a running app").
+				const lines = roots.split("\n").filter((line) => /@r\d+/.test(line));
+				const pick = lines.find((line) => /\bwindow\b/.test(line) && !/\(untitled\)/.test(line)) ?? lines[0];
+				const root = pick ? /@r\d+/.exec(pick)?.[0] : undefined;
 				if (!root) throw new Error(`No window found for ${target.app}. Is it open?`);
 				return cua.observe({ root, mode: target.mode });
 			}
