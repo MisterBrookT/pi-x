@@ -214,49 +214,51 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
 
 const launch = async () => chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
 
-test("one place: the bell opens the For you chat; its card is open, shows source and prepared, one recommended move that says where", async t => {
+test("one page: the bell opens the For you chat; its posts sit in the conversation; the main move says where and runs there; brook can type to For you", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("j1", { title: "Send the data", action: "Package it", prepared: "Found tracks.json\nMinara has the snapshot\nline 3", choices: [{ label: "Ask Minara", run: "s1", prompt: "Package the newest data" }, { label: "Discuss", run: "discuss" }] })) + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
-  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi foryou" }] }) });
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi foryou" }, { role: "assistant", text: "Morning. Two things today." }] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
   await page.getByText("hello there").waitFor();
-  assert.equal(await page.locator("#messages [data-job]").count(), 0, "work sessions show no card");
-  // Sidebar: For you is its own row with a count, not in the session lists.
+  assert.equal(await page.locator("#messages .fp, #messages [data-job]").count(), 0, "work sessions show no posts");
   await page.locator("#menu").click();
   await page.locator("#forYouRow").waitFor();
   assert.equal(await page.locator("#forYouCount").textContent(), "1");
   assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
   await page.locator("#forYouRow").click();
-  await page.locator('.fp[data-fy="j1"]').waitFor();
-  await page.locator(".fp-compose").click();
-  await openCard(page);
-  const card = page.locator('#messages .job-card[data-job="j1"]');
-  await card.waitFor();
-  assert.equal(await page.locator("#forYouPage").isHidden(), true, "the bell/row opens the chat, not a separate page");
-  assert.match(await card.textContent(), /Feishu|Group|Send the data/);
-  assert.match(await card.locator(".job-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
-  const go = card.locator(".job-go");
-  assert.equal(await go.count(), 1, "one recommended move");
-  assert.match(await go.textContent(), /Ask Minara[\s\S]*In minara · Package the newest data/);
-  for (const b of await card.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
-  if (process.env.PIX_SHOT) { await page.waitForTimeout(800); await page.screenshot({ path: process.env.PIX_SHOT }); }
+  const post = page.locator('#messages .fp[data-fy="j1"]');
+  await post.waitFor();
+  assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the For you chat itself");
+  assert.equal(await page.locator("#messages .job-card, #messages .feed-head, #messages .ln-box").count(), 0, "no second card UI");
+  assert.match(await page.locator("#messages").textContent(), /Morning\. Two things today\.[\s\S]*Send the data/, "the conversation, then the posts");
+  assert.match(await post.locator(".fp-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
+  assert.match(await post.locator(".fp-go").textContent(), /Ask Minara[\s\S]*In minara · Package the newest data/);
+  for (const b of await post.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(600); await page.screenshot({ path: process.env.PIX_SHOT }); }
+  // Chat stays available: the composer talks to For you.
+  assert.equal(await page.locator("#input").isVisible(), true);
+  const toFy = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
+  await page.locator("#input").fill("what's left today?");
+  await page.locator("#send").click();
+  assert.match((await toFy).prompts[0], /what's left today\?/);
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await go.click();
+  await post.locator(".fp-go").click();
+  await post.locator(".fp-where button", { hasText: "In minara" }).click();
   assert.match((await next).prompts[0], /Package the newest data/);
   const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
   assert.equal(it.status, "onit"); assert.equal(it.session, "s1");
   assert.deepEqual(errors, []);
 });
 
-test("in-chat card: Something else sends brook's words; Later parks it; ‹ › flips cards", async t => {
+test("posts in the For you chat: Reply sends brook's words; Later parks; while For you works the posts stay and one status line shows", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
@@ -268,33 +270,21 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const card = page.locator('.job-card[data-job="k1"]');
-  await openCard(page);
-  await card.waitFor();
-  await card.locator(".feed-back").click();
-  await openCard(page, 1);
-  await page.locator('.job-card[data-job="k2"]').waitFor();
-  await page.locator(".feed-back").click();
-  await openCard(page, 0);
-  await card.waitFor();
-  // Never interrupt: while For you works, the card steps back to one quiet line; it returns when the turn ends.
+  const p1 = page.locator('#messages .fp[data-fy="k1"]'), p2 = page.locator('#messages .fp[data-fy="k2"]');
+  await p1.waitFor(); await p2.waitFor();
   await put(true);
-  await page.locator(".fy-status").waitFor({ timeout: 8000 });
-  assert.match(await page.locator(".fy-status").textContent(), /Thinking… · 2 cards wait/);
-  assert.equal(await card.count(), 0);
+  await page.locator("#messages .fy-status").waitFor({ timeout: 8000 });
+  assert.match(await page.locator("#messages .fy-status").textContent(), /Thinking… · 2 cards wait/);
+  assert.equal(await p1.count(), 1, "posts stay put while it works");
   await put(false);
-  await openCard(page);
-  await card.waitFor({ timeout: 8000 });
-  await card.locator("textarea").fill("Only draft a reply");
+  await p1.locator(".fp-bar [data-fy-else]").click();
+  await p1.locator(".fp-reply textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await card.getByRole("button", { name: "Send" }).click();
+  await p1.locator("[data-fy-else-send]").click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
-  await put(false);
-  const card2 = page.locator('.job-card[data-job="k2"]');
-  await openCard(page);
-  await card2.waitFor({ timeout: 8000 });
-  await card2.getByRole("button", { name: "Later" }).click();
-  await card2.waitFor({ state: "detached", timeout: 8000 });
+  await p1.locator(".fp-mine").waitFor();
+  await p2.locator('.fp-bar [data-fy-act="later"]').click();
+  await p2.waitFor({ state: "detached", timeout: 8000 });
   assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });
 
@@ -346,8 +336,7 @@ test("related asks in one line of work share one card, and one answer handles th
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  await openCard(page);
-  const rel = page.locator('.job-card[data-job="h1"] .job-rel');
+  const rel = page.locator('#messages .fp[data-fy="h1"] .fp-rel');
   await rel.waitFor();
   assert.match(await rel.textContent(), /Same thread · News bench[\s\S]*Data for 欧阳/);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
@@ -373,61 +362,10 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  // Quiet until tapped: the box is closed and only says how many are unfinished.
-  assert.equal(await page.locator(".ln-box").getAttribute("open"), null);
-  assert.match(await page.locator(".ln-box summary").textContent(), /Unfinished & lines\s*2 unfinished · 1 working/);
-  await page.locator(".ln-box summary").click();
-  const items = page.locator(".ln-item");
-  assert.equal(await items.count(), 2, "every unfinished loop is listed");
-  assert.match(await items.first().textContent(), /On it/);
-  assert.match(await page.locator(".ln-row:not(.ln-item)").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done/);
-  // Tapping one starts a message about it.
+  // Who is on what lives on the Working tab of the same page.
+  await page.locator('#messages [data-fy-tab="work"]').click();
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done[\s\S]*On it/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
-  await items.first().click();
-  assert.match(await page.locator("#input").inputValue(), /^@foryou:w\d /);
-});
-
-test("card feed: one quiet line by default; tap for one row per card plus the unfinished list; tap a row for the full card; Back returns", async t => {
-  const dir = await folder(t);
-  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
-  writeFileSync(join(dir, "inbox.jsonl"), [item("m1", { title: "Reply to Lowes", at: "2026-10-01T00:00:00Z" }), item("m3", { title: "Book the room", at: "2026-10-02T00:00:00Z" }), item("m2", { line: "bench", status: "onit", session: "s1", title: "Backtest fixes" })].map(x => JSON.stringify(x)).join("\n") + "\n");
-  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
-  t.after(() => hub.close());
-  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
-  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
-  const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
-  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
-  await page.goto(`${base}/#token=${token}`);
-  const head = page.locator(".feed-head");
-  await head.waitFor();
-  assert.match(await head.textContent(), /2 cards\s*3 unfinished · 1 working/);
-  assert.ok((await head.boundingBox()).height <= 56, "one line");
-  for (const sel of [".job-card", ".feed-row", ".ln-box", ".ln-item"]) assert.equal(await page.locator(sel).count(), 0, sel);
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-closed.png") });
-  await head.click();
-  const rows = page.locator(".feed-row");
-  assert.equal(await rows.count(), 2);
-  assert.match(await rows.first().textContent(), /Reply to Lowes/);
-  for (const r of await rows.all()) assert.ok((await r.boundingBox()).height >= 44);
-  assert.equal(await page.locator(".feed .ln-item").count(), 1, "other unfinished loops under the rows; cards are not repeated");
-  assert.match(await page.locator(".feed .ln-item").textContent(), /Backtest fixes[\s\S]*On it/);
-  assert.match(await page.locator(".feed .ln-row:not(.ln-item)").textContent(), /News bench/);
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-list.png") });
-  await rows.nth(1).click();
-  const card = page.locator('.job-card[data-job="m3"]');
-  await card.waitFor();
-  for (const name of ["Later", "Done", "Not important", "Send"]) assert.equal(await card.getByRole("button", { name, exact: true }).count(), 1, name);
-  assert.equal(await card.locator("textarea").count(), 1, "free text stays");
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-card.png") });
-  await card.locator(".feed-back").click();
-  await rows.first().waitFor();
-  assert.equal(await page.locator(".job-card").count(), 0);
-  await rows.first().click();
-  await page.locator('.job-card[data-job="m1"]').getByRole("button", { name: "Later", exact: true }).click();
-  await page.locator(".feed-head").waitFor();
-  await page.waitForFunction(() => document.querySelector(".feed-head b")?.textContent === "1 card", null, { timeout: 8000 });
-  assert.equal(await page.locator(".job-card").count(), 0, "answering returns to the quiet line");
 });
 
 test("For you at work: one steady status line (doing · waiting on · cards); no tool rows, no lines box", async t => {
@@ -446,7 +384,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   const st = page.locator("#messages .fy-status");
   await st.waitFor();
   assert.match(await st.textContent(), /^Messaging a session… · 1 card waits$/);
-  for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing"]) assert.equal(await page.locator(sel).count(), 0, sel);
+  for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing", "#messages .job-card"]) assert.equal(await page.locator(sel).count(), 0, sel);
   assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
   await put([]);
   await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
@@ -455,7 +393,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
-test("feed: posts like a social For you timeline; Reply is a comment to For you; Working tab; compose opens the chat", async t => {
+test("feed in the For you chat: posts like a social timeline; Reply is a comment to For you; Working tab", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
   writeFileSync(join(dir, "inbox.jsonl"), [
@@ -472,11 +410,11 @@ test("feed: posts like a social For you timeline; Reply is a comment to For you;
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
-  const post = page.locator('.fp[data-fy="p1"]');
+  const post = page.locator('#messages .fp[data-fy="p1"]');
   await post.waitFor();
-  assert.equal(await page.locator("#forYouPage").isHidden(), false, "the bell opens the feed even when For you is live");
+  assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the bell opens the For you chat");
   assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
-  assert.equal(await page.locator(".fp").count(), 2, "one post per thing that needs brook");
+  assert.equal(await page.locator("#messages .fp").count(), 2, "one post per thing that needs brook");
   for (const b of await post.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
   // Reply = a comment: it goes to For you as brook's instruction, and shows under the post.
@@ -488,13 +426,10 @@ test("feed: posts like a social For you timeline; Reply is a comment to For you;
   await post.locator(".fp-mine").waitFor();
   assert.match(await post.locator(".fp-mine").textContent(), /You Say OK/);
   // Working tab: who is on what.
-  await page.locator('[data-fy-tab="work"]').click();
-  assert.match(await page.locator("#forYou").textContent(), /Lines of work[\s\S]*News bench[\s\S]*On it[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed/);
+  await page.locator('#messages [data-fy-tab="work"]').click();
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /Lines of work[\s\S]*News bench[\s\S]*On it[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") });
-  // The pen opens the conversation with For you.
-  await page.locator(".fp-compose").click();
-  await page.locator("#messages").getByText("hi", { exact: true }).waitFor();
-  assert.equal(await page.locator("#forYouPage").isHidden(), true);
+  assert.equal(await page.locator(".fp-compose:visible").count(), 0, "no pen: the composer below is the chat");
   assert.deepEqual(errors, []);
 });
 
