@@ -512,9 +512,14 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	const makeState = (result: ToolResultLike, previousId?: string, previousOutline?: string): CuaState => {
 		const id = stateIdOf(result) ?? previousId;
 		if (!id) throw new Error("Backend returned no stateId; the observation cannot be used.");
-		const full = textOf(result);
-		// After an act the model sees only what changed; the full outline stays for checks and look().
-		const text = previousOutline === undefined ? full : diffOutline(previousOutline, full, id);
+		const raw = textOf(result);
+		// The real backend already answers an act with its own delta ("Changes (N, a → b)"), not a
+		// full outline. Show that as-is; otherwise diff ourselves. Either way keep a merged outline
+		// (new lines first, then the previous ones) so look() and the irreversible/title guards still
+		// see refs and labels that did not change.
+		const backendDelta = previousOutline !== undefined && /^Changes \(\d+/m.test(raw);
+		const full = previousOutline === undefined ? raw : backendDelta ? `${raw}\n${previousOutline}` : raw;
+		const text = previousOutline === undefined || backendDelta ? raw : diffOutline(previousOutline, raw, id);
 		// Advanced by operations that bump the backend's epoch for this resource.
 		let current = id;
 
@@ -621,7 +626,9 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				// Prefer a real titled window: Finder lists its untitled desktop
 				// backdrop first, and observing that fails ("not owned by a running app").
 				const lines = roots.split("\n").filter((line) => /@r\d+/.test(line));
-				const pick = lines.find((line) => /\bwindow\b/.test(line) && !/\(untitled\)/.test(line)) ?? lines[0];
+				const titled = lines.filter((line) => /\bwindow\b/.test(line) && !/\(untitled\)/.test(line));
+				// The app's main window is the one in front; a titled window behind it captures cropped.
+				const pick = titled.find((line) => /\bmain\b/.test(line)) ?? titled[0] ?? lines[0];
 				const root = pick ? /@r\d+/.exec(pick)?.[0] : undefined;
 				if (!root) throw new Error(`No window found for ${target.app}. Is it open?`);
 				return cua.observe({ root, mode: target.mode });

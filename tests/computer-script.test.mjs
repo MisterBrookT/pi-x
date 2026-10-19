@@ -731,9 +731,28 @@ test("screen mode diffs OCR lines too", async () => {
 test("cua.look({ app }) skips an untitled backdrop root and observes the titled window", async () => {
 	const { runtime, calls } = runtimeFor({
 		operations: {
-			find: async () => ({ content: [{ type: "text", text: "Found 2\n- @r1 window Finder pid 1 — (untitled) (z 9)\n- @r2 window Finder pid 1 — Recents (z 0, main)" }] }),
+			find: async () => ({ content: [{ type: "text", text: "Found 2\n- @r1 window Finder pid 1 — (untitled) (z 9)\n- @r2 window Finder pid 1 — Recents (z 0, onscreen)\n- @r3 window Finder pid 1 — Downloads (z 5, main, onscreen)" }] }),
 		},
 	});
 	await runtime.cua.look({ app: "Finder" });
-	assert.equal(calls.find((c) => c.name === "observe").params.root, "@r2");
+	assert.equal(calls.find((c) => c.name === "observe").params.root, "@r3", "the main (front) titled window wins");
+});
+
+test("a backend that answers act with its own delta: shown as-is, and the guard still knows the Send button", async () => {
+	// Real shape from @injaneity/pi-computer-use on Finder: act returns a short "Changes (N, a → b)" block.
+	const before = '@e1 AXWindow "Mail"\n@e9 AXButton "Send"\n' + Array.from({ length: 50 }, (_, i) => `@e${i + 20} row "${i}"`).join("\n");
+	const delta = 'Executed 1 checked UI action.\n\nChanges (1, S1 → S2):\n~ @e20 row "renamed"';
+	const { runtime } = runtimeFor({
+		confirm: async () => true,
+		operations: {
+			observe: async () => ({ content: [{ type: "text", text: before }], details: { stateId: "S1" } }),
+			act: async () => ({ content: [{ type: "text", text: delta }], details: { stateId: "S2" } }),
+		},
+	});
+	const s = await runtime.cua.look();
+	const n = await s.act({ action: "setText", ref: "@e20", text: "renamed" });
+	assert.equal(n.text, delta);
+	assert.match(await n.look(), /@e9 AXButton "Send"/, "look() still has the unchanged controls");
+	await assert.rejects(() => n.act({ action: "press", ref: "@e9" }), /without a target/, "Send is still recognised");
+	await n.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "Mail" } });
 });
