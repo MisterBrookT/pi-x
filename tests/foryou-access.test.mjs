@@ -8,7 +8,7 @@ test("probe: hanging app data reads as sealed, with a reason that names the fix"
   assert.equal(await probeApp("wechat", { list: async () => "timeout" }), "sealed");
   assert.equal(await probeApp("other", { list: async () => assert.fail("not probed") }), "ok");
   assert.match(sealedReason("wechat", true), /WeChat.*locked/);
-  assert.match(sealedReason("dingtalk", false), /DingTalk.*Allow for "Pix Proactive"/);
+  assert.match(sealedReason("dingtalk", false), /DingTalk.*Full Disk Access.*"Pix Proactive"/);
 });
 
 test("reaper: keeps only the newest young wx daemon; never touches other processes", async () => {
