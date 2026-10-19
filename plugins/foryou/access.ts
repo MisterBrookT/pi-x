@@ -36,7 +36,8 @@ export function sealedReason(app: string, locked: boolean): string {
 	const name = app === "wechat" ? "WeChat" : app === "dingtalk" ? "DingTalk" : app;
 	return locked
 		? `${name} data is sealed while the Mac is locked; skipped this round`
-		: `${name} data is blocked (a macOS privacy prompt is waiting: click Allow for "Pix Proactive"); skipped this round`;
+		// "Allow" on the prompt lasts only until the checker restarts; Full Disk Access is the lasting fix.
+		: `${name} data is blocked: give "Pix Proactive" Full Disk Access (System Settings → Privacy & Security), once; "Allow" on the prompt only lasts until it restarts`;
 }
 
 /**
