@@ -214,7 +214,7 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
 
 const launch = async () => chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
 
-test("one page: the bell opens the For you chat; its posts sit in the conversation; the main move says where and runs there; brook can type to For you", async t => {
+test("For you is a feed of posts; the chat sits behind the Shiba button; the main move says where and runs there", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("j1", { title: "Send the data", action: "Package it", prepared: "Found tracks.json\nMinara has the snapshot\nline 3", choices: [{ label: "Ask Minara", run: "s1", prompt: "Package the newest data" }, { label: "Discuss", run: "discuss" }] })) + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
@@ -238,17 +238,24 @@ test("one page: the bell opens the For you chat; its posts sit in the conversati
   await post.waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the For you chat itself");
   assert.equal(await page.locator("#messages .job-card, #messages .feed-head, #messages .ln-box").count(), 0, "no second card UI");
-  assert.match(await page.locator("#messages").textContent(), /Morning\. Two things today\.[\s\S]*Send the data/, "the conversation, then the posts");
+  assert.doesNotMatch(await page.locator("#messages").textContent(), /Morning\. Two things today\./, "the feed shows posts, not the chat");
+  assert.equal(await page.locator("#input").isVisible(), false, "no composer on the feed");
   assert.match(await post.locator(".fp-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
   assert.match(await post.locator(".fp-go").textContent(), /Ask Minara[\s\S]*In minara · Package the newest data/);
   for (const b of await post.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(600); await page.screenshot({ path: process.env.PIX_SHOT }); }
-  // Chat stays available: the composer talks to For you.
+  // The dog opens the chat (the composer talks to For you); "Feed" goes back.
+  assert.equal(await page.getByRole("button", { name: "Talk to For you" }).boundingBox().then(b => b.height >= 40), true);
+  await page.getByRole("button", { name: "Talk to For you" }).click();
+  await page.getByText("Morning. Two things today.").waitFor();
+  assert.equal(await page.locator("#messages .fp").count(), 0, "chat sheet has no posts");
   assert.equal(await page.locator("#input").isVisible(), true);
   const toFy = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await page.locator("#input").fill("what's left today?");
   await page.locator("#send").click();
   assert.match((await toFy).prompts[0], /what's left today\?/);
+  await page.getByRole("button", { name: "Back to the feed" }).click();
+  await post.waitFor();
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await post.locator(".fp-go").click();
   await post.locator(".fp-where button", { hasText: "In minara" }).click();

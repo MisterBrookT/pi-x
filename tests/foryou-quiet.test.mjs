@@ -46,3 +46,10 @@ test("For you's prompt says in plain words how to see what other sessions are do
   assert.match(p, /\/api\/sessions\/<id>\?tail=20/);
   assert.match(p, /check the owner session/);
 });
+
+test("held batches and urgent lines fold into one quiet line too (phone showed the raw batch)", async () => {
+  const { heldPrompt, urgentLine } = await import("../plugins/core/foryou-queue.ts");
+  const batch = "[For you: new messages, 2026-10-19 11:49] ▸ marks what the filter thinks matters.\n\n### WeChat: 朱闽峰老师 (source key wechat:x)\nFilter: …";
+  assert.equal(quietSummary(heldPrompt([{ at: "2026-10-19T11:49:00Z", text: batch }])), "Held while you talked · 1 batch · WeChat: 朱闽峰老师");
+  assert.equal(quietSummary(urgentLine("WeChat 李老师", "needs receipt today")), "Urgent · WeChat 李老师");
+});

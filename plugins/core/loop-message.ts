@@ -25,9 +25,14 @@ export const loopMessage = (text: string) => {
  * line on screen; the model still gets the full text, and Details shows it. brook's own prose never matches.
  */
 export function quietSummary(text: string): string | undefined {
-	const fy = text.match(/^\[For you: (new messages|hourly review)[^\]]*\]/);
+	const fy = text.match(/^\[For you: (new messages|hourly review|held|urgent)[^\]]*\]/);
 	if (fy) {
 		if (fy[1] === "hourly review") return "Hourly review of open cards";
+		if (fy[1] === "urgent") return `Urgent · ${text.replace(/^\[For you: urgent, ([^\]]*)\].*$/s, "$1")}`;
+		if (fy[1] === "held") {
+			const n = (text.match(/^\[For you: new messages/gm) ?? []).length, src = [...new Set([...text.matchAll(/^### (.+?)(?: \(|$)/gm)].map(m => m[1]))];
+			return `Held while you talked · ${n} batch${n === 1 ? "" : "es"}${src.length ? ` · ${src.slice(0, 3).join(", ")}${src.length > 3 ? ` +${src.length - 3}` : ""}` : ""}`;
+		}
 		const n = (text.match(/^\s*▸/gm) ?? []).length, src = [...new Set([...text.matchAll(/^### (.+?)(?: \(|$)/gm)].map(m => m[1]))];
 		return `New messages${src.length ? ` · ${src.slice(0, 3).join(", ")}${src.length > 3 ? ` +${src.length - 3}` : ""}` : ""}${n ? ` · ${n} marked` : ""}`;
 	}
