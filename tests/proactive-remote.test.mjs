@@ -20,6 +20,9 @@ async function folder(t) {
   return dir;
 }
 
+// The card feed: one quiet line; tap it for the rows, tap a row for the full card.
+const openCard = async (page, i = 0) => { const head = page.locator(".feed-head"); await head.waitFor({ timeout: 8000 }); if (await head.getAttribute("aria-expanded") !== "true") await head.click(); await page.locator(".feed-row").nth(i).click(); };
+
 test("store: ✕ and the main button both leave needs-you; a loop without a project goes to the coordinator", async t => {
   const dir = await folder(t);
   const project = join(dir, "proj"); mkdirSync(project);
@@ -228,6 +231,7 @@ test("one place: the bell opens the For you chat; its card is open, shows source
   assert.equal(await page.locator("#forYouCount").textContent(), "1");
   assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
   await page.locator("#forYouRow").click();
+  await openCard(page);
   const card = page.locator('#messages .job-card[data-job="j1"]');
   await card.waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "the bell/row opens the chat, not a separate page");
@@ -259,10 +263,13 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const card = page.locator('.job-card[data-job="k1"]');
+  await openCard(page);
   await card.waitFor();
-  await card.getByRole("button", { name: "Next card" }).click();
+  await card.locator(".feed-back").click();
+  await openCard(page, 1);
   await page.locator('.job-card[data-job="k2"]').waitFor();
-  await page.getByRole("button", { name: "Previous card" }).click();
+  await page.locator(".feed-back").click();
+  await openCard(page, 0);
   await card.waitFor();
   // Never interrupt: while For you works, the card steps back to one quiet line; it returns when the turn ends.
   await put(true);
@@ -270,6 +277,7 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   assert.match(await page.locator(".fy-status").textContent(), /Thinking… · 2 cards wait/);
   assert.equal(await card.count(), 0);
   await put(false);
+  await openCard(page);
   await card.waitFor({ timeout: 8000 });
   await card.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
@@ -277,6 +285,7 @@ test("in-chat card: Something else sends brook's words; Later parks it; ‹ › 
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
   await put(false);
   const card2 = page.locator('.job-card[data-job="k2"]');
+  await openCard(page);
   await card2.waitFor({ timeout: 8000 });
   await card2.getByRole("button", { name: "Later" }).click();
   await card2.waitFor({ state: "detached", timeout: 8000 });
@@ -331,6 +340,7 @@ test("related asks in one line of work share one card, and one answer handles th
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
+  await openCard(page);
   const rel = page.locator('.job-card[data-job="h1"] .job-rel');
   await rel.waitFor();
   assert.match(await rel.textContent(), /Same thread · News bench[\s\S]*Data for 欧阳/);
@@ -371,10 +381,10 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   assert.match(await page.locator("#input").inputValue(), /^@foryou:w\d /);
 });
 
-test("one element: the top card carries the unfinished header and expands the list inline; the card's actions stay", async t => {
+test("card feed: one quiet line by default; tap for one row per card plus the unfinished list; tap a row for the full card; Back returns", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
-  writeFileSync(join(dir, "inbox.jsonl"), [item("m1", { title: "Reply to Lowes" }), item("m2", { line: "bench", status: "onit", session: "s1", title: "Backtest fixes" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  writeFileSync(join(dir, "inbox.jsonl"), [item("m1", { title: "Reply to Lowes", at: "2026-10-01T00:00:00Z" }), item("m3", { title: "Book the room", at: "2026-10-02T00:00:00Z" }), item("m2", { line: "bench", status: "onit", session: "s1", title: "Backtest fixes" })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
@@ -383,20 +393,35 @@ test("one element: the top card carries the unfinished header and expands the li
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const card = page.locator('.job-card[data-job="m1"]');
-  await card.waitFor();
-  assert.equal(await page.locator(".ln-box").count(), 0, "no separate box");
-  const head = card.locator(".job-un summary");
-  assert.match(await head.textContent(), /2 unfinished · 1 working/);
-  assert.ok((await head.boundingBox()).height >= 40);
-  assert.equal(await card.locator(".ln-item").first().isVisible(), false, "closed until tapped");
-  if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-closed.png") }); }
+  const head = page.locator(".feed-head");
+  await head.waitFor();
+  assert.match(await head.textContent(), /2 cards\s*3 unfinished · 1 working/);
+  assert.ok((await head.boundingBox()).height <= 56, "one line");
+  for (const sel of [".job-card", ".feed-row", ".ln-box", ".ln-item"]) assert.equal(await page.locator(sel).count(), 0, sel);
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-closed.png") });
   await head.click();
-  assert.equal(await card.locator(".ln-item").count(), 2);
-  assert.match(await card.locator(".ln-row:not(.ln-item)").textContent(), /News bench/);
+  const rows = page.locator(".feed-row");
+  assert.equal(await rows.count(), 2);
+  assert.match(await rows.first().textContent(), /Reply to Lowes/);
+  for (const r of await rows.all()) assert.ok((await r.boundingBox()).height >= 44);
+  assert.equal(await page.locator(".feed .ln-item").count(), 1, "other unfinished loops under the rows; cards are not repeated");
+  assert.match(await page.locator(".feed .ln-item").textContent(), /Backtest fixes[\s\S]*On it/);
+  assert.match(await page.locator(".feed .ln-row:not(.ln-item)").textContent(), /News bench/);
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-list.png") });
+  await rows.nth(1).click();
+  const card = page.locator('.job-card[data-job="m3"]');
+  await card.waitFor();
   for (const name of ["Later", "Done", "Not important", "Send"]) assert.equal(await card.getByRole("button", { name, exact: true }).count(), 1, name);
   assert.equal(await card.locator("textarea").count(), 1, "free text stays");
-  if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT, fullPage: true }); }
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-card.png") });
+  await card.locator(".feed-back").click();
+  await rows.first().waitFor();
+  assert.equal(await page.locator(".job-card").count(), 0);
+  await rows.first().click();
+  await page.locator('.job-card[data-job="m1"]').getByRole("button", { name: "Later", exact: true }).click();
+  await page.locator(".feed-head").waitFor();
+  await page.waitForFunction(() => document.querySelector(".feed-head b")?.textContent === "1 card", null, { timeout: 8000 });
+  assert.equal(await page.locator(".job-card").count(), 0, "answering returns to the quiet line");
 });
 
 test("For you at work: one steady status line (doing · waiting on · cards); no tool rows, no lines box", async t => {
