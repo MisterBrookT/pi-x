@@ -5,6 +5,7 @@
  *   node wechat.ts find "<chat>"              exact contact/group match? opens nothing
  *   node wechat.ts prepare "<chat>" "<text>"  open the exact chat, check title, paste; does NOT send
  *   node wechat.ts send                       check title again, then Enter (brook confirmed already)
+ *   node wechat.ts sendnow "<chat>" "<text>"  all in one (brook confirmed): open, type, check title + box, Enter, read back
  *   node wechat.ts cancel                     clear the draft
  *
  * Exit: 0 ok, 2 blocked (locked / no window), 3 refused (no exact match / wrong chat).
@@ -14,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TargetMismatchError, createCuaRuntime, type ComputerOperations, type CuaApi } from "./computer-script.ts";
-import { type ScreenOperations, macScreenOperations, normalizeName, pickExactResult, titleMatches } from "./computer-screen.ts";
+import { type ScreenOperations, draftVisible, macScreenOperations, nearMisses, normalizeName, pickExactResult, titleMatches } from "./computer-screen.ts";
 
 const APP = "WeChat";
 const STATE = join(process.env.TMPDIR ?? tmpdir(), "wechat-send");
@@ -40,13 +41,21 @@ const open = async (cua: CuaApi, screen: ScreenOperations, chat: string, findOnl
 	s = await s.act({ action: "typeText", text: chat });
 	await screen.sleep?.(1200);
 	s = await cua.observe({ app: APP, mode: "screen" });
-	const hit = pickExactResult(await screen.capture(APP), chat);
+	let results = await screen.capture(APP);
+	let hit = pickExactResult(results, chat);
+	// Search results can lag behind the first capture; look once more before refusing.
 	if (!hit) {
-		await screen.keys(["escape"]);
-		throw new Refused(`no contact or group reads exactly '${chat}'. Nothing opened, nothing sent.`);
+		await screen.sleep?.(1200);
+		results = await screen.capture(APP);
+		hit = pickExactResult(results, chat);
+	}
+	if (!hit) {
+		await screen.keys(["escape"], APP);
+		const near = nearMisses(results, chat).filter((t) => !/^(search|most used|group chats|contacts|chat history)/i.test(t));
+		throw new Refused(`no contact or group reads exactly '${chat}'.${near.length ? ` Close matches: ${near.map((n) => `'${n}'`).join(", ")}.` : ""} Nothing opened, nothing sent.`);
 	}
 	if (findOnly) {
-		await screen.keys(["escape"]);
+		await screen.keys(["escape"], APP);
 		return s;
 	}
 	const ref = s.text.split("\n").find((row) => row.includes(JSON.stringify(hit.text)) && row.includes(`(${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)})`))?.split(" ")[0];
@@ -57,14 +66,14 @@ const open = async (cua: CuaApi, screen: ScreenOperations, chat: string, findOnl
 };
 
 const clearDraft = async (screen: ScreenOperations) => {
-	await screen.keys(["cmd", "a"]);
-	await screen.keys(["backspace"]);
+	await screen.keys(["cmd", "a"], APP);
+	await screen.keys(["backspace"], APP);
 };
 
 export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (line: string) => void): Promise<number> => {
 	const [mode, rawChat, text] = argv;
 	// The CLI is the confirmation: brook approved recipient + text before `send`.
-	const { cua } = createCuaRuntime({ operations: noBackend, screen, confirm: async () => mode === "send" });
+	const { cua } = createCuaRuntime({ operations: noBackend, screen, confirm: async () => mode === "send" || mode === "sendnow" });
 	mkdirSync(STATE, { recursive: true });
 	try {
 		if (mode === "find") {
@@ -84,13 +93,38 @@ export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (
 			out("Confirm recipient + exact text with brook, then: send");
 			return 0;
 		}
+		// One call, focus held once: open → type → check title + input box → Enter → read back.
+		// Only for a recipient and text brook has already confirmed.
+		if (mode === "sendnow") {
+			const chat = normalizeName(rawChat ?? "");
+			if (!chat || !text) throw new Error("usage: sendnow <chat> <text>");
+			const msg = signed(text);
+			let s = await open(cua, screen, chat);
+			await clearDraft(screen);
+			s = await s.act(
+				[{ action: "typeText", text: msg }, { action: "keypress", keys: ["Enter"] }],
+				undefined,
+				{ target: { title: chat } },
+			);
+			await screen.activate(APP);
+			await screen.sleep?.(800);
+			const after = await screen.capture(APP);
+			const sent = titleMatches(after, chat) && !draftVisible(after, msg) && after.lines.some((l) => l.y < after.window.h * 0.75 && l.text.replace(/\s+/g, "").includes(msg.split("\n")[0].replace(/\s+/g, "").slice(0, 12)));
+			out(sent ? `[SENT] '${chat}': read back in the chat, input box empty.` : `[SENT?] Enter pressed in '${chat}', but the read-back did not find the message. Check WeChat.`);
+			return sent ? 0 : 4;
+		}
 		if (mode === "send") {
 			if (!existsSync(PENDING)) {
 				out("[BLOCKED] nothing prepared");
 				return 2;
 			}
 			const chat = readFileSync(PENDING, "utf8").split("\n")[0];
+			const msg = readFileSync(PENDING, "utf8").split("\n").slice(1).join("\n");
 			const s = await cua.observe({ app: APP, mode: "screen" });
+			if (msg && !draftVisible(await screen.capture(APP), msg)) {
+				await clearDraft(screen);
+				throw new TargetMismatchError(`the input box no longer shows the prepared text. Draft cleared, nothing sent.`);
+			}
 			try {
 				await s.act({ action: "keypress", keys: ["Enter"] }, undefined, { target: { title: chat } });
 			} catch (error) {

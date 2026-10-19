@@ -11,6 +11,10 @@
 
 import {
 	COMMIT_KEYS,
+	HEADER_BAND,
+	draftVisible,
+	firstLine,
+	nearMisses,
 	type ScreenCapture,
 	type ScreenOperations,
 	lineForRef,
@@ -430,42 +434,54 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 					throw new BudgetExceededError(`Script exceeded ${budget.maxActions} UI actions. Report progress instead of continuing to act.`);
 				}
 				const summary = `${capture.app}: ${summarizeActions(list)}`;
-				const risky = list.some(
-					(a) =>
-						(a.action === "keypress" && (a.keys ?? []).some((k) => COMMIT_KEYS.test(k)) && !(a.keys ?? []).some((k) => /^(cmd|command|ctrl|control|alt|option)$/i.test(k))) ||
-						((a.action === "click" || a.action === "press") && a.ref !== undefined && IRREVERSIBLE.test(lineForRef(capture, a.ref)?.text ?? "")),
-				);
+				const isRisky = (a: UiAction) =>
+					(a.action === "keypress" && (a.keys ?? []).some((k) => COMMIT_KEYS.test(k)) && !(a.keys ?? []).some((k) => /^(cmd|command|ctrl|control|alt|option)$/i.test(k))) ||
+					((a.action === "click" || a.action === "press") && a.ref !== undefined && IRREVERSIBLE.test(lineForRef(capture, a.ref)?.text ?? ""));
+				const risky = list.some(isRisky);
+				// Missing target and the user's OK are settled before anything moves; the title and draft are
+				// checked again right before the irreversible step, after the earlier steps in this same call.
 				if (risky) {
-					await checkTarget(actOptions?.target, summary, async (target) => {
-						if (target.url !== undefined) return "a screen-mode app has no URL; aim it with target.title";
-						await screen.activate(capture.app);
-						const now = await recapture("target check");
-						return target.title !== undefined && !titleMatches(now, target.title)
-							? `the open title is ${JSON.stringify(now.lines.find((l) => l.y < 50 && l.x > now.window.w * 0.2)?.text ?? "")}, not ${JSON.stringify(normalizeName(target.title))}`
-							: undefined;
-					});
+					await checkTarget(actOptions?.target, summary, async () => undefined);
 					await gate(summary);
 				}
 				spend("screen_act", summary);
 				actions += mutations;
 				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
+				// Clicks and captures need the window in front; keys and paste go to the app's process.
+				const app = screen.background ? capture.app : undefined;
 				await screen.activate(capture.app);
+				let typed = "";
+				let current = capture;
 				for (const action of list) {
+					if (isRisky(action)) {
+						await screen.activate(capture.app);
+						current = await recapture("target check");
+						const want = normalizeName(actOptions?.target?.title ?? "");
+						if (actOptions?.target?.url !== undefined) throw new TargetMismatchError(`Refused: a screen-mode app has no URL; aim it with target.title. Nothing sent: ${summary}`);
+						if (!titleMatches(current, want)) {
+							const open = current.lines.find((l) => l.y < HEADER_BAND && l.x > current.window.w * 0.2)?.text ?? "";
+							if (typed) await clearDraft(screen, app);
+							throw new TargetMismatchError(`Refused: the open title is ${JSON.stringify(open)}, not ${JSON.stringify(want)}${hint(nearMisses(current, want))}. ${typed ? "Draft cleared. " : ""}Nothing sent: ${summary}`);
+						}
+						if (typed && !draftVisible(current, typed)) {
+							await clearDraft(screen, app);
+							throw new TargetMismatchError(`Refused: the input box does not show the typed text ${JSON.stringify(firstLine(typed))}. Draft cleared, nothing sent: ${summary}`);
+						}
+					}
 					if (action.action === "click" || action.action === "press") {
-						const point = pointFor(capture, action);
+						const point = pointFor(current, action);
+						await screen.activate(capture.app);
 						await screen.click(point.x, point.y);
 					} else if (action.action === "keypress") {
-						await screen.keys(action.keys ?? []);
+						await screen.keys(action.keys ?? [], app);
 					} else if (action.action === "typeText" || action.action === "setText") {
 						if (action.ref || action.x !== undefined) {
-							const point = pointFor(capture, action);
+							const point = pointFor(current, action);
 							await screen.click(point.x, point.y);
 						}
-						if (action.action === "setText") {
-							await screen.keys(["cmd", "a"]);
-							await screen.keys(["backspace"]);
-						}
-						await screen.paste(action.text ?? "");
+						if (action.action === "setText") await clearDraft(screen, app);
+						await screen.paste(action.text ?? "", app);
+						typed = action.text ?? "";
 					} else {
 						throw new Error(`${action.action} is not available in screen mode.`);
 					}
@@ -748,6 +764,12 @@ export const diffOutline = (before: string, after: string, id = "", ratio = DIFF
 	if (out.length > Math.max(3, b.length * ratio)) return after;
 	return [`Changes${id ? ` in ${id}` : ""} (${out.length} of ${b.length} lines; look() for the full outline):`, ...out].join("\n");
 };
+
+const clearDraft = async (screen: ScreenOperations, app?: string) => {
+	await screen.keys(["cmd", "a"], app);
+	await screen.keys(["backspace"], app);
+};
+const hint = (near: string[]) => (near.length ? `; close matches: ${near.map((n) => JSON.stringify(n)).join(", ")}` : "");
 
 /** Run the target check for an irreversible action, or refuse when it has none. */
 const checkTarget = async (

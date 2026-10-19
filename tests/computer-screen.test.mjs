@@ -158,9 +158,10 @@ test("WeChat search: only an exact Contacts/Group/Most-used row is picked, never
 });
 
 /** A fuller fake WeChat for the CLI: cmd+f opens search; typing filters; clicking a row opens it. */
-const fakeWeChatApp = ({ opensAs } = {}) => {
+const fakeWeChatApp = ({ opensAs, flipAfterPaste, dropDraft } = {}) => {
 	const log = [];
 	let title = "brookkk", searching = false, query = "", draft = "";
+	const sentLines = [];
 	const rows = () => !searching ? [] : [
 		line("Most used", 40, 60), line("brookkk", 120, 90),
 		line("Group Chats", 40, 130), line("VAG 报销小分队", 120, 160),
@@ -168,19 +169,22 @@ const fakeWeChatApp = ({ opensAs } = {}) => {
 	].filter((l) => l.x === 40 || l.text.includes(query) || query.includes("报销") && l.text.includes("报销"));
 	const screen = {
 		activate: async () => {},
-		capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [line(title, 300, 20), ...rows(), ...(draft ? [line(draft.split("\n")[0], 300, 700)] : [])] }),
+		capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [line(title, 300, 20), ...rows(), ...sentLines.map((t, i) => line(t, 500, 400 + i * 30)), ...(draft ? [line(draft.split("\n")[0], 300, 700)] : [])] }),
 		click: async (x, y) => {
 			const hit = rows().find((r) => r.x !== 40 && Math.abs(r.x + r.w / 2 - x) < 2 && Math.abs(r.y + r.h / 2 - y) < 2);
 			if (hit) { title = opensAs?.(hit.text) ?? hit.text; searching = false; log.push(`open ${hit.text}`); }
+			if (draft === "" && y > 600) log.push("click box");
 		},
-		keys: async (k) => {
+		keys: async (k, app) => {
 			const c = k.join("+");
+			log.push(`key ${c}${app ? ` →${app}` : ""}`);
 			if (c === "cmd+f") { searching = true; query = ""; }
 			else if (c === "escape") searching = false;
 			else if (c === "backspace") draft = "";
-			else if (c === "Enter" && draft) { log.push(`SENT ${title}: ${draft}`); draft = ""; }
+			else if (c === "Enter" && draft) { log.push(`SENT ${title}: ${draft}`); sentLines.push(draft.split("\n")[0]); draft = ""; }
 		},
-		paste: async (t) => { if (searching) query = t; else draft = t; },
+		paste: async (t, app) => { log.push(`paste${app ? ` →${app}` : ""}`); if (searching) query = t; else draft = dropDraft?.() ? "" : t; if (flipAfterPaste && !searching) title = flipAfterPaste; },
+		background: true,
 	};
 	return { screen, log };
 };
@@ -190,9 +194,9 @@ test("wechat CLI: prepare opens the exact private chat (not the group), send re-
 	const { screen, log } = fakeWeChatApp();
 	const out = [];
 	assert.equal(await runWeChat(["prepare", "浙大 李老师 报销\r", "已提交"], screen, (l) => out.push(l)), 0, out.join("\n"));
-	assert.deepEqual(log, ["open 浙大 李老师 报销"]);
+	assert.deepEqual(log.filter((l) => /^(open|SENT)/.test(l)), ["open 浙大 李老师 报销"]);
 	assert.equal(await runWeChat(["send"], screen, (l) => out.push(l)), 0, out.join("\n"));
-	assert.equal(log[1], "SENT 浙大 李老师 报销: 已提交\n\n这条消息来自 brook 的 agent。");
+	assert.equal(log.find((l) => l.startsWith("SENT")), "SENT 浙大 李老师 报销: 已提交\n\n这条消息来自 brook 的 agent。");
 });
 
 test("wechat CLI: if the click lands in another chat, prepare refuses and nothing is sent", async () => {
@@ -210,5 +214,53 @@ test("wechat CLI: no exact match refuses without opening anything", async () => 
 	const { screen, log } = fakeWeChatApp();
 	const out = [];
 	assert.equal(await runWeChat(["prepare", "File Transfer", "hi"], screen, (l) => out.push(l)), 3);
-	assert.equal(log.length, 0);
+	assert.equal(log.filter((l) => /^(open|SENT|paste →WeChat$)/.test(l) && !l.startsWith("paste")).length, 0);
+});
+
+test("sendnow: one call opens, types, checks title + box, sends, and reads back; keys go to WeChat in the background", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const { screen, log } = fakeWeChatApp();
+	const out = [];
+	assert.equal(await runWeChat(["sendnow", "brookkk", "hello"], screen, (l) => out.push(l)), 0, out.join("\n"));
+	assert.match(out.join("\n"), /^\[SENT\] 'brookkk': read back/);
+	assert.deepEqual(log.filter((l) => l.startsWith("SENT")), ["SENT brookkk: hello\n\nSent by brook's agent."]);
+	assert.ok(log.includes("key Enter →WeChat"), "keys are posted to the app's process");
+	assert.ok(log.includes("paste →WeChat"));
+});
+
+test("sendnow refuses when the chat changes between typing and Enter, and clears the draft", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const { screen, log } = fakeWeChatApp({ flipAfterPaste: "VAG 报销小分队(73)" });
+	const out = [];
+	assert.equal(await runWeChat(["sendnow", "浙大 李老师 报销", "hi"], screen, (l) => out.push(l)), 3, out.join("\n"));
+	assert.match(out.join("\n"), /not "浙大 李老师 报销".*Draft cleared/);
+	assert.ok(!log.some((l) => l.startsWith("SENT")));
+	assert.ok(log.includes("key backspace →WeChat"));
+});
+
+test("sendnow refuses when the input box does not show what was typed", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const { screen, log } = fakeWeChatApp({ dropDraft: () => true });
+	const out = [];
+	assert.equal(await runWeChat(["sendnow", "brookkk", "hello"], screen, (l) => out.push(l)), 3);
+	assert.match(out.join("\n"), /input box does not show/);
+	assert.ok(!log.some((l) => l.startsWith("SENT")));
+});
+
+test("no exact match suggests close names", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const { screen } = fakeWeChatApp();
+	const out = [];
+	assert.equal(await runWeChat(["prepare", "浙大 李老师", "hi"], screen, (l) => out.push(l)), 3);
+	assert.match(out.join("\n"), /Close matches: '浙大 李老师 报销'/);
+	const { nearMisses } = await import("../plugins/computer/computer-screen.ts");
+	const cap = { app: "x", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [line("brookk", 0, 0), line("Search", 0, 0), line("brookkk 2", 0, 0)] };
+	assert.deepEqual(nearMisses(cap, "brookkk").slice(0, 2).sort(), ["brookk", "brookkk 2"]);
+});
+
+test("key chords map to background key codes", async () => {
+	const { keyArgs } = await import("../plugins/computer/computer-screen.ts");
+	assert.deepEqual(keyArgs(["cmd", "v"]), ["code", "9", "cmd"]);
+	assert.deepEqual(keyArgs(["Enter"]), ["code", "36"]);
+	assert.deepEqual(keyArgs(["command", "shift", "a"]), ["code", "0", "cmd", "shift"]);
 });

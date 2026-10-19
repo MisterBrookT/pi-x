@@ -39,10 +39,12 @@ export interface ScreenOperations {
 	capture(app: string): Promise<ScreenCapture>;
 	/** Absolute screen points. */
 	click(x: number, y: number): Promise<void>;
-	/** One chord, e.g. ["cmd", "f"] or ["Enter"]. */
-	keys(keys: string[]): Promise<void>;
-	/** Type text through the clipboard (restored afterwards). Works for any script, incl. CJK. */
-	paste(text: string): Promise<void>;
+	/** One chord, e.g. ["cmd", "f"] or ["Enter"]. Sent to the app's process, so it need not be in front. */
+	keys(keys: string[], app?: string): Promise<void>;
+	/** Type text through the clipboard (every type saved and restored). Works for any script, incl. CJK. */
+	paste(text: string, app?: string): Promise<void>;
+	/** True when keys and paste reach `app` in the background, so only clicks and captures need it in front. */
+	background?: boolean;
 	sleep?(ms: number): Promise<void>;
 }
 
@@ -116,7 +118,7 @@ const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "native");
 const CACHE = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "pix-computer");
 
 /** Build a small Swift helper once (rebuilt when its source changes). */
-const helper = async (name: "ocr" | "click"): Promise<string> => {
+const helper = async (name: "ocr" | "click" | "keys" | "clip"): Promise<string> => {
 	const src = join(NATIVE, `${name}.swift`);
 	const bin = join(CACHE, name);
 	if (!existsSync(bin) || statSync(src).mtimeMs > statSync(bin).mtimeMs) {
@@ -128,6 +130,20 @@ const helper = async (name: "ocr" | "click"): Promise<string> => {
 
 const KEY_CODES: Record<string, number> = { enter: 36, return: 36, escape: 53, esc: 53, backspace: 51, delete: 51, tab: 48, space: 49, up: 126, down: 125, left: 123, right: 124 };
 const MODIFIERS: Record<string, string> = { cmd: "command down", command: "command down", shift: "shift down", alt: "option down", option: "option down", ctrl: "control down", control: "control down" };
+
+/** One chord as `keys <pid> code …` arguments, for posting to a process in the background. */
+export const keyArgs = (keys: string[]): string[] => {
+	const mods = keys.map((k) => k.toLowerCase()).filter((k) => MODIFIERS[k]).map((k) => ({ command: "cmd", option: "alt", control: "ctrl" })[k] ?? k);
+	const main = keys.filter((k) => !MODIFIERS[k.toLowerCase()]);
+	if (main.length !== 1) throw new Error(`A key chord needs exactly one non-modifier key: ${keys.join("+")}`);
+	const key = main[0].toLowerCase();
+	const code = KEY_CODES[key] ?? LETTER_CODES[key];
+	if (code === undefined) throw new Error(`No key code for ${main[0]}`);
+	return ["code", String(code), ...mods];
+};
+
+/** US-layout virtual key codes for letters and digits used in chords (cmd+a, cmd+v, cmd+f …). */
+const LETTER_CODES: Record<string, number> = { a: 0, s: 1, d: 2, f: 3, h: 4, g: 5, z: 6, x: 7, c: 8, v: 9, b: 11, q: 12, w: 13, e: 14, r: 15, y: 16, t: 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "9": 25, "7": 26, "8": 28, "0": 29, o: 31, u: 32, i: 34, p: 35, l: 37, j: 38, k: 40, n: 45, m: 46 };
 
 /** One chord as an AppleScript System Events line. */
 export const keystrokeScript = (keys: string[]): string => {
@@ -147,7 +163,22 @@ const pngWidth = (path: string): number => readFileSync(path).readUInt32BE(16);
 export const macScreenOperations = (): ScreenOperations => {
 	const dir = mkdtempSync(join(tmpdir(), "pix-screen-"));
 	let shots = 0;
+	const pids = new Map<string, string>();
+	const pidOf = async (app: string) => {
+		const known = pids.get(app);
+		if (known) return known;
+		const pid = (await osa(`tell application "System Events" to get unix id of first process whose name is ${JSON.stringify(app)}`)).trim();
+		if (!/^\d+$/.test(pid)) throw new Error(`${app} is not running.`);
+		pids.set(app, pid);
+		return pid;
+	};
+	/** Keys go to the app's process (works while it is behind; verified with WeChat 4.x), else the front app. */
+	const chord = async (keys: string[], app?: string) => {
+		if (app) await run(await helper("keys"), [await pidOf(app), ...keyArgs(keys)]);
+		else await osa(keystrokeScript(keys));
+	};
 	return {
+		background: true,
 		async activate(app) {
 			const click = await helper("click");
 			const locked = await run(click, ["locked"]).then(() => true, () => false);
@@ -181,15 +212,21 @@ export const macScreenOperations = (): ScreenOperations => {
 			// System Events "click at" is refused by some apps (WeChat: -25208); post a real HID click.
 			await run(await helper("click"), [String(Math.round(x)), String(Math.round(y))]);
 		},
-		async keys(keys) {
-			await osa(keystrokeScript(keys));
+		async keys(keys, app) {
+			await chord(keys, app);
 		},
-		async paste(text) {
-			const old = await run("pbpaste", []).catch(() => "");
-			await run("pbcopy", [], text);
-			await osa(keystrokeScript(["cmd", "v"]));
-			await new Promise((r) => setTimeout(r, 400));
-			await run("pbcopy", [], old);
+		async paste(text, app) {
+			// Save every pasteboard item and type (images, files, rich text), not just plain text.
+			const clip = await helper("clip");
+			const saved = join(dir, `clip-${Date.now()}.plist`);
+			const kept = await run(clip, ["save", saved]).then(() => true, () => false);
+			try {
+				await run("pbcopy", [], text);
+				await chord(["cmd", "v"], app);
+				await new Promise((r) => setTimeout(r, 400));
+			} finally {
+				if (kept) await run(clip, ["restore", saved]).catch(() => {});
+			}
 		},
 		sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
 	};
@@ -215,4 +252,33 @@ export const pickExactResult = (capture: ScreenCapture, name: string): ScreenLin
 	return capture.lines
 		.filter((l) => normalizeName(l.text) === want && l.x < capture.window.w * 0.45 && l.y > 30 && RESULT_SECTIONS.has(section(l)))
 		.sort((a, b) => a.y - b.y)[0];
+};
+
+/**
+ * OCR lines that nearly match `name`, best first: one contains the other, or they share most characters.
+ * Shown when an exact match fails, so the caller can correct a name instead of guessing.
+ */
+export const nearMisses = (capture: ScreenCapture, name: string, limit = 3): string[] => {
+	const want = normalizeName(name);
+	const chars = new Set([...want.replace(/\s+/g, "")]);
+	if (!chars.size) return [];
+	const scored = new Map<string, number>();
+	for (const line of capture.lines) {
+		const text = normalizeName(line.text);
+		if (!text || text === want || text.length > want.length * 3 + 8) continue;
+		const own = new Set([...text.replace(/\s+/g, "")]);
+		const shared = [...chars].filter((c) => own.has(c)).length;
+		const score = text.includes(want) || want.includes(text) ? 1 + shared / chars.size : shared / Math.max(chars.size, own.size);
+		if (score >= 0.5) scored.set(text, Math.max(scored.get(text) ?? 0, score));
+	}
+	return [...scored].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([t]) => t);
+};
+
+export const firstLine = (text: string) => normalizeName(text.split("\n").find((l) => l.trim()) ?? "");
+/** The typed text's first line is on screen in the lower (input) part of the window. */
+export const draftVisible = (capture: ScreenCapture, text: string): boolean => {
+	const want = firstLine(text).replace(/\s+/g, "");
+	if (!want) return true;
+	const probe = want.slice(0, 12);
+	return capture.lines.some((l) => l.y > capture.window.h * 0.75 && l.text.replace(/\s+/g, "").includes(probe));
 };
