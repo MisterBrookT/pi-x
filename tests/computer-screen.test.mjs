@@ -264,3 +264,14 @@ test("key chords map to background key codes", async () => {
 	assert.deepEqual(keyArgs(["Enter"]), ["code", "36"]);
 	assert.deepEqual(keyArgs(["command", "shift", "a"]), ["code", "0", "cmd", "shift"]);
 });
+
+test("cua.recipe runs saved recipes inside the same runner; unknown names list what exists", async () => {
+	const { createCuaRuntime } = await import("../plugins/computer/computer-script.ts");
+	const { screen, log } = fakeWeChatApp();
+	const declined = createCuaRuntime({ operations: {}, screen, confirm: async () => false });
+	await assert.rejects(declined.cua.recipe("wechat-send", { to: "brookkk", text: "hi" }), /declined/i, "the irreversible-act confirm still applies");
+	assert.ok(!log.some((l) => l.startsWith("SENT")));
+	const ok = createCuaRuntime({ operations: {}, screen, confirm: async () => true });
+	assert.deepEqual(await ok.cua.recipe("wechat-send", { to: "brookkk", text: "hi" }), { sent: true, readBack: true, chat: "brookkk" });
+	await assert.rejects(ok.cua.recipe("nope"), /No recipe "nope"[\s\S]*wechat-send/);
+});

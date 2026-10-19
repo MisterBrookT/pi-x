@@ -291,6 +291,8 @@ export interface CuaApi {
 	 * for a fresh observation.
 	 */
 	state(stateId: string): Promise<CuaState>;
+	/** Run a saved, tested script from plugins/computer/recipes, e.g. cua.recipe("wechat-send", {to, text}). Same guard, budget and confirm. */
+	recipe(name: string, args?: Record<string, unknown>): Promise<unknown>;
 }
 
 export interface CuaRuntime {
@@ -633,6 +635,13 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 	};
 
 	const cua: CuaApi = {
+		async recipe(name, args = {}) {
+			const { recipes, recipeList } = await import("./recipes/index.ts");
+			const r = recipes[name];
+			if (!r) throw new Error(`No recipe "${name}". Recipes:\n${recipeList()}`);
+			record({ kind: "log", name: `recipe ${name}`, detail: JSON.stringify(args).slice(0, 200) });
+			return r.run({ cua, screen: options.screen }, args);
+		},
 		async look(target = {}) {
 			if (target.state) return cua.state(target.state);
 			if (target.url) return cua.launchBrowser(target.url);

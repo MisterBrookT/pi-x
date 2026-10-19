@@ -36,6 +36,7 @@ Three calls:
   await s.look({ query: "Send" })                     // read more without a new capture: { ref, depth } | { ref, inspect: true } | { ref, read: true } | { wait: { text, until } }
   const next = await s.act(action | action[], expect, { target })   // -> next state
   await page.eval("document.title")                   // browser pages; page.navigate(url) to move
+  await cua.recipe("wechat-send", { to, text })     // saved, tested scripts (same guards); unknown name lists them
 
 Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse, e.g. { action: "setText", ref: "@e7", text: "hi" }. Prefer refs; x/y only without an element. Always pass expect, e.g. { text: "Sent", until: "present" }.
 

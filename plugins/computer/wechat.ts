@@ -14,18 +14,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TargetMismatchError, createCuaRuntime, type ComputerOperations, type CuaApi } from "./computer-script.ts";
-import { type ScreenOperations, draftVisible, macScreenOperations, nearMisses, normalizeName, pickExactResult, titleMatches } from "./computer-screen.ts";
+import { TargetMismatchError, createCuaRuntime, type ComputerOperations } from "./computer-script.ts";
+import { type ScreenOperations, draftVisible, macScreenOperations, normalizeName } from "./computer-screen.ts";
+import { APP, Refused, clearDraft as clear, openChat, signed } from "./recipes/wechat.ts";
 
-const APP = "WeChat";
+export { Refused, signed };
 const STATE = join(process.env.TMPDIR ?? tmpdir(), "wechat-send");
 const PENDING = join(STATE, "pending");
-
-/** Same rule as Feishu: every outbound message ends with its own signature line. */
-export const signed = (text: string): string => {
-	const sig = /[\u4e00-\u9fa5]/.test(text) ? "这条消息来自 brook 的 agent。" : "Sent by brook's agent.";
-	return text.endsWith(sig) ? text : `${text}\n\n${sig}`;
-};
 
 const noBackend = new Proxy({}, {
 	get: () => async () => {
@@ -33,42 +28,8 @@ const noBackend = new Proxy({}, {
 	},
 }) as ComputerOperations;
 
-export class Refused extends Error {}
-
-const open = async (cua: CuaApi, screen: ScreenOperations, chat: string, findOnly = false) => {
-	let s = await cua.observe({ app: APP, mode: "screen" });
-	s = await s.act({ action: "keypress", keys: ["cmd", "f"] });
-	s = await s.act({ action: "typeText", text: chat });
-	await screen.sleep?.(1200);
-	s = await cua.observe({ app: APP, mode: "screen" });
-	let results = await screen.capture(APP);
-	let hit = pickExactResult(results, chat);
-	// Search results can lag behind the first capture; look once more before refusing.
-	if (!hit) {
-		await screen.sleep?.(1200);
-		results = await screen.capture(APP);
-		hit = pickExactResult(results, chat);
-	}
-	if (!hit) {
-		await screen.keys(["escape"], APP);
-		const near = nearMisses(results, chat).filter((t) => !/^(search|most used|group chats|contacts|chat history)/i.test(t));
-		throw new Refused(`no contact or group reads exactly '${chat}'.${near.length ? ` Close matches: ${near.map((n) => `'${n}'`).join(", ")}.` : ""} Nothing opened, nothing sent.`);
-	}
-	if (findOnly) {
-		await screen.keys(["escape"], APP);
-		return s;
-	}
-	const ref = s.text.split("\n").find((row) => row.includes(JSON.stringify(hit.text)) && row.includes(`(${Math.round(hit.x + hit.w / 2)},${Math.round(hit.y + hit.h / 2)})`))?.split(" ")[0];
-	s = await s.act(ref ? { action: "click", ref } : { action: "click", x: Math.round(hit.x + hit.w / 2), y: Math.round(hit.y + hit.h / 2) });
-	await screen.sleep?.(800);
-	if (!titleMatches(await screen.capture(APP), chat)) throw new Refused(`the opened chat is not '${chat}'. Nothing sent.`);
-	return s;
-};
-
-const clearDraft = async (screen: ScreenOperations) => {
-	await screen.keys(["cmd", "a"], APP);
-	await screen.keys(["backspace"], APP);
-};
+const open = openChat;
+const clearDraft = (screen: ScreenOperations) => clear(screen);
 
 export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (line: string) => void): Promise<number> => {
 	const [mode, rawChat, text] = argv;
@@ -77,7 +38,7 @@ export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (
 	mkdirSync(STATE, { recursive: true });
 	try {
 		if (mode === "find") {
-			await open(cua, screen, normalizeName(rawChat ?? ""), true);
+			await cua.recipe("wechat-find", { to: rawChat });
 			out(`[FOUND] exact '${normalizeName(rawChat ?? "")}' (not opened)`);
 			return 0;
 		}
@@ -96,22 +57,10 @@ export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (
 		// One call, focus held once: open → type → check title + input box → Enter → read back.
 		// Only for a recipient and text brook has already confirmed.
 		if (mode === "sendnow") {
-			const chat = normalizeName(rawChat ?? "");
-			if (!chat || !text) throw new Error("usage: sendnow <chat> <text>");
-			const msg = signed(text);
-			let s = await open(cua, screen, chat);
-			await clearDraft(screen);
-			s = await s.act(
-				[{ action: "typeText", text: msg }, { action: "keypress", keys: ["Enter"] }],
-				undefined,
-				{ target: { title: chat } },
-			);
-			await screen.activate(APP);
-			await screen.sleep?.(800);
-			const after = await screen.capture(APP);
-			const sent = titleMatches(after, chat) && !draftVisible(after, msg) && after.lines.some((l) => l.y < after.window.h * 0.75 && l.text.replace(/\s+/g, "").includes(msg.split("\n")[0].replace(/\s+/g, "").slice(0, 12)));
-			out(sent ? `[SENT] '${chat}': read back in the chat, input box empty.` : `[SENT?] Enter pressed in '${chat}', but the read-back did not find the message. Check WeChat.`);
-			return sent ? 0 : 4;
+			if (!normalizeName(rawChat ?? "") || !text) throw new Error("usage: sendnow <chat> <text>");
+			const r = (await cua.recipe("wechat-send", { to: rawChat, text })) as { readBack: boolean; chat: string };
+			out(r.readBack ? `[SENT] '${r.chat}': read back in the chat, input box empty.` : `[SENT?] Enter pressed in '${r.chat}', but the read-back did not find the message. Check WeChat.`);
+			return r.readBack ? 0 : 4;
 		}
 		if (mode === "send") {
 			if (!existsSync(PENDING)) {
