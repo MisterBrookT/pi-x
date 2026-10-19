@@ -123,7 +123,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b", { source: "DingTalk: Research", sourceKey: "dingtalk:research" })) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
-  assert.match(await page.locator('[data-fy-tab="you"]').textContent(), /For you\s*2/);
+  assert.equal(await page.locator('[data-fy-tab]').count(), 0, "one feed, no tabs");
   // Transparency: an open row says where it came from, and each button says where it runs and what it does.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
   const main = page.locator('[data-fy="c"] [data-fy-pick="0"]');
@@ -135,7 +135,8 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('[data-fy="c"] [data-fy-pick="0"]').click();
   assert.deepEqual(await page.locator('[data-fy="c"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
   assert.match(await page.locator('[data-fy="c"] [data-fy-pick="0"]').textContent(), /Start test[\s\S]*Run the Databento test/);
-  assert.equal(await page.locator('[data-fy="c"] .fy-src').textContent(), "飞", "source icon");
+  assert.equal(await page.locator('[data-fy="c"] .fy-src').getAttribute("aria-label"), "Feishu", "source avatar is the app's icon");
+  assert.equal(await page.locator('[data-fy="c"] .fy-src svg').count(), 1);
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
   await page.locator('.fp[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
@@ -151,11 +152,9 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
   await page.locator("#forYou").getByText("All clear").waitFor();
-  assert.equal(await page.getByText("Title c").count(), 0, "parked loops leave the feed");
-  await page.locator('[data-fy-tab="work"]').click();
-  await page.locator(".fw", { hasText: "Title c" }).waitFor();
-  assert.match(await page.locator("#forYou").textContent(), /Later[\s\S]*Title c[\s\S]*Back /);
-  await page.locator('[data-fy-tab="you"]').click();
+  assert.equal(await page.locator(".fp:not(.fw)", { hasText: "Title c" }).count(), 0, "parked loops leave the feed");
+  // Parked loops fold into "Later · N" at the bottom of the same feed.
+  assert.match(await page.locator("#forYou .fw-later").textContent(), /Later · 1[\s\S]*Title c[\s\S]*back /);
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
@@ -369,9 +368,9 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  // Who is on what lives on the Working tab of the same page.
-  await page.locator('#messages [data-fy-tab="work"]').click();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /News bench[\s\S]*Working · minara[\s\S]*All 5 fixes are done[\s\S]*On it/);
+  // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
+  await page.locator("#messages .fy-feed .fw").first().waitFor();
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /In progress[\s\S]*minara[\s\S]*Working[\s\S]*News bench[\s\S]*All 5 fixes are done/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 
@@ -421,7 +420,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await post.waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the bell opens the For you chat");
   assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
-  assert.equal(await page.locator("#messages .fp").count(), 2, "one post per thing that needs brook");
+  assert.equal(await page.locator("#messages .fp:not(.fw)").count(), 2, "one post per thing that needs brook");
   for (const b of await post.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
   // Reply = a comment: it goes to For you as brook's instruction, and shows under the post.
@@ -432,10 +431,10 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   assert.match((await next).prompts[0], /I'll be there at 18:30/);
   await post.locator(".fp-mine").waitFor();
   assert.match(await post.locator(".fp-mine").textContent(), /You Say OK/);
-  // Working tab: who is on what.
-  await page.locator('#messages [data-fy-tab="work"]').click();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /Lines of work[\s\S]*News bench[\s\S]*On it[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed/);
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") });
+  // In progress, below the posts in the same feed: what's being worked on, with the latest note.
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /In progress[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed[\s\S]*News bench/);
+  assert.equal(await page.locator("#messages .fw-trail li.now").count() > 0, true, "the newest note is highlighted");
+  if (process.env.PIX_SHOT) { await page.locator(".fw").first().scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") }); }
   assert.equal(await page.locator(".fp-compose:visible").count(), 0, "no pen: the composer below is the chat");
   assert.deepEqual(errors, []);
 });
