@@ -79,7 +79,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
 
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   // Main chat stays clean: only a red dot on the bell; For you is its own page.
@@ -191,7 +191,7 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "S", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
@@ -222,7 +222,7 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hello there" }] }) });
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi foryou" }, { role: "assistant", text: "Morning. Two things today." }] }) });
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
@@ -273,7 +273,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   const put = (busy = false) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy, messages: [{ role: "user", text: "hi" }] }) });
   await put();
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const p1 = page.locator('#messages .fp[data-fy="k1"]'), p2 = page.locator('#messages .fp[data-fy="k2"]');
@@ -303,7 +303,7 @@ test("bell page: every card has Something else; brook's words go to For you", as
   const base = `http://127.0.0.1:${hub.port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const card = page.locator('#forYou [data-fy="e1"]');
@@ -339,7 +339,7 @@ test("related asks in one line of work share one card, and one answer handles th
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const rel = page.locator('#messages .fp[data-fy="h1"] .fp-rel');
@@ -365,12 +365,12 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
   await page.locator("#messages .fy-feed .fw").first().waitFor();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /In progress[\s\S]*minara[\s\S]*Working[\s\S]*News bench[\s\S]*All 5 fixes are done/);
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /Doing 3[\s\S]*minara[\s\S]*News bench[\s\S]*All 5 fixes are done/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 
@@ -384,7 +384,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   const put = (extra) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: true, messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "", tools: [{ id: "t1", name: "bash", label: "ls -t ~/.pi/agent/chat", input: "ls", output: "x" }, ...extra] }], ...(extra.length ? {} : { peerWait: "Waiting for pix" }) }) });
   await put([{ id: "t2", name: "chat", label: "send to pix" }]);
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const st = page.locator("#messages .fy-status");
@@ -412,7 +412,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
@@ -432,7 +432,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await post.locator(".fp-mine").waitFor();
   assert.match(await post.locator(".fp-mine").textContent(), /You Say OK/);
   // In progress, below the posts in the same feed: what's being worked on, with the latest note.
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /In progress[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed[\s\S]*News bench/);
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /Doing[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed[\s\S]*News bench/);
   assert.equal(await page.locator("#messages .fw-trail li.now").count() > 0, true, "the newest note is highlighted");
   if (process.env.PIX_SHOT) { await page.locator(".fw").first().scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") }); }
   assert.equal(await page.locator(".fp-compose:visible").count(), 0, "no pen: the composer below is the chat");
@@ -451,7 +451,7 @@ test("phone: session buttons use unique board names with a short hint; a card na
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   for (const id of ["m1", "m2", "m3"]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [] }) });
   const browser = await launch(); t.after(() => browser.close());
-  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   await page.locator('.fp[data-fy="k1"] [data-fy-pick="0"]').click();
