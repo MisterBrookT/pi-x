@@ -151,7 +151,7 @@ test("irreversible actions are refused when no confirmation gate is wired", asyn
 	const { runtime, calls } = runtimeFor();
 	const state = await runtime.cua.observe();
 	await assert.rejects(
-		() => state.act({ action: "press", ref: "@e9" }),
+		() => state.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } }),
 		(error) => error instanceof ConfirmationRequiredError && /without a confirmation gate/.test(error.message),
 	);
 	assert.equal(calls.filter((c) => c.name === "act").length, 0, "nothing reached the backend");
@@ -160,7 +160,7 @@ test("irreversible actions are refused when no confirmation gate is wired", asyn
 test("a declined confirmation aborts without touching the backend", async () => {
 	const { runtime, calls } = runtimeFor({ confirm: async () => false });
 	const state = await runtime.cua.observe();
-	await assert.rejects(() => state.act({ action: "press", ref: "@e9" }), ConfirmationRequiredError);
+	await assert.rejects(() => state.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } }), ConfirmationRequiredError);
 	assert.equal(calls.filter((c) => c.name === "act").length, 0);
 });
 
@@ -173,7 +173,7 @@ test("an approved irreversible action is asked once, not once per loop iteration
 		},
 	});
 	let state = await runtime.cua.observe();
-	for (let i = 0; i < 3; i += 1) state = await state.act({ action: "press", ref: "@e9" });
+	for (let i = 0; i < 3; i += 1) state = await state.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } });
 	assert.equal(asked.length, 1, "the identical summary is remembered");
 	assert.equal(asked[0], "press @e9");
 });
@@ -231,7 +231,7 @@ test("every backend call and log line lands in the trace in order", async () => 
 	const { runtime } = runtimeFor({ confirm: async () => true });
 	const state = await runtime.cua.observe();
 	runtime.log("checking");
-	await state.act({ action: "press", ref: "@e9" });
+	await state.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } });
 	assert.deepEqual(
 		runtime.events.map((e) => `${e.kind}:${e.name}`),
 		["call:observe_ui", "log:checking", "call:act_ui", "action:press @e9"],

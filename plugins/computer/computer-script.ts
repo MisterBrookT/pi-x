@@ -9,6 +9,17 @@
  * contract can be tested against fake operations.
  */
 
+import {
+	COMMIT_KEYS,
+	type ScreenCapture,
+	type ScreenOperations,
+	lineForRef,
+	normalizeName,
+	pointFor,
+	screenOutline,
+	titleMatches,
+} from "./computer-screen.ts";
+
 export interface ToolResultLike {
 	content?: Array<{ type?: string; text?: string }>;
 	details?: unknown;
@@ -134,8 +145,22 @@ export const describeOcclusion = (message: string): string | undefined => {
 	].join("\n");
 };
 
+/**
+ * What an irreversible action must be aimed at. Checked right before the
+ * action runs, in every mode: the window or chat title (AX outline or OCR
+ * header) or the page URL must match, otherwise the action is refused.
+ */
+export interface ActTarget {
+	title?: string;
+	url?: string;
+}
+
+export class TargetMismatchError extends Error {}
+
 export interface CuaApiOptions {
 	operations: ComputerOperations;
+	/** Screen mode (OCR + real input) for apps without an accessibility tree. */
+	screen?: ScreenOperations;
 	budget?: ScriptBudget;
 	/** Called for every backend call and every log line, in order. */
 	onEvent?: (event: ScriptEvent) => void;
@@ -215,7 +240,7 @@ export interface CuaState {
 	expand(ref: string, depth?: number): Promise<string>;
 	inspect(ref: string): Promise<string>;
 	read(ref: string, offset?: number): Promise<string>;
-	act(actions: UiAction | UiAction[], expect?: UiCondition): Promise<CuaState>;
+	act(actions: UiAction | UiAction[], expect?: UiCondition, options?: { target?: ActTarget }): Promise<CuaState>;
 	waitFor(condition: UiCondition): Promise<string>;
 	navigate(url: string): Promise<CuaState>;
 	eval(expression: string): Promise<unknown>;
@@ -223,7 +248,7 @@ export interface CuaState {
 
 export interface CuaApi {
 	roots(query?: { text?: string; app?: string; bundleId?: string; pid?: number; kind?: string }): Promise<string>;
-	observe(target?: { root?: string; mode?: "semantic" | "visual" | "fused" }): Promise<CuaState>;
+	observe(target?: { root?: string; app?: string; mode?: "semantic" | "visual" | "fused" | "screen" }): Promise<CuaState>;
 	launchBrowser(url?: string): Promise<CuaState>;
 	/**
 	 * Rebind a stateId seen in an earlier call. The backend keeps saved states
@@ -316,6 +341,122 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		record({ kind: "call", name, detail });
 	};
 
+	const gate = async (summary: string) => {
+		if (approved.has(summary)) return;
+		if (!options.confirm) {
+			throw new ConfirmationRequiredError(`Refusing an irreversible action without a confirmation gate: ${summary}`);
+		}
+		const ok = await options.confirm(summary);
+		if (!ok) throw new ConfirmationRequiredError(`User declined: ${summary}`);
+		approved.add(summary);
+	};
+
+	/**
+	 * Screen-mode state for an app without an accessibility tree. Every act
+	 * re-captures the window, so refs always belong to what is on screen now.
+	 */
+	const makeScreenState = (capture: ScreenCapture, serial: number): CuaState => {
+		const screen = options.screen;
+		if (!screen) throw new Error("Screen mode is not available on this host.");
+		const id = `screen:${capture.app}:${serial}`;
+		const text = screenOutline(capture);
+		const recapture = async (why: string) => {
+			spend("screen_capture", why);
+			return screen.capture(capture.app);
+		};
+		const unsupported = (name: string) => async () => {
+			throw new Error(`${name} is not available in screen mode; read state.text (OCR lines) instead.`);
+		};
+		const state: CuaState = {
+			id,
+			text,
+			async search(query) {
+				const needle = (query.text ?? "").toLowerCase();
+				return text.split("\n").slice(1).filter((row) => row.toLowerCase().includes(needle)).join("\n");
+			},
+			expand: unsupported("expand"),
+			inspect: unsupported("inspect"),
+			read: unsupported("read"),
+			async waitFor(condition) {
+				const until = condition.until ?? "present";
+				const deadline = (options.now?.() ?? Date.now()) + (condition.timeoutMs ?? 3000);
+				for (;;) {
+					const next = await recapture(`wait ${JSON.stringify(condition.text)}`);
+					const seen = next.lines.some((line) => line.text.includes(condition.text ?? ""));
+					if (seen === (until === "present")) return screenOutline(next);
+					if ((options.now?.() ?? Date.now()) > deadline) throw new Error(`Timed out waiting for ${JSON.stringify(condition.text)} to be ${until}.`);
+					await screen.sleep?.(400);
+				}
+			},
+			async act(input, expect, actOptions) {
+				const list = Array.isArray(input) ? input : [input];
+				if (list.length === 0) throw new Error("act requires at least one action.");
+				const mutations = list.filter((a) => MUTATING.has(a.action)).length;
+				if (actions + mutations > budget.maxActions) {
+					throw new BudgetExceededError(`Script exceeded ${budget.maxActions} UI actions. Report progress instead of continuing to act.`);
+				}
+				const summary = `${capture.app}: ${summarizeActions(list)}`;
+				const risky = list.some(
+					(a) =>
+						(a.action === "keypress" && (a.keys ?? []).some((k) => COMMIT_KEYS.test(k)) && !(a.keys ?? []).some((k) => /^(cmd|command|ctrl|control|alt|option)$/i.test(k))) ||
+						((a.action === "click" || a.action === "press") && a.ref !== undefined && IRREVERSIBLE.test(lineForRef(capture, a.ref)?.text ?? "")),
+				);
+				if (risky) {
+					await checkTarget(actOptions?.target, summary, async (target) => {
+						if (target.url !== undefined) return "a screen-mode app has no URL; aim it with target.title";
+						await screen.activate(capture.app);
+						const now = await recapture("target check");
+						return target.title !== undefined && !titleMatches(now, target.title)
+							? `the open title is ${JSON.stringify(now.lines.find((l) => l.y < 50 && l.x > now.window.w * 0.2)?.text ?? "")}, not ${JSON.stringify(normalizeName(target.title))}`
+							: undefined;
+					});
+					await gate(summary);
+				}
+				spend("screen_act", summary);
+				actions += mutations;
+				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
+				await screen.activate(capture.app);
+				for (const action of list) {
+					if (action.action === "click" || action.action === "press") {
+						const point = pointFor(capture, action);
+						await screen.click(point.x, point.y);
+					} else if (action.action === "keypress") {
+						await screen.keys(action.keys ?? []);
+					} else if (action.action === "typeText" || action.action === "setText") {
+						if (action.ref || action.x !== undefined) {
+							const point = pointFor(capture, action);
+							await screen.click(point.x, point.y);
+						}
+						if (action.action === "setText") {
+							await screen.keys(["cmd", "a"]);
+							await screen.keys(["backspace"]);
+						}
+						await screen.paste(action.text ?? "");
+					} else {
+						throw new Error(`${action.action} is not available in screen mode.`);
+					}
+					await screen.sleep?.(350);
+				}
+				serial += 1;
+				const after = await recapture("after act");
+				const next = makeScreenState(after, serial);
+				if (expect?.text !== undefined) {
+					const until = expect.until ?? "present";
+					const seen = after.lines.some((line) => line.text.includes(expect.text ?? ""));
+					if (seen !== (until === "present")) await next.waitFor(expect);
+				}
+				return next;
+			},
+			navigate: unsupported("navigate"),
+			eval: unsupported("eval"),
+		};
+		for (const key of Object.keys(state)) {
+			if (typeof state[key as keyof CuaState] === "function") Object.defineProperty(state, key, { enumerable: false });
+		}
+		return trackMethods(state);
+	};
+	let screenSerial = 0;
+
 	const makeState = (result: ToolResultLike, previousId?: string): CuaState => {
 		const id = stateIdOf(result) ?? previousId;
 		if (!id) throw new Error("Backend returned no stateId; the observation cannot be used.");
@@ -346,7 +487,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				spend("wait_for", JSON.stringify(condition));
 				return textOf(await operations.waitFor({ stateId: id, ...condition }));
 			},
-			async act(input, expect) {
+			async act(input, expect, actOptions) {
 				const list = Array.isArray(input) ? input : [input];
 				if (list.length === 0) throw new Error("act requires at least one action.");
 				const mutations = list.filter((a) => MUTATING.has(a.action)).length;
@@ -356,16 +497,21 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 					);
 				}
 				const summary = summarizeActions(list);
-				if (isIrreversible(list, text) && !approved.has(summary)) {
-					if (!options.confirm) {
-						throw new ConfirmationRequiredError(
-							`Refusing an irreversible action without a confirmation gate: ${summary}`,
-						);
+				const risky = isIrreversible(list, text);
+				if (risky) await checkTarget(actOptions?.target, summary, async (target) => {
+					if (target.url !== undefined) {
+						spend("evaluate_browser", "location.href (target check)");
+						const result = await operations.evaluateBrowser({ stateId: current, expression: "location.href" });
+						current = stateIdOf(result) ?? current;
+						const href = String(extractEvaluationValue(textOf(result)) ?? "");
+						if (!urlMatches(href, target.url)) return `page is ${href || "unknown"}, not ${target.url}`;
 					}
-					const ok = await options.confirm(summary);
-					if (!ok) throw new ConfirmationRequiredError(`User declined: ${summary}`);
-					approved.add(summary);
-				}
+					if (target.title !== undefined && !outlineHasTitle(text, target.title)) {
+						return `no window, heading, or title in this state reads exactly ${JSON.stringify(normalizeName(target.title))}`;
+					}
+					return undefined;
+				});
+				if (risky) await gate(summary);
 				spend("act_ui", summary);
 				actions += mutations;
 				record({ kind: "action", name: summary, detail: expect ? JSON.stringify(expect) : "no expect" });
@@ -415,6 +561,14 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			return textOf(await operations.find(query ?? {}));
 		},
 		async observe(target) {
+			if (target?.mode === "screen") {
+				if (!target.app) throw new Error('Screen mode needs an app name: cua.observe({ app: "WeChat", mode: "screen" }).');
+				if (!options.screen) throw new Error("Screen mode is not available on this host.");
+				spend("screen_capture", target.app);
+				await options.screen.activate(target.app);
+				screenSerial += 1;
+				return makeScreenState(await options.screen.capture(target.app), screenSerial);
+			}
 			spend("observe_ui", target?.root);
 			return makeState(await operations.observe(target ?? {}));
 		},
@@ -473,6 +627,43 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 			}
 		},
 	};
+};
+
+/** Run the target check for an irreversible action, or refuse when it has none. */
+const checkTarget = async (
+	target: ActTarget | undefined,
+	summary: string,
+	verify: (target: ActTarget) => Promise<string | undefined>,
+): Promise<void> => {
+	if (!target || (target.title === undefined && target.url === undefined)) {
+		throw new TargetMismatchError(
+			`Refusing an irreversible action without a target: ${summary}. Pass { target: { title } } (window or chat title) or { target: { url } } so the runtime can check what it acts on.`,
+		);
+	}
+	const problem = await verify(target);
+	if (problem) throw new TargetMismatchError(`Refused: ${problem}. Nothing was done: ${summary}`);
+};
+
+/** Exact title match against quoted labels of window, heading, or title-like rows in an AX outline. */
+export const outlineHasTitle = (outline: string, title: string): boolean => {
+	const want = normalizeName(title);
+	return outline
+		.split("\n")
+		.filter((row) => /\b(window|heading|title|AXWindow|AXHeading|AXStaticText|statictext|webarea|AXWebArea)\b/i.test(row))
+		.some((row) => [...row.matchAll(/"([^"]*)"/g)].some((m) => normalizeName(m[1]) === want));
+};
+
+/** Same page: exact match, or the page sits under the expected URL (path prefix, same origin). */
+export const urlMatches = (href: string, want: string): boolean => {
+	try {
+		const a = new URL(href);
+		const b = new URL(want);
+		if (a.origin !== b.origin) return false;
+		const base = b.pathname.endsWith("/") ? b.pathname : `${b.pathname}/`;
+		return a.pathname === b.pathname || a.pathname.startsWith(base);
+	} catch {
+		return href === want;
+	}
 };
 
 const stringify = (value: unknown): string => {

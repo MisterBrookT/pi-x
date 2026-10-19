@@ -147,7 +147,7 @@ test("an irreversible action prompts through ctx.ui.confirm and proceeds when al
 	const { tool, ctx, confirms } = harness({ backend: backend.module, confirmAnswer: true });
 	const result = await tool.execute(
 		"call-1",
-		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }); return "sent";` },
+		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } }); return "sent";` },
 		undefined,
 		undefined,
 		ctx,
@@ -163,7 +163,7 @@ test("declining the prompt fails the script and never reaches the backend", asyn
 	const { tool, ctx } = harness({ backend: backend.module, confirmAnswer: false });
 	const result = await tool.execute(
 		"call-1",
-		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }); return "sent";` },
+		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } }); return "sent";` },
 		undefined,
 		undefined,
 		ctx,
@@ -178,7 +178,7 @@ test("without a TUI there is no gate, so irreversible actions are refused", asyn
 	const { tool, ctx } = harness({ backend: backend.module, mode: "headless" });
 	const result = await tool.execute(
 		"call-1",
-		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }); return 1;` },
+		{ script: `const s = await cua.observe(); await s.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "App" } }); return 1;` },
 		undefined,
 		undefined,
 		ctx,

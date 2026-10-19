@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import { callTitle, resultLines, scriptSummary } from "./computer-render.ts";
 import { CHROME_CANDIDATES, installWrapper } from "./chrome-wrapper.ts";
 import { createCuaRuntime, type ComputerOperations, DEFAULT_BUDGET } from "./computer-script.ts";
+import { macScreenOperations } from "./computer-screen.ts";
 import { renderOutcome, runScript } from "./computer-runner.ts";
 import { registerCapabilityAction } from "../core/capability-actions.ts";
 import { withSpecialistExposure } from "../core/tool-discovery.ts";
@@ -39,7 +40,9 @@ CuaState: id, text; search({ text, role, capability }), expand(ref, depth), insp
 
 Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse, e.g. { action: "setText", ref: "@e7", text: "hello" }. Prefer refs; use x/y only without an accessibility element. keypress and typeText need a ref, coordinates, or a preceding click in the same act array.
 
-Use the state act returns instead of observing again. Batch deterministic steps into one act. Use eval to extract from pages and act for what the user must see happen. Irreversible actions (send, delete, pay, publish) prompt the user once each.
+No AX tree (WeChat): \`cua.observe({ app, mode: "screen" })\` gives OCR @t refs. Irreversible acts (Send/Pay, screen Enter) need act(a, expect, { target: { title } | { url } }), re-checked before running.
+
+Use the state act returns instead of observing again. Batch deterministic steps into one act. Use eval to extract from pages and act for what the user must see happen. They also prompt the user once each.
 `.trim();
 
 const Params = Type.Object({
@@ -278,6 +281,7 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 
 			const runtime = createCuaRuntime({
 				operations: bindOperations(backend, toolCallId, signal, ctx),
+				screen: process.platform === "darwin" ? macScreenOperations() : undefined,
 				signal,
 				budget: { ...DEFAULT_BUDGET, maxActions: params.maxActions ?? DEFAULT_BUDGET.maxActions },
 				confirm:
