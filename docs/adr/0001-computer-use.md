@@ -277,3 +277,16 @@ browser script in about 2 seconds.
 - Expected win: a 150-ref Notes outline after one click becomes 3-10 lines. Risk: refs must stay stable across diffs; keep ids for unchanged elements and re-key only what changed.
 
 **Order and risk:** 2 → 3 → 4. Step 2 is the most valuable (it removes the separate WeChat script path) and is medium-risk. Step 3 is low-risk (surface only). Step 4 is medium-risk (ref stability) and gets its own tests against Notes and a browser page.
+
+### Iteration 2: built (2026-10-19)
+
+| Step | Commit | What shipped |
+|---|---|---|
+| 1 | hub `ea5a731` | WeChat helper: exact-name result, `\r` stripped, OCR title check before Enter |
+| 2 | pix `b192615`, hub `166540f` | `computer-screen.ts`: screen mode (`cua.observe({ app, mode: "screen" })`, OCR `@t` refs, real HID click / paste / keys, locked-screen refusal). **Target guard in every mode**: an irreversible act needs `{ target: { title } }` (exact AX window/heading or OCR header) or `{ target: { url } }` (same origin + path prefix), re-checked right before it runs, then the confirm prompt. `plugins/computer/wechat.ts` is the WeChat recipe; `send.sh` is a one-line wrapper. |
+| 3 | pix `2bd3ea3` | `cua.look(target)`, `state.look(options)`, `act(…, expect, { target })`, `eval`. All old names are kept as aliases. |
+| 4 | pix `b86c7b1` | After the first look, act results carry `+` / `-` / `~` lines only; the full outline is used past 40% change; `look()` returns it. Guards and the irreversible check always read the full tree. |
+
+Verified: 1059 tests, including the VAG-group incident as a regression. WeChat screen mode was run live (find, refuse on a missing name, prepare → send to brookkk only).
+
+Not yet verified live: steps 3–4 against an AX app. On the day of the change, the backend's native bridge failed `observe_ui` for every desktop root ("Root is not owned by a running app", from `bridge.swift`). Old-style scripts failed the same way, and `evaluate_browser` returned an empty title. This is a backend/helper issue to re-check after a reboot or a TCC re-grant; the new surface calls the same backend operations.
