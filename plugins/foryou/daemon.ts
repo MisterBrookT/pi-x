@@ -15,6 +15,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
@@ -23,6 +24,7 @@ import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memory
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
 import { readStatus, statusBoard } from "./session-status.ts";
+import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
 import { filterPrompt, forwardPrompt, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
@@ -74,7 +76,7 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 	const now = Date.now();
 	// Forward mode: For you itself reviews its cards every hour, with its full context (activity, board, sessions).
 	if (cfg.mode === "forward") {
-		if (now - Date.parse(state["@review"] ?? "0") > 3_600_000) {
+		if (now - Date.parse(state["@review"] ?? "0") > 3_600_000 && !(await forYouThreadActive())) {
 			const open = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "").filter(isOpen);
 			if (open.length) {
 				const text = reviewPrompt({ open, since: state["@review"], board: statusBoard(readStatus()) });
@@ -168,7 +170,7 @@ async function tick(cfg: Config) {
 				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), raw, verdict: v });
 				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
 				log(`${src.name}: ${fresh.length} new -> ${v.pass ? "PASS" : "drop"}: ${v.why}`);
-				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
+				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
 				else mark();
 				if (v.pass) pendingMarks.push(mark);
 				continue;
@@ -226,11 +228,25 @@ async function tick(cfg: Config) {
 		} catch (e) { failed.push({ source: src.name, error: (e as Error).message }); log(`${src.name}: error ${(e as Error).message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: (e as Error).message.slice(0, 2000) }); }
 	}
 	// Everything that passed goes to For you as one message; cursors move only once it is delivered.
+	// While brook is mid-thread with For you, batches wait in a queue (urgent ones still get one line);
+	// once the thread goes quiet, everything held goes over as one message.
+	const active = !dry && await forYouThreadActive();
 	if (forwards.length && !dry) {
 		const text = forwardPrompt(forwards);
-		const sent = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
-		log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> ${sent ? "For you" : "not delivered; retry next round"}`);
-		if (sent) for (const m of pendingMarks) m();
+		if (active) {
+			holdBatch(text, P.dir);
+			for (const m of pendingMarks) m();
+			for (const f of forwards.filter(f => f.urgent)) await hubPrepare(urgentLine(f.source.name, f.why));
+			log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> held (brook is in a thread with For you)${forwards.some(f => f.urgent) ? "; urgent line sent" : ""}`);
+		} else {
+			const sent = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
+			log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> ${sent ? "For you" : "not delivered; retry next round"}`);
+			if (sent) for (const m of pendingMarks) m();
+		}
+	}
+	if (!dry && !active) {
+		const held = readQueue(P.dir);
+		if (held.length && await hubPrepare(heldPrompt(held))) { clearQueue(P.dir); log(`held: ${held.length} batches delivered`); }
 	}
 	// Sources that keep failing show at the top of For you (phone and Mac) until they work again.
 	if (!dry) {
@@ -250,6 +266,20 @@ async function tick(cfg: Config) {
 	await housekeeping(cfg, state, work);
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
+}
+
+/** brook is talking with For you (last 10 min), or For you is still busy / waiting on a handoff for him. */
+async function forYouThreadActive(): Promise<boolean> {
+	const userAt = brookActiveAt(P.dir);
+	if (!userAt) return false;
+	let busy = false, openWaits = 0;
+	try {
+		const token = readFileSync(remoteTokenPath, "utf8").trim();
+		const res = await fetch(`http://127.0.0.1:${remoteDefaultPort}/api/sessions`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000) });
+		busy = !!((res.ok ? await res.json() as any[] : []).find(s => s.id === "pix-foryou")?.busy);
+	} catch { /* */ }
+	try { openWaits = (JSON.parse(readFileSync(join(homedir(), ".pi/agent/chat/for-you/waiting.json"), "utf8")).waits ?? []).filter((w: any) => w.live !== false).length; } catch { /* */ }
+	return threadActive({ userAt, busy, openWaits });
 }
 
 async function hubPrepare(prompt: string): Promise<boolean> {

@@ -24,6 +24,7 @@ import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
 import { expandForYou, withForYou } from "./foryou-mention.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
+import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 
 const TOOL = "loops";
 
@@ -290,6 +291,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		return box;
 	});
 	pi.on("input", async (event, ctx) => {
+		// brook talking to For you opens a "thread": the daemon holds new batches until it goes quiet.
+		if (isCoordinator(ctx) && isBrookText(event.text)) markBrookActive(deps.dir); // Mac or phone (the hub)
 		// brook's own short reply answers the waiting card; anything longer is a normal chat with For you.
 		if (event.source === "interactive" && !event.images?.length && isCoordinator(ctx) && event.text.trim().length <= 20) {
 			const it = currentCard(deps.dir, await sessions().catch(() => []));

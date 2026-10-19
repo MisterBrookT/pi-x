@@ -5,7 +5,7 @@
  */
 import type { Msg, Source } from "./proactive.ts";
 
-export interface FilterVerdict { pass: boolean; why: string; ids: string[] }
+export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urgent?: boolean }
 
 /** The cheap model's only question: does any of this involve brook? */
 export function filterPrompt(o: { me: string; source: Source; context: Msg[]; fresh: Msg[]; memory: string; lines: string }): string {
@@ -25,7 +25,8 @@ ${o.context.map(fmt).join("\n") || "(none)"}
 New messages:
 ${o.fresh.map(fmt).join("\n")}
 
-Reply with JSON only: {"pass": true|false, "why": "<one short line>", "ids": ["<ids of the new messages that matter>"]}`;
+Reply with JSON only: {"pass": true|false, "why": "<one short line>", "ids": ["<ids of the new messages that matter>"], "urgent": true|false}
+urgent = due today, or someone is blocked on ${o.me} right now. Almost always false.`;
 }
 
 export function parseFilter(raw: string): FilterVerdict | undefined {
@@ -34,11 +35,11 @@ export function parseFilter(raw: string): FilterVerdict | undefined {
 	try {
 		const v = JSON.parse(m[0]);
 		if (typeof v.pass !== "boolean") return undefined;
-		return { pass: v.pass, why: String(v.why ?? "").slice(0, 200), ids: Array.isArray(v.ids) ? v.ids.map(String).slice(0, 40) : [] };
+		return { pass: v.pass, why: String(v.why ?? "").slice(0, 200), ids: Array.isArray(v.ids) ? v.ids.map(String).slice(0, 40) : [], ...(v.urgent === true && v.pass ? { urgent: true } : {}) };
 	} catch { return undefined; }
 }
 
-export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string }
+export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean }
 
 /** One chat message to For you for everything that passed this round. */
 export function forwardPrompt(batches: Forward[], now = new Date()): string {

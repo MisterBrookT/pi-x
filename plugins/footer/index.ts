@@ -9,6 +9,7 @@ import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../core/s
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "./footer.js";
 import { linkFits, readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPath } from "../core/hub-paths.ts";
 import { memoryUnseen } from "../core/memory-badge.ts";
+import { queuedCount } from "../core/foryou-queue.ts";
 
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
@@ -37,6 +38,9 @@ export default function (pi: ExtensionAPI) {
   // Same bookmarks as the phone sidebar (~/.pi/agent/pix-remote/links.json), as clickable terminal links (OSC 8).
   let links: { label: string; url: string }[] = [];
   let memoryUrl: string | undefined, memoryNew = { at: 0, n: 0 };
+  // "· N queued": For you batches held while brook is mid-thread (see core/foryou-queue.ts).
+  let queued = { at: 0, n: 0 };
+  const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? ` · ${queued.n} queued` : ""; };
   const memoryLabel = () => { if (Date.now() - memoryNew.at > 5000) memoryNew = { at: Date.now(), n: memoryUnseen() }; return memoryNew.n ? `Memory +${memoryNew.n}` : "Memory"; };
 
   pi.on("message_start", (event) => {
@@ -112,7 +116,7 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const linkText = [...(memoryUrl ? [{ label: memoryLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         const withLinks = [core, linkText].filter(Boolean).join(" · ");
         const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;
