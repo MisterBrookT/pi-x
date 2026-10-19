@@ -123,40 +123,44 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("b", { source: "DingTalk: Research", sourceKey: "dingtalk:research" })) + "\n");
   await page.getByText("Title b").waitFor({ timeout: 8000 });
   assert.deepEqual(pushes.map(p => [p.body, p.foryou]), [["Title b", true]], "push opens For you");
-  assert.match(await page.locator("#forYouSub").textContent(), /2 things need you/);
+  assert.match(await page.locator('[data-fy-tab="you"]').textContent(), /For you\s*2/);
   // Transparency: an open row says where it came from, and each button says where it runs and what it does.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
   const main = page.locator('[data-fy="c"] [data-fy-pick="0"]');
   await main.waitFor({ state: "attached", timeout: 8000 });
-  assert.match(await page.locator('.fy[data-fy="c"] .fy-from').textContent(), /Group · now · due/);
+  assert.match(await page.locator('.fp[data-fy="c"] .fp-meta').textContent(), /Group· now\s*Due/);
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
-  await page.locator('.fy[data-fy="a"] .fy-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
+  await page.locator('.fp[data-fy="a"] .fp-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
   // Nested: an action first shows the task, then asks where (here / new session / discuss), like question cards.
   await page.locator('[data-fy="c"] [data-fy-pick="0"]').click();
-  assert.deepEqual(await page.locator('[data-fy="c"] .fy-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
+  assert.deepEqual(await page.locator('[data-fy="c"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
   assert.match(await page.locator('[data-fy="c"] [data-fy-pick="0"]').textContent(), /Start test[\s\S]*Run the Databento test/);
   assert.equal(await page.locator('[data-fy="c"] .fy-src').textContent(), "飞", "source icon");
   await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
-  await page.locator('.fy[data-fy="c"]').waitFor({ state: "detached" });
+  await page.locator('.fp[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
 
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
-  await page.locator('.fy[data-fy="b"]').waitFor({ state: "detached" });
+  await page.locator('.fp[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
   await page.locator('[data-fy="a"] [data-fy-pick="0"]').click();
-  await page.locator('[data-fy="a"] .fy-where button', { hasText: "Here, in For you" }).click();
-  await page.locator('.fy[data-fy="a"]').waitFor({ state: "detached" });
+  await page.locator('[data-fy="a"] .fp-where button', { hasText: "Here, in For you" }).click();
+  await page.locator('.fp[data-fy="a"]').waitFor({ state: "detached" });
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
   await page.locator("#forYou").getByText("All clear").waitFor();
-  assert.equal(await page.getByText("Title c").count(), 0, "parked loops stay with the agent, off the page");
+  assert.equal(await page.getByText("Title c").count(), 0, "parked loops leave the feed");
+  await page.locator('[data-fy-tab="work"]').click();
+  await page.locator(".fw", { hasText: "Title c" }).waitFor();
+  assert.match(await page.locator("#forYou").textContent(), /Later[\s\S]*Title c[\s\S]*Back /);
+  await page.locator('[data-fy-tab="you"]').click();
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
-  await page.locator('.fy[data-fy="d"] [data-fy-act="done"]').click();
-  await page.locator('.fy[data-fy="d"]').waitFor({ state: "detached" });
+  await page.locator('.fp[data-fy="d"] [data-fy-act="done"]').click();
+  await page.locator('.fp[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
 
   // Finished work shows as one calm line, so brook sees it is done and not coming back.
@@ -231,6 +235,8 @@ test("one place: the bell opens the For you chat; its card is open, shows source
   assert.equal(await page.locator("#forYouCount").textContent(), "1");
   assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
   await page.locator("#forYouRow").click();
+  await page.locator('.fp[data-fy="j1"]').waitFor();
+  await page.locator(".fp-compose").click();
   await openCard(page);
   const card = page.locator('#messages .job-card[data-job="j1"]');
   await card.waitFor();
@@ -437,16 +443,59 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const st = page.locator(".fy-status");
+  const st = page.locator("#messages .fy-status");
   await st.waitFor();
   assert.match(await st.textContent(), /^Messaging a session… · 1 card waits$/);
   for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing"]) assert.equal(await page.locator(sel).count(), 0, sel);
   assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
   await put([]);
-  await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector(".fy-status")?.textContent || ""));
+  await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
   assert.match(await st.textContent(), /^Thinking… · Waiting for pix · 1 card waits$/);
-  assert.equal(await page.locator(".fy-status").count(), 1, "one steady row, updated in place");
+  assert.equal(await page.locator("#messages .fy-status").count(), 1, "one steady row, updated in place");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
+});
+
+test("feed: posts like a social For you timeline; Reply is a comment to For you; Working tab; compose opens the chat", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), [
+    item("p1", { source: "WeChat: 千羽", sourceKey: "wechat:x", title: "Dinner tonight: 赶海去 BBQ", why: "She is waiting for your OK on the place.", prepared: "EFC T9, ~¥103/person, 18:30" }),
+    item("p2", { title: "Lowes wants backtest charts", due: "2099-01-20", at: "2026-10-01T00:00:00Z" }),
+    item("p3", { line: "bench", status: "onit", session: "s1", title: "Backtest fixes", note: "minara: 3 of 5 fixed" }),
+  ].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  const post = page.locator('.fp[data-fy="p1"]');
+  await post.waitFor();
+  assert.equal(await page.locator("#forYouPage").isHidden(), false, "the bell opens the feed even when For you is live");
+  assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
+  assert.equal(await page.locator(".fp").count(), 2, "one post per thing that needs brook");
+  for (const b of await post.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
+  // Reply = a comment: it goes to For you as brook's instruction, and shows under the post.
+  await post.locator(".fp-bar [data-fy-else]").click();
+  await post.locator(".fp-reply textarea").fill("Say OK, I'll be there at 18:30");
+  const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
+  await post.locator("[data-fy-else-send]").click();
+  assert.match((await next).prompts[0], /I'll be there at 18:30/);
+  await post.locator(".fp-mine").waitFor();
+  assert.match(await post.locator(".fp-mine").textContent(), /You Say OK/);
+  // Working tab: who is on what.
+  await page.locator('[data-fy-tab="work"]').click();
+  assert.match(await page.locator("#forYou").textContent(), /Lines of work[\s\S]*News bench[\s\S]*On it[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed/);
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") });
+  // The pen opens the conversation with For you.
+  await page.locator(".fp-compose").click();
+  await page.locator("#messages").getByText("hi", { exact: true }).waitFor();
+  assert.equal(await page.locator("#forYouPage").isHidden(), true);
+  assert.deepEqual(errors, []);
 });
 
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
