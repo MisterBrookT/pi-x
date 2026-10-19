@@ -371,6 +371,34 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   assert.match(await page.locator("#input").inputValue(), /^@foryou:w\d /);
 });
 
+test("one element: the top card carries the unfinished header and expands the list inline; the card's actions stay", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), [item("m1", { title: "Reply to Lowes" }), item("m2", { line: "bench", status: "onit", session: "s1", title: "Backtest fixes" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`${base}/#token=${token}`);
+  const card = page.locator('.job-card[data-job="m1"]');
+  await card.waitFor();
+  assert.equal(await page.locator(".ln-box").count(), 0, "no separate box");
+  const head = card.locator(".job-un summary");
+  assert.match(await head.textContent(), /2 unfinished · 1 working/);
+  assert.ok((await head.boundingBox()).height >= 40);
+  assert.equal(await card.locator(".ln-item").first().isVisible(), false, "closed until tapped");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-closed.png") }); }
+  await head.click();
+  assert.equal(await card.locator(".ln-item").count(), 2);
+  assert.match(await card.locator(".ln-row:not(.ln-item)").textContent(), /News bench/);
+  for (const name of ["Later", "Done", "Not important", "Send"]) assert.equal(await card.getByRole("button", { name, exact: true }).count(), 1, name);
+  assert.equal(await card.locator("textarea").count(), 1, "free text stays");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT, fullPage: true }); }
+});
+
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
   const { unfinishedLines } = await import("../plugins/foryou/index.ts");
   const rows = unfinishedLines({ pending: [{ id: "a", title: "Reply Lowes", due: "2026-10-20" }], onit: [{ id: "b", title: "Backtest" }], later: [{ id: "c", title: "ZIA prep", wakeAt: "2026-10-17T05:55:00Z" }] });

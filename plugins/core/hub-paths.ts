@@ -1,7 +1,7 @@
 // Where the local hub lives and how to reach it: shared by every plugin that talks to the hub.
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 export const remoteHost = "127.0.0.1";
 export const remoteDefaultPort = 8787;
@@ -20,3 +20,11 @@ export async function readRemoteLinks(path = remoteLinksPath): Promise<{ label: 
 }
 
 export const relayConfigPath = join(homedir(), ".pi", "agent", "pix-remote", "relay.json");
+
+/** Minara's dashboards only belong in Minara sessions. Other links show everywhere. */
+const MINARA_LINKS = new Set(["Decision book", "Arena"]);
+export const linkFits = (label: string, cwd: string, home = homedir()) => {
+  if (!MINARA_LINKS.has(label)) return true;
+  const root = join(home, "workspace/minara");
+  return cwd === root || cwd.startsWith(root + sep);
+};

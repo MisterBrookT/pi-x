@@ -7,8 +7,9 @@ import { Container, SettingsList, Text, truncateToWidth, visibleWidth, type Sett
 import { fastModeActiveFor } from "../core/fast-mode.js";
 import { SUBAGENT_SPINNER_FRAMES, SUBAGENT_SPINNER_INTERVAL_MS } from "../core/subagent-spinner.js";
 import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type FooterOptions } from "./footer.js";
-import { readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPath } from "../core/hub-paths.ts";
+import { linkFits, readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPath } from "../core/hub-paths.ts";
 import { memoryUnseen } from "../core/memory-badge.ts";
+
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
 const labels: Record<keyof FooterOptions, string> = {
@@ -111,7 +112,7 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const linkText = [...(memoryUrl ? [{ label: memoryLabel(), url: memoryUrl }] : []), ...links].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...(memoryUrl ? [{ label: memoryLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         const withLinks = [core, linkText].filter(Boolean).join(" · ");
         const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;

@@ -212,3 +212,12 @@ test("footer: Memory shows '+N' for lines For you added since brook last looked,
 	// Only when the hub token exists (it does on brook's Mac); then Memory sits beside the other links.
 	if (/Memory/.test(line)) assert.match(line, /Memory \+1/);
 });
+
+test("footer: Decision book and Arena only under ~/workspace/minara; other links everywhere", async () => {
+	const { linkFits } = await import("../plugins/core/hub-paths.ts");
+	assert.equal(linkFits("Arena", "/h/workspace/minara/arena", "/h"), true);
+	assert.equal(linkFits("Decision book", "/h/workspace/minara", "/h"), true);
+	assert.equal(linkFits("Arena", "/h", "/h"), false);
+	assert.equal(linkFits("Arena", "/h/workspace/minara-old", "/h"), false);
+	assert.equal(linkFits("Memory", "/h", "/h"), true);
+});
