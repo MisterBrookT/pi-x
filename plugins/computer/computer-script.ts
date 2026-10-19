@@ -233,9 +233,38 @@ export const labelForRef = (stateText: string, ref: string | undefined): string 
 };
 
 /** A saved UI state. Every read is answered from the cached outline. */
+/** Options for `state.look`: one read call that replaces search / expand / inspect / read. */
+export interface LookOptions {
+	/** Find elements by text (was `search`). */
+	query?: string;
+	role?: string;
+	capability?: string;
+	/** Expand under a ref (was `expand`), or with `inspect: true` show its details (was `inspect`). */
+	ref?: string;
+	depth?: number;
+	inspect?: boolean;
+	/** Read the full text of a ref (was `read`). */
+	read?: boolean;
+	offset?: number;
+	/** Wait for a condition first (was `waitFor`). */
+	wait?: UiCondition;
+}
+
+/** Where `cua.look` points. */
+export interface LookTarget {
+	app?: string;
+	root?: string;
+	url?: string;
+	/** Re-bind a state id from an earlier call (was `cua.state`). */
+	state?: string;
+	mode?: "semantic" | "visual" | "fused" | "screen";
+}
+
 export interface CuaState {
 	readonly id: string;
 	readonly text: string;
+	/** Read more from this state without a new capture. No options: the outline itself. */
+	look(options?: LookOptions): Promise<string>;
 	search(query: { text?: string; role?: string; capability?: string }): Promise<string>;
 	expand(ref: string, depth?: number): Promise<string>;
 	inspect(ref: string): Promise<string>;
@@ -247,6 +276,8 @@ export interface CuaState {
 }
 
 export interface CuaApi {
+	/** One entry point: an app, a window root, a URL (launches the browser), or an earlier state id. */
+	look(target?: LookTarget): Promise<CuaState>;
 	roots(query?: { text?: string; app?: string; bundleId?: string; pid?: number; kind?: string }): Promise<string>;
 	observe(target?: { root?: string; app?: string; mode?: "semantic" | "visual" | "fused" | "screen" }): Promise<CuaState>;
 	launchBrowser(url?: string): Promise<CuaState>;
@@ -370,6 +401,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		const state: CuaState = {
 			id,
 			text,
+			look: async () => text, // replaced by withLook
 			async search(query) {
 				const needle = (query.text ?? "").toLowerCase();
 				return text.split("\n").slice(1).filter((row) => row.toLowerCase().includes(needle)).join("\n");
@@ -453,9 +485,26 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		for (const key of Object.keys(state)) {
 			if (typeof state[key as keyof CuaState] === "function") Object.defineProperty(state, key, { enumerable: false });
 		}
-		return trackMethods(state);
+		return trackMethods(withLook(state));
 	};
 	let screenSerial = 0;
+
+	/** `state.look(options)` dispatches to the narrower reads, which stay as aliases. */
+	const lookOn = (state: CuaState) => async (opts: LookOptions = {}): Promise<string> => {
+		const parts: string[] = [];
+		if (opts.wait) parts.push(await state.waitFor(opts.wait));
+		if (opts.query !== undefined || opts.role !== undefined || opts.capability !== undefined) {
+			parts.push(await state.search({ text: opts.query, role: opts.role, capability: opts.capability }));
+		} else if (opts.ref && opts.read) parts.push(await state.read(opts.ref, opts.offset));
+		else if (opts.ref && opts.inspect) parts.push(await state.inspect(opts.ref));
+		else if (opts.ref) parts.push(await state.expand(opts.ref, opts.depth));
+		else if (!opts.wait) parts.push(state.text);
+		return parts.join("\n");
+	};
+	const withLook = (state: CuaState): CuaState => {
+		Object.defineProperty(state, "look", { value: lookOn(state), enumerable: false, writable: true, configurable: true });
+		return state;
+	};
 
 	const makeState = (result: ToolResultLike, previousId?: string): CuaState => {
 		const id = stateIdOf(result) ?? previousId;
@@ -467,6 +516,7 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 		const state: CuaState = {
 			id,
 			text,
+			look: async () => text, // replaced by withLook
 			async search(query) {
 				spend("search_ui", JSON.stringify(query));
 				return textOf(await operations.search({ stateId: id, ...query }));
@@ -552,10 +602,22 @@ export const createCuaRuntime = (options: CuaApiOptions): CuaRuntime => {
 				Object.defineProperty(state, key, { enumerable: false });
 			}
 		}
-		return trackMethods(state);
+		return trackMethods(withLook(state));
 	};
 
 	const cua: CuaApi = {
+		async look(target = {}) {
+			if (target.state) return cua.state(target.state);
+			if (target.url) return cua.launchBrowser(target.url);
+			if (target.mode === "screen") return cua.observe({ app: target.app, mode: "screen" });
+			if (target.app && !target.root) {
+				const roots = await cua.roots({ app: target.app });
+				const root = /@r\d+/.exec(roots)?.[0];
+				if (!root) throw new Error(`No window found for ${target.app}. Is it open?`);
+				return cua.observe({ root, mode: target.mode });
+			}
+			return cua.observe({ root: target.root, mode: target.mode });
+		},
 		async roots(query) {
 			spend("find_roots", query ? JSON.stringify(query) : undefined);
 			return textOf(await operations.find(query ?? {}));

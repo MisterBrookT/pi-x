@@ -97,7 +97,7 @@ test("registers a single computer tool with a valid schema", () => {
 
 test("the description documents the cua API the model must write against", () => {
 	const { tool } = harness();
-	for (const fragment of ["cua.observe", "act(action | action[], expect)", "eval(expression)", "cua.state("]) {
+	for (const fragment of ["cua.look(", "s.look(", "act(action | action[], expect, { target })", ".eval(", "Old names still work"]) {
 		assert.ok(tool.description.includes(fragment), `missing ${fragment}`);
 	}
 	// The full tutorial lives in the computer-use skill; the schema pays for

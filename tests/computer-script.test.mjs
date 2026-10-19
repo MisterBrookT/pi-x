@@ -647,3 +647,30 @@ test("regression: a script returning an un-awaited Promise leaves only plain dat
   const loop = {}; loop.self = loop;
   assert.equal(typeof plainValue(loop), "string");
 });
+
+test("look is the one read call: outline, query, expand, inspect, read, wait; old names still work", async () => {
+	const { runtime, calls } = runtimeFor();
+	const s = await runtime.cua.look();
+	assert.match(await s.look(), /button "Send"/);
+	await s.look({ query: "Send" });
+	await s.look({ ref: "@e1", depth: 2 });
+	await s.look({ ref: "@e9", inspect: true });
+	await s.look({ ref: "@e9", read: true });
+	await s.look({ wait: { text: "Sent" } });
+	assert.deepEqual(calls.map((c) => c.name), ["observe", "search", "expand", "inspect", "readText", "waitFor"]);
+	assert.equal(calls[1].params.text, "Send");
+	await s.search({ text: "x" }); // alias kept
+	assert.deepEqual(structuredClone(s), { id: s.id, text: s.text }, "look stays off the cloned shape");
+});
+
+test("cua.look targets: app → first window root, url → browser, state → rebind", async () => {
+	const roots = [];
+	const { runtime, calls } = runtimeFor({ operations: { find: async (q) => (roots.push(q), { content: [{ type: "text", text: '@r4 window "Notes"' }] }) } });
+	await runtime.cua.look({ app: "Notes" });
+	assert.deepEqual(roots, [{ app: "Notes" }]);
+	assert.equal(calls.find((c) => c.name === "observe").params.root, "@r4");
+	await runtime.cua.look({ url: "https://example.com" });
+	assert.equal(calls.find((c) => c.name === "launchBrowser").params.url, "https://example.com");
+	const again = await runtime.cua.look({ state: "S7" });
+	assert.equal(again.id, "S7");
+});

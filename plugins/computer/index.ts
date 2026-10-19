@@ -29,20 +29,19 @@ import { checkPermissions, renderReport } from "./computer-permissions.ts";
 const BACKEND = "@injaneity/pi-computer-use";
 
 const API_DOC = `
-Write JavaScript with \`cua\`, \`log(...)\`, \`signal\`; \`return\` the result. One browser launch per script; reuse it with \`page.navigate(url)\` or \`cua.state(id)\` later. Keep scripts short: they hold pointer, keyboard, and focus, and stop after two minutes.
+Write JavaScript with \`cua\`, \`log(...)\`, \`signal\`; \`return\` the result. One browser launch per script. Keep scripts short: they hold pointer, keyboard, and focus, and stop after two minutes.
 
-  const roots = await cua.roots({ app: "Notes" });   // @r refs
-  const state = await cua.observe({ root: "@r1" });  // -> CuaState
-  const page  = await cua.launchBrowser("https://example.com");
-  const again = await cua.state("S3");               // state from an earlier call
+Three calls:
+  const s = await cua.look({ app: "Notes" });        // or { url }, { root: "@r1" }, { state: "S3" }, { app: "WeChat", mode: "screen" }
+  await s.look({ query: "Send" })                     // read more without a new capture: { ref, depth } | { ref, inspect: true } | { ref, read: true } | { wait: { text, until } }
+  const next = await s.act(action | action[], expect, { target })   // -> next state
+  await page.eval("document.title")                   // browser pages; page.navigate(url) to move
 
-CuaState: id, text; search({ text, role, capability }), expand(ref, depth), inspect(ref), read(ref, offset), waitFor({ text, ref, until, timeoutMs }), act(action | action[], expect) -> next state, navigate(url) and eval(expression) on browser pages.
+Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse, e.g. { action: "setText", ref: "@e7", text: "hi" }. Prefer refs; x/y only without an element. Always pass expect, e.g. { text: "Sent", until: "present" }.
 
-Actions: press | click | setText | typeText | keypress | scroll | drag | moveMouse, e.g. { action: "setText", ref: "@e7", text: "hello" }. Prefer refs; use x/y only without an accessibility element. keypress and typeText need a ref, coordinates, or a preceding click in the same act array.
+Irreversible acts (Send/Pay/Delete, Enter in screen mode) need { target: { title } } (exact window/chat title) or { target: { url } }; re-checked before running, refused on mismatch, then confirmed by the user once.
 
-No AX tree (WeChat): \`cua.observe({ app, mode: "screen" })\` gives OCR @t refs. Irreversible acts (Send/Pay, screen Enter) need act(a, expect, { target: { title } | { url } }), re-checked before running.
-
-Use the state act returns instead of observing again. Batch deterministic steps into one act. Use eval to extract from pages and act for what the user must see happen. They also prompt the user once each.
+Screen mode (no AX tree, e.g. WeChat): OCR lines as @t refs. Old names still work: cua.roots/observe/state/launchBrowser, state.search/expand/inspect/read/waitFor, cua.observe, act(action | action[], expect), eval(expression).
 `.trim();
 
 const Params = Type.Object({
