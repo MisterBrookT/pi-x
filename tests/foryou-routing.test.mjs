@@ -393,6 +393,31 @@ test("Mac: with several cards waiting, ← / → flip between them in the picker
 	assert.equal(keys, undefined, "key listener removed when the picker closes");
 });
 
+for (const n of [2, 3]) test(`Mac regression: one ← / → press flips one card, even when the terminal also sends the key release (${n} cards)`, async () => {
+	const cards = ["a", "b", "c"].slice(0, n).map((id, k) => ({ ...loop(id), at: `2026-10-09T0${9 - k}:00:00Z` }));
+	const d = tmp(...cards);
+	const pi = fakePi(), shown = [];
+	register(pi, { dir: d, sessions: async () => [], answer: async () => "ok", cardPollMs: 60_000, badge: () => {} });
+	const ctx = macCtx("pix-foryou", [], shown);
+	let keys;
+	ctx.ui.onTerminalInput = h => { keys = h; return () => { if (keys === h) keys = undefined; }; };
+	// Each press sends press + release (kitty): the release reaches whatever picker is open next.
+	const presses = [["\x1b[1;1:1C", "\x1b[1;1:3C"], ["\x1b[1;1:1C", "\x1b[1;1:3C"], ["\x1b[1;1:1D", "\x1b[1;1:3D"]];
+	let pendingRelease;
+	ctx.ui.select = async (title) => {
+		shown.push(title.split("\n")[0]);
+		if (pendingRelease) { assert.deepEqual(keys(pendingRelease), { consume: true }); pendingRelease = undefined; }
+		const p = presses.shift();
+		if (!p) return undefined;
+		keys(p[0]); keys(p[0]); // a stray duplicate in the same picker is ignored too
+		pendingRelease = p[1];
+		return undefined;
+	};
+	await cardCmd(pi, ctx);
+	const want = n === 2 ? ["Loop b", "Loop a", "Loop b", "Loop a"] : ["Loop c", "Loop b", "Loop a", "Loop b"]; // oldest first
+	assert.deepEqual(shown, want);
+});
+
 test("Mac regression: the 4s card refresh does not close a picker showing card 2; it closes only when that card is answered elsewhere; every step is logged", async () => {
 	const d = tmp(loop("a"), { ...loop("b"), at: "2026-10-09T09:00:00Z" });
 	const pi = fakePi(), shown = [];

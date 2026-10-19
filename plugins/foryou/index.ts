@@ -12,7 +12,7 @@ import { LOOP_MESSAGE, loopMessage, loopPromptSummary, quietSummary } from "../c
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { matchesKey } from "@earendil-works/pi-tui";
+import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
@@ -237,8 +237,10 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			// ←/→ flip between waiting cards without leaving the picker.
 			let step = 0;
 			const flip = (it.left && ctx.ui.onTerminalInput) ? ctx.ui.onTerminalInput((data: string) => {
+				// One press = one flip: a key release (kitty protocol) must not flip the next card again.
 				const d = matchesKey(data, "right") ? 1 : matchesKey(data, "left") ? -1 : 0;
 				if (!d) return undefined;
+				if (isKeyRelease(data) || step) return { consume: true };
 				step = d; cardLog(deps.dir, d > 0 ? "key →" : "key ←", { id: it.id }); close?.abort();
 				return { consume: true };
 			}) : undefined;
