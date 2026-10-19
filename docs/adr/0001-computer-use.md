@@ -252,3 +252,28 @@ actionable ref owned by that page's state.
 
 Timing: a three-call desktop script completes in about 1 second, a five-call
 browser script in about 2 seconds.
+
+## Addendum: iteration 2 ("general and simple")
+
+**Step 1 shipped** (hub `ea5a731`). The WeChat send helper now opens only the exact-name Contacts / Group Chats / Most used result, strips `\r`, and re-reads the open chat's title by OCR right before Enter. Any mismatch refuses and clears the draft. It also refuses on a locked screen. Tested live: the exact match found 浙大 李老师 报销 (not the VAG group), a missing name was refused, and one test was sent to brookkk. Trigger: on 2026-10-19 search + Enter opened a 73-person group instead of a private chat (caught at preview).
+
+**Lesson that shapes 2-4:** before an irreversible step, the agent must check *who or what it is acting on*, not only that a button exists. And for apps without an AX tree, "look" has to mean pixels + OCR.
+
+### Step 2: screen-only apps inside the same tool (design)
+- `cua.observe({ app: "WeChat" })` already returns a state. When the AX tree is empty or near-empty (WeChat 4.x: a window, 2 groups, 3 buttons), the state switches to **screen mode**: a window screenshot + OCR lines become pseudo-refs (`@t12 text "浙大 李老师 报销" at x,y`), and `act({ref:"@t12", action:"click"})` posts a real mouse event at the line's center.
+- Irreversible gate in screen mode: a `send`-like keypress/click needs a `target` assertion, e.g. `act([...], { expect:..., target:{ title:"浙大 李老师 报销" } })`. The runtime re-OCRs the title region right before the act and refuses on mismatch. The same assertion also works for browsers (URL / heading) and AX apps (window title).
+- `send.sh` becomes a thin recipe over this (prepare = observe + find exact + act; send = target-checked Enter). Its rules stay in the WeChat skill; the mechanism lives in the tool.
+- Size: OCR + click helpers are about 60 lines of Swift (already written for step 1), plus about 150 lines of TS in `plugins/computer`.
+
+### Step 3: about 3 calls (design)
+- `look(target, { query?, depth? })` → state: AX outline (or OCR in screen mode) + screenshot handle. `query` replaces `search_ui`; `depth`/`ref` replace `expand_ui`/`inspect_ui`.
+- `act(state, actions, { expect, target })` → next state. Covers press/click/type/key/scroll/drag by ref or x/y.
+- `eval(state, js)` for browser pages only.
+- Plus `launchBrowser`/`navigate` kept as helpers on `look`. `roots`, `waitFor` and `read` fold in as `look` options. The backend's 11 tools stay underneath; only the model-facing `cua` surface shrinks. This is mostly docs + a compat layer: old names keep working for a while.
+
+### Step 4: AX diffs between looks (design)
+- Cache the last outline per state lineage. On the next `look`/`act` result, send `+ added`, `- removed` and `~ changed` lines (keyed by role + label + path), plus a full outline only when more than 40% of it changed or on request (`look({ full:true })`).
+- Screen mode diffs OCR lines the same way (same text + similar position = unchanged).
+- Expected win: a 150-ref Notes outline after one click becomes 3-10 lines. Risk: refs must stay stable across diffs; keep ids for unchanged elements and re-key only what changed.
+
+**Order and risk:** 2 → 3 → 4. Step 2 is the most valuable (it removes the separate WeChat script path) and is medium-risk. Step 3 is low-risk (surface only). Step 4 is medium-risk (ref stability) and gets its own tests against Notes and a browser page.
