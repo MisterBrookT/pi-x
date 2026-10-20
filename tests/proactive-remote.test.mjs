@@ -559,3 +559,17 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 1, "not shown twice");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
+
+test("Mac: the Unfinished list and the card pager show one row per job (a line with 2+ loops), with its tasks inside", async () => {
+  const { unfinishedLines, cardLines, cardTitle } = await import("../plugins/foryou/index.ts");
+  const lines = [{ id: "kl", name: "Kairos launch" }];
+  const rows = unfinishedLines({ lines, pending: [{ id: "a", title: "Review doc", line: "kl" }, { id: "x", title: "Reply Lowes" }, { id: "b", title: "Arena page", line: "kl" }], onit: [{ id: "c", title: "Deploy", line: "kl" }] });
+  assert.deepEqual(rows.map(r => r.id), ["line:kl", "x"]);
+  assert.match(rows[0].label, /^needs you Kairos launch · 3 tasks · 2 need you$/);
+  assert.deepEqual(rows[0].tasks, ["a: Review doc (needs you)", "b: Arena page (needs you)", "c: Deploy (on it)"]);
+  const one = unfinishedLines({ lines, pending: [{ id: "a", title: "Review doc", line: "kl" }] });
+  assert.match(one[0].label, /^needs you Review doc$/, "a lone loop stays a plain row");
+  const card = { line: "Kairos launch", related: [{ title: "Arena page" }], title: "Review doc", source: "s", left: 0, choices: [] };
+  assert.match(cardLines(card)[0], /Kairos launch · 2 tasks/);
+  assert.match(cardTitle(card), /^Kairos launch · 2 tasks\n  • Review doc\n  • Arena page/);
+});

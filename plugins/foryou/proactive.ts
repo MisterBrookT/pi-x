@@ -181,6 +181,8 @@ Decide, in this order:
    Not new: the same ask again (a reminder, "再问一次") when a loop for it is open or was recently done/resolved
    (see reactions below). Update or close that loop instead.
 4. The map. Every new or updated loop gets "line": the id of the line it belongs to (omit if none fits).
+   Loops of the same job (same project or topic, e.g. deploy, docs and landing page of one launch) share one line:
+   brook sees one card per line with the loops as its tasks, and decides once per job.
    Progress on a line (a result, a delivery, a decision) moves that line's "state" in "lines", often with no alert at all:
    e.g. Knight posted backtest numbers that need nothing from him -> {"id": "backtest", "state": "NewsLiquid backtest v2 done: +3.1% after fees"}.
    A new lasting thread of his work (not a one-off ask) may become a new line: {"id": "short-id", "name": "2-4 words", "state": "...", "next": "...", "project": "~/path"}.

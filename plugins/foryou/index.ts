@@ -80,22 +80,35 @@ export const choiceLabel = (c: { label: string; run: string; name?: string }) =>
 
 /** The waiting card as a few short lines above the editor. */
 /** Every unfinished loop, one line each, for the list brook opens himself (⌘⇧Y when no card waits, or from the card). */
-export function unfinishedLines(v: { pending?: any[]; onit?: any[]; later?: any[] }): { id: string; label: string }[] {
+export function unfinishedLines(v: { pending?: any[]; onit?: any[]; later?: any[]; lines?: { id: string; name: string }[] }): { id: string; label: string; tasks?: string[] }[] {
 	const day = (t: string) => t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
 	const row = (i: any, tag: string) => ({ id: i.id, label: `${tag.padEnd(9)} ${i.title}${i.due ? ` · due ${day(i.due)}` : ""}${tag === "later" && i.wakeAt ? ` · back ${day(i.wakeAt)}` : ""}` });
-	return [...(v.pending ?? []).map(i => row(i, "needs you")), ...(v.onit ?? []).map(i => row(i, "on it")), ...(v.later ?? []).map(i => row(i, "later"))];
+	const tagged = [...(v.pending ?? []).map(i => [i, "needs you"] as const), ...(v.onit ?? []).map(i => [i, "on it"] as const), ...(v.later ?? []).map(i => [i, "later"] as const)];
+	// One row per job: a line with 2+ unfinished loops is one row ("Kairos launch · 3 tasks · 2 need you"), at its first loop's place.
+	const jobs = new Map<string, (typeof tagged)[number][]>();
+	for (const t of tagged) if (t[0].line && v.lines?.some(l => l.id === t[0].line)) jobs.set(t[0].line, [...(jobs.get(t[0].line) ?? []), t]);
+	const out: { id: string; label: string; tasks?: string[] }[] = [], done = new Set<string>();
+	for (const t of tagged) {
+		const g = t[0].line ? jobs.get(t[0].line) : undefined;
+		if (!g || g.length < 2) { out.push(row(...t)); continue; }
+		if (done.has(t[0].line)) continue;
+		done.add(t[0].line);
+		const you = g.filter(x => x[1] === "needs you").length, name = v.lines!.find(l => l.id === t[0].line)!.name;
+		out.push({ id: `line:${t[0].line}`, label: `${(you ? "needs you" : t[1]).padEnd(9)} ${name} · ${g.length} tasks${you ? ` · ${you} need you` : ""}`, tasks: g.map(x => `${x[0].id}: ${x[0].title} (${x[1]})`) });
+	}
+	return out;
 }
 
-export const cardLines = (it: { title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
-	`● ${it.title.length > 60 ? `${it.title.slice(0, 59)}…` : it.title}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
+export const cardLines = (it: { line?: string; related?: unknown[]; title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
+	`● ${((t: string) => t.length > 60 ? `${t.slice(0, 59)}…` : t)(it.line && it.related?.length ? `${it.line} · ${it.related.length + 1} tasks` : it.title)}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
 ];
 
 /** A session to hand the task to, as one option in the card's list. */
 export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? ` · ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
-export const cardTitle = (it: { prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
-	it.title,
+export const cardTitle = (it: { line?: string; related?: { title: string }[]; prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
+	...(it.line && it.related?.length ? [`${it.line} · ${it.related.length + 1} tasks`, `  • ${it.title}`, ...it.related.map(r => `  • ${r.title}`), ""] : [it.title]),
 	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
 	"",
 	...(it.why ? [it.why, ""] : []),
@@ -146,7 +159,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			sourceKey: Type.Optional(Type.String({ description: "create: the source key, as in the forwarded message" })),
 			howToRead: Type.Optional(Type.String({ description: "create: how to read the original messages" })),
 			refs: Type.Optional(Type.Array(Type.String(), { description: "create: message ids" })),
-			line: Type.Optional(Type.String({ description: "create: the line id it belongs to" })),
+			line: Type.Optional(Type.String({ description: "create: the line id it belongs to. Always pick the best existing line (same project or topic); loops of the same job share one line so brook sees one job card. Make a new line only for a new lasting job." })),
 			project: Type.Optional(Type.String({ description: "create: project folder" })),
 			due: Type.Optional(Type.String({ description: "create: YYYY-MM-DD" })),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
@@ -227,7 +240,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!rows.length) { ctx.ui.notify("Nothing unfinished.", "info"); return; }
 		const pick = await ctx.ui.select(`Unfinished · ${rows.length}`, rows.map(r => r.label));
 		const row = rows.find(r => r.label === pick);
-		if (row) pi.sendUserMessage(`Let's look at loop ${row.id}: ${row.label.replace(/^\S+(?: you)?\s+/, "")}. Where does it stand?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+		if (row?.tasks) pi.sendUserMessage(`Let's look at the job "${row.label.replace(/^\S+(?: you)?\s+/, "")}". Its tasks:\n${row.tasks.map(t => `- ${t}`).join("\n")}\nWhere does each stand, and what do you need from me (once, for the whole job)?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+		else if (row) pi.sendUserMessage(`Let's look at loop ${row.id}: ${row.label.replace(/^\S+(?: you)?\s+/, "")}. Where does it stand?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 	};
 	const answer = async (ctx: any, skip = 0): Promise<void> => {
 		const it = currentCard(deps.dir, await sessions().catch(() => []), Date.now(), skip);
