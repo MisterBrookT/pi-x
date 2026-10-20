@@ -486,7 +486,7 @@ Its buttons: ${c.choices.map(x => `"${x.label}" -> ${x.run}`).join(", ")}; plus 
 ${live.map(s => `- ${s.name} (${s.id}) in ${s.cwd}${s.busy ? ", busy" : ""}`).join("\n") || "(none known)"}
 
 ### Session board (chat): what each live session says it is doing
-${readBoard().filter(b => b.name !== "for-you").map(b => `- ${b.name} in ${b.cwd}: ${b.doing || b.status || "(nothing posted)"}${b.claims?.length ? `; claims ${b.claims.slice(0, 4).join(", ")}` : ""}`).join("\n") || "(empty)"}`;
+${readBoard().filter(b => b.name !== "for-you").map(b => `- ${b.name}${b.session ? ` (${b.session})` : ""} in ${b.cwd}: ${b.doing || b.status || "(nothing posted)"}${b.claims?.length ? `; claims ${b.claims.slice(0, 4).join(", ")}` : ""}`).join("\n") || "(empty)"}`;
 }
 
 /** One line from a turn's last reply: its first sentence or line, plain. */

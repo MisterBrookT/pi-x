@@ -1,3 +1,4 @@
+import { boardNameFor } from "../core/chat-board.ts";
 /**
  * The For you coordinator: one Pi session (id "pix-foryou") that looks after brook's open loops.
  * It gets a map of what is open each turn, plus one `loops` tool, and decides the rest itself:
@@ -184,7 +185,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			if (p.action === "done") return done(doneItem(p.id, deps.dir) ? "Done." : `No open loop ${p.id}.`);
 			if (p.action === "drop") return done(dismissItem(p.id, deps.dir) ? "Dropped." : `No open loop ${p.id}.`);
 			if (!p.into || p.into === forYouSession.id) return done("Name a session id or \"new\"; to do it here, just do it.");
-			return done((await (deps.handOff ?? handOff)(p.id, p.into, p.cwd)) ? `Handed ${p.id} to ${p.into === "new" ? "a new session" : p.into}.` : `Could not hand off ${p.id} (closed, or no folder for a new session).`);
+			return done((await (deps.handOff ?? handOff)(p.id, p.into, p.cwd)) ? `Handed ${p.id} to ${p.into === "new" ? "a new session" : `${boardNameFor({ id: p.into, name: "", cwd: "" }) ?? "session"} (${p.into})`}. Its reply comes back here on the same thread.` : `Could not hand off ${p.id} (closed, or no folder for a new session).`);
 		},
 	});
 

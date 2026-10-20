@@ -1,7 +1,7 @@
 // The For you coordinator gets one tool and a map of open loops, only in its own session.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import register from "../plugins/foryou/index.ts";
@@ -18,6 +18,8 @@ function fakePi() {
 	};
 }
 process.env.PIX_CHAT_DIR ??= mkdtempSync(join(tmpdir(), "pix-chat-empty-"));
+// Two sessions in one folder share a name; For you must see which is which (board name + session id).
+for (const [n, sid] of [["minara", "A1"], ["minara-3", "C3"]]) { mkdirSync(join(process.env.PIX_CHAT_DIR, n), { recursive: true }); writeFileSync(join(process.env.PIX_CHAT_DIR, n, "me.json"), JSON.stringify({ name: n, cwd: "/w/minara", pid: process.pid, session: sid, doing: n === "minara-3" ? "Kairos eval" : "", at: 1 })); }
 const ctx = id => ({ sessionManager: { getSessionId: () => id } });
 
 test("coordinator: loops tool and context only in the For you session", async () => {
@@ -43,6 +45,9 @@ test("coordinator: loops tool and context only in the For you session", async ()
 	assert.doesNotMatch(systemPrompt, /Small loops|Real work in a project/, "no hard routing rules: it decides");
 
 	const run = p => pi.tools.get("loops").execute("c1", p).then(r => r.content[0].text);
+	assert.match(systemPrompt, /- minara-3 \(C3\) in \/w\/minara: Kairos eval/, "For you sees each session's id next to its board name");
+	assert.match(await run({ action: "handoff", id: "a", into: "C3" }), /Handed a to minara-3 \(C3\)\. Its reply comes back here/, "and is told exactly who got it");
+	handed.length = 0;
 	assert.match(await run({ action: "handoff", id: "a", into: "new", cwd: "~/nd" }), /Handed a to a new session/);
 	assert.deepEqual(handed, [["a", "new", "~/nd"]]);
 	assert.match(await run({ action: "handoff", id: "a" }), /to do it here, just do it/);
