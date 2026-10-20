@@ -126,6 +126,8 @@ test("regression: ✓ Done and Now work from the phone through the relay", async
 	const { relayAllowed } = await import("../plugins/remote/remote-relay-agent.ts");
 	for (const verb of ["act", "dismiss", "later", "done", "now", "card"]) assert.ok(forYouRelayAllowed(`/api/foryou/abc123/${verb}`, "POST"), verb);
 	assert.ok(!forYouRelayAllowed("/api/foryou/abc123/rm", "POST"));
+	assert.ok(forYouRelayAllowed("/api/foryou/line/bench/hide", "POST"), "swipe a line away from the phone");
+	assert.ok(!forYouRelayAllowed("/api/foryou/line/bench/hide", "GET"));
 });
 
 test("health: a source failing 3 checks in a row shows in For you; one success clears it", async () => {

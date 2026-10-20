@@ -77,3 +77,11 @@ export function trackLine(lineId: string, owner: { id: string; name?: string; st
 	writeLines(lines, dir);
 	return true;
 }
+
+/** Retire a line by id (brook swiped it away). False when there is no such live line. */
+export function hideLine(id: string, dir?: string): boolean {
+	const lines = readLines(dir), l = lines.find(x => x.id === id && !x.hidden);
+	if (!l) return false;
+	l.hidden = true; l.updated = new Date().toISOString(); writeLines(lines, dir);
+	return true;
+}

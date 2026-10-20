@@ -156,7 +156,9 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.locator("#forYou").getByText("All clear").count(), 0, "no big empty state");
   assert.equal(await page.locator(".fp:not(.fw)", { hasText: "Title c" }).count(), 0, "parked loops leave the feed");
   // Parked loops fold into "Later · N" at the bottom of the same feed.
-  assert.match(await page.locator("#forYou .fw-later").textContent(), /Later · 1[\s\S]*Title c[\s\S]*back /);
+  await page.locator('#forYou [data-fy-filter="later"]').click();
+  await page.locator('#forYou .fp.later', { hasText: "Title c" }).waitFor();
+  await page.locator('#forYou [data-fy-filter="all"]').click();
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
@@ -372,7 +374,7 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
   await page.locator("#messages .fy-feed .fw").first().waitFor();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /Doing 3[\s\S]*minara[\s\S]*News bench[\s\S]*All 5 fixes are done/);
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /News bench[\s\S]*minara[\s\S]*All 5 fixes are done/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 
@@ -438,6 +440,28 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   assert.equal(await page.locator("#messages .fw-trail li.now").count() > 0, true, "the newest note is highlighted");
   if (process.env.PIX_SHOT) { await page.locator(".fw").first().scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") }); }
   assert.equal(await page.locator(".fp-compose:visible").count(), 0, "no pen: the composer below is the chat");
+  // One list: no Ready/Doing section headers; filter chips instead, default All.
+  assert.equal(await page.locator("#messages .fw-h").count(), 0);
+  assert.equal(await page.locator('#messages [data-fy-filter="all"]').getAttribute("aria-selected"), "true");
+  await page.locator('#messages [data-fy-filter="doing"]').click();
+  assert.equal(await page.locator('#messages .fp[data-fy="p2"]').count(), 0, "Doing hides what waits on brook");
+  await page.locator('#messages [data-fy-filter="all"]').click();
+  // Tap a post: its own page with the full progress, a comment box, and a jump to the session.
+  await page.locator('#messages .fw[data-fy-detail="i:p3"] .fw-t').click();
+  await page.locator("#messages .fd .fd-steps li.now", { hasText: "3 of 5 fixed" }).waitFor();
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-detail.png") });
+  assert.equal(await page.locator("#messages .fd .fd-reply textarea").count(), 1);
+  await page.locator("#messages [data-fy-back]").click();
+  await page.locator('#messages .fp[data-fy="p2"]').waitFor();
+  // Swipe a stale post sideways: it is removed for good.
+  const card = page.locator('#messages .fp[data-fy="p2"]'), box = await card.boundingBox();
+  const touch = async (type, x) => card.evaluate((el, [type, x, y]) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y }); el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], changedTouches: [t] })); }, [type, x, box.y + 20]);
+  await touch("touchstart", box.x + 40); for (const dx of [20, 80, 160, 260]) await touch("touchmove", box.x + 40 + dx); await touch("touchend", box.x + 300);
+  await page.locator('#messages .fp[data-fy="p2"]').waitFor({ state: "detached" });
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
+  // Lines of work swipe away too (retired, not deleted).
+  assert.equal((await fetch(`${base}/api/foryou/line/bench/hide`, { method: "POST", headers: auth })).status, 200);
+  assert.equal(JSON.parse(readFileSync(join(dir, "lines.json"), "utf8"))[0].hidden, true);
   assert.deepEqual(errors, []);
 });
 

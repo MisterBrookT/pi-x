@@ -1,3 +1,4 @@
+import { hideLine } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
@@ -14,7 +15,7 @@ export interface ForYouHubOptions {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path);
+	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/hide$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
@@ -83,6 +84,9 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 				onProactive();
 				return { status: 200, body: { ok: true } };
 			}
+			// Swipe away a stale line of work: retire it (hidden), like the judge does.
+			const lm = method === "POST" && path.match(/^\/api\/foryou\/line\/([A-Za-z0-9_-]{1,60})\/hide$/);
+			if (lm) { const ok = hideLine(lm[1], dir); onProactive(); return ok ? { status: 200, body: { ok } } : { status: 404, body: { error: "no such line" } }; }
 			const m = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
 			if (method !== "POST" || !m) return undefined;
 			const input = await body().catch(() => ({})) as any;
