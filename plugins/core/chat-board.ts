@@ -18,9 +18,13 @@ const chatRootDir = () => process.env.PIX_CHAT_DIR ?? join(homedir(), ".pi/agent
 const slugOf = (s: string) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "pi";
 
 /** The board name of a live session: same folder, and its name (or name-2, name-3…) matches. */
-export function boardNameFor(s: { name: string; cwd: string }, root = chatRootDir()): string | undefined {
+export function boardNameFor(s: { id?: string; name: string; cwd: string }, root = chatRootDir()): string | undefined {
+	const board = readBoard(root);
+	// The board entry that IS this session wins: several sessions in one folder share a name (minara, minara-2, …).
+	const own = s.id ? board.find(b => b.session === s.id) : undefined;
+	if (own) return own.name;
 	const base = slugOf(s.name);
-	const hits = readBoard(root).filter(b => b.cwd === s.cwd && (b.name === base || b.name.startsWith(`${base}-`)));
+	const hits = board.filter(b => b.cwd === s.cwd && (b.name === base || b.name.startsWith(`${base}-`)));
 	return hits.length === 1 ? hits[0].name : hits.find(b => b.name === base)?.name;
 }
 

@@ -78,6 +78,12 @@ test("handoff: a live session on the chat board gets a chat handoff from for-you
   writeFileSync(join(chat, "minara-2", "me.json"), JSON.stringify({ name: "minara-2", cwd: "/w/minara", pid: process.pid, at: 1 }));
   assert.equal(boardNameFor({ name: "minara", cwd: "/w/minara" }, chat), "minara-2");
   assert.equal(boardNameFor({ name: "minara", cwd: "/elsewhere" }, chat), undefined);
+  // Same folder, same name: the board entry of THIS session wins, not the bare "minara" (the bug: work went to the wrong session).
+  for (const [n, sid] of [["minara", "A"], ["minara-3", "C"]]) { mkdirSync(join(chat, n), { recursive: true }); writeFileSync(join(chat, n, "me.json"), JSON.stringify({ name: n, cwd: "/w/minara", pid: process.pid, session: sid, at: 1 })); }
+  assert.equal(boardNameFor({ id: "C", name: "minara", cwd: "/w/minara" }, chat), "minara-3");
+  assert.equal(boardNameFor({ id: "A", name: "minara", cwd: "/w/minara" }, chat), "minara");
+  for (const n of ["minara", "minara-3"]) rm(join(chat, n), { recursive: true, force: true });
+  await new Promise(r => setTimeout(r, 50));
   const it = createItem({ title: "Run backtest", why: "Lowes asks", source: "群", project: "/w/minara" }, dir);
   const queued = [];
   const done = await actItem(it.id, { dir, live: [{ id: "s1", name: "minara", cwd: "/w/minara" }], into: "s1", send: (s, x) => (queued.push(s), true),
