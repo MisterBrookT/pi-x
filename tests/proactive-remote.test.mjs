@@ -374,7 +374,7 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
   await page.locator("#messages .fy-feed .fw").first().waitFor();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /News bench[\s\S]*minara[\s\S]*All 5 fixes are done/);
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /All 5 fixes are done[\s\S]*News bench[\s\S]*minara[\s\S]*Open: Title w1/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 

@@ -545,3 +545,18 @@ test("session names on cards: three sessions in one folder show their unique boa
 	await cardCmd(pi, macCtx("pix-foryou", [], shown));
 	assert.equal(shown[0].options.filter(o => /^Do it in/.test(o)).length, 0, shown[0].options.join(" | "));
 });
+
+test("a line with nothing concrete is not a post: forYouView gives each line its open loops", async () => {
+	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { forYouView } = await import("../plugins/foryou/proactive-store.ts");
+	const dir = mkdtempSync(join(tmpdir(), "fy-lines-"));
+	writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD / ZJU", state: "Ongoing", updated: "x" }, { id: "b", name: "Bench", project: "~/w/nd", state: "s", updated: "x" }]));
+	writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "q1", at: new Date().toISOString(), title: "Check the result", why: "w", line: "phd", source: "DingTalk", status: "pending" }) + "\n");
+	const v = forYouView(dir);
+	const phd = v.lines.find(l => l.id === "phd"), b = v.lines.find(l => l.id === "b");
+	assert.deepEqual(phd.loops.map(l => [l.title, l.you]), [["Check the result", true]], "the line knows what it waits on");
+	assert.equal(b.project, "~/w/nd", "project kept so the phone can jump to its session");
+	assert.deepEqual(b.loops, []);
+});
