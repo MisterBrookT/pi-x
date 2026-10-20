@@ -20,6 +20,7 @@ import remend from "remend";
 import { prepareRemotePairing, prepareRelayPairing } from "./remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "./remote-mac.ts";
 import { bypassProxyForLoopback } from "./remote-loopback.ts";
+import { startPrivacyCover } from "./privacy-cover.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "./remote-relay-agent.ts";
 
 const messageLimit = 200;
@@ -61,6 +62,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let publicOrigin = "";
   let relayKey = "";
   let relayAgent: ReturnType<typeof startRemoteRelayAgent> | undefined;
+  let stopCover: (() => void) | undefined;
   let ctx: ExtensionContext | undefined;
   // Pi's terminal shows user images only as text. For photos sent from the phone, add a display-only
   // entry after the message so the terminal draws them. It stores a timestamp, not a second copy.
@@ -123,6 +125,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   const ensureRelay = async (wait = false) => {
     if (!hub) return;
     relayAgent ||= startRemoteRelayAgent({ origin: publicOrigin, secret: relayKey, localBase: base, localToken: token, onState: logRelay });
+    stopCover ||= startPrivacyCover(logRelay);
     // A slow network is not fatal: warn, keep the agent retrying, and leave remote on.
     if (wait) await relayAgent.ready.catch(() => ctx?.ui.notify("The relay is slow to reach. Remote is on and keeps retrying; check your network or proxy if the phone stays offline.", "warning"));
     else relayAgent.ready.catch(() => {});
@@ -159,7 +162,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     }
     // A phone-started Pi uses the same network mode as the session hosting the hub.
     const launch = async (dir: string, session?: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty, session }); };
-    try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
+    try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay(wait);
   };
@@ -324,7 +327,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     pushTimer = undefined;
     try { await request(`/agent/${encodeURIComponent(sessionId)}`, { method: "DELETE", signal: AbortSignal.timeout(1_000) }); } catch {}
     if (hub && relayAgent) {
-      try { if ((await (await request("/api/sessions")).json() as unknown[]).length === 0) { relayAgent.stop(); relayAgent = undefined; } } catch {}
+      try { if ((await (await request("/api/sessions")).json() as unknown[]).length === 0) { relayAgent.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined; } } catch {}
     }
     ctx?.ui.setStatus("pix-remote", undefined);
     await cleanupPairing?.();
@@ -410,6 +413,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     await disconnect();
     relayAgent?.stop();
     relayAgent = undefined;
+    stopCover?.(); stopCover = undefined;
     await hub?.close();
     hub = undefined;
     if (deleteOnShutdown !== undefined) {
@@ -467,7 +471,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
         const useRelay = !tailnet;
         if (action === "reset") {
           await disconnect();
-          relayAgent?.stop(); relayAgent = undefined;
+          relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined;
           relayKey = await rotateRelayKey(options.relayKeyPath);
         }
         if (!connected) await connect(next, useRelay, true);
@@ -484,7 +488,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
         }
       } catch (error) {
         await disconnect();
-        relayAgent?.stop(); relayAgent = undefined;
+        relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined;
         next.ui.notify(`Remote control failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
     },
