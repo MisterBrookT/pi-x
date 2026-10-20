@@ -27,12 +27,19 @@ import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
 import { filterPrompt, forwardPrompt, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, expandSources } from "./proactive-sources.ts";
+import { probeApp } from "./access.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
 const P = paths();
 const once = process.argv.includes("--once");
 const dry = process.argv.includes("--dry-run");
 const pixAnthropic = join(dirname(fileURLToPath(import.meta.url)), "..", "pix-anthropic", "index.ts");
+/** A repeating error is logged when it starts and when it changes, not every round. */
+const lastErr = new Map<string, string>();
+/** Apps whose data was blocked last round (lost Full Disk Access); rechecked every 30 s until readable. */
+const blockedApps = new Set<"wechat" | "dingtalk">();
+const accessBack = async () => { for (const a of blockedApps) if (await probeApp(a) !== "ok") return false; return true; };
+const logOnce = (s: string) => { const k = s.split(":")[0]; if (lastErr.get(k) === s) return false; lastErr.set(k, s); return true; };
 const log = (s: string) => { const line = `[${new Date().toISOString()}] ${s}\n`; process.stdout.write(line); try { appendFileSync(P.log, line); } catch { /* */ } };
 const readJson = <T>(f: string, d: T): T => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return d; } };
 
@@ -140,7 +147,7 @@ async function tick(cfg: Config) {
 		if (!dry && cfg.sources.some(x => /wechat|dingtalk/i.test(x.kind))) { const u = await ensureUnlocked(); if (u !== "open") log(`mac: ${u}`); }
 		sources = await expandSources(cfg.sources, {
 			onSuccess: src => fine.push(src.name),
-			onError: (src, e) => { failed.push({ source: src.name, error: e.message }); log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },
+			onError: (src, e) => { failed.push({ source: src.name, error: e.message }); if (logOnce(`${src.name}: ${e.message}`)) log(`${src.name}: expand error ${e.message}`); judged({ kind: "error", source: src.name, sourceKey: sourceKey(src), error: e.message.slice(0, 2000) }); },
 		});
 	} catch (e) { log(`expand sources: ${(e as Error).message}`); judged({ kind: "error", source: "expand sources", error: (e as Error).message.slice(0, 2000) }); sources = cfg.sources.filter(s => !adapterFor(s).expand); }
 	for (const src of sources) {
@@ -253,6 +260,8 @@ async function tick(cfg: Config) {
 		const old = readJson<{ state?: Record<string, Problem> }>(P.health, {}).state ?? {};
 		const next = trackHealth(old, failed.filter((f, i, a) => a.findIndex(x => x.source === f.source) === i), fine, new Date().toISOString());
 		const problems = healthSummary(next);
+		blockedApps.clear();
+		for (const f of failed) if (/lost Full Disk Access/.test(f.error)) blockedApps.add(f.source.startsWith("WeChat") ? "wechat" : "dingtalk");
 		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);
 		writeFileSync(P.health, JSON.stringify({ state: next, problems }, null, 2));
 	}
@@ -342,5 +351,11 @@ if (!cfg.sources.length) { log(`no sources; edit ${P.config}`); process.exit(onc
 do {
 	await tick(cfg);
 	if (once) break;
-	await new Promise(r => setTimeout(r, cfg.intervalSec * 1000));
+	// While WeChat/DingTalk is blocked, look again every 30 s (one cheap folder listing), so a fix in
+	// System Settings takes effect within a minute, with no restart.
+	const until = Date.now() + cfg.intervalSec * 1000;
+	while (Date.now() < until) {
+		await new Promise(r => setTimeout(r, Math.min(30_000, Math.max(0, until - Date.now()))));
+		if (blockedApps.size && await accessBack()) { log(`access back: ${[...blockedApps].join(", ")}; checking now`); blockedApps.clear(); break; }
+	}
 } while (true);

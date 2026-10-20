@@ -365,9 +365,12 @@ export function staleOnit(items: Item[], now: number, hours = 6): Item[] {
 }
 
 const PERMISSION = "Mac permission required";
+/** WeChat/DingTalk data blocked while the Mac is unlocked: the app's Full Disk Access grant is gone. One warning for all. */
+export const FDA = "Pix Proactive lost Full Disk Access";
 export interface Problem { source: string; since: string; times: number; error: string }
 /** Plain words for a fetch error: a login that expired reads differently from a flaky network. */
 export function problemText(error: string): string {
+	if (/lost Full Disk Access/.test(error)) return FDA;
 	if (/Full Disk Access|App Data|SystemPolicyAppData|\bEPERM\b|\bEACCES\b|operation not permitted/i.test(error)) return PERMISSION;
 	if (/token_invalid|authentication|auth.*expired|not logged in|login/i.test(error)) return "login expired";
 	if (/timed? ?out|ETIMEDOUT|ECONNRESET|ENOTFOUND|network/i.test(error)) return "network";
@@ -390,8 +393,12 @@ export function trackHealth(old: Record<string, Problem>, failed: { source: stri
  */
 export function healthSummary(state: Record<string, Problem>, after = 3): { text: string; since: string }[] {
 	const groups = new Map<string, Problem[]>();
-	for (const p of Object.values(state)) if (p.times >= (p.error === PERMISSION ? 1 : after)) { const kind = p.source.startsWith("WeChat") ? "WeChat" : p.source.startsWith("DingTalk") ? "DingTalk" : p.source === "Gmail" ? "Gmail" : /model|pile|tidy/.test(p.source) ? "For you" : "Feishu"; const k = `${kind}: ${p.error}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
-	return [...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^(WeChat|DingTalk): /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }));
+	const fda = Object.values(state).filter(p => p.error === FDA);
+	const out: { text: string; since: string }[] = [];
+	// One line, whatever the number of chats or apps: the fix is one switch in System Settings.
+	if (fda.length) out.push({ text: `${FDA}: ${[...new Set(fda.map(p => p.source.startsWith("WeChat") ? "WeChat" : "DingTalk"))].join(", ")} paused`, since: fda.map(p => p.since).sort()[0] });
+	for (const p of Object.values(state)) if (p.error !== FDA && p.times >= (p.error === PERMISSION ? 1 : after)) { const kind = p.source.startsWith("WeChat") ? "WeChat" : p.source.startsWith("DingTalk") ? "DingTalk" : p.source === "Gmail" ? "Gmail" : /model|pile|tidy/.test(p.source) ? "For you" : "Feishu"; const k = `${kind}: ${p.error}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
+	return [...out, ...[...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^(WeChat|DingTalk): /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }))];
 }
 
 /** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */

@@ -37,7 +37,7 @@ export function sealedReason(app: string, locked: boolean): string {
 	return locked
 		? `${name} data is sealed while the Mac is locked; skipped this round`
 		// "Allow" on the prompt lasts only until the checker restarts; Full Disk Access is the lasting fix.
-		: `${name} data is blocked: give "Pix Proactive" Full Disk Access (System Settings → Privacy & Security), once; "Allow" on the prompt only lasts until it restarts`;
+		: `${name} data is blocked: Pix Proactive lost Full Disk Access (System Settings → Privacy & Security → Full Disk Access → turn on "Pix Proactive")`;
 }
 
 /**

@@ -105,6 +105,13 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   const healed = trackHealth(ding, [], ["DingTalk"], "y");
   writeFileSync(join(dir, "health.json"), JSON.stringify({ state: healed, problems: healthSummary(healed) }));
   await page.locator(".fy-warn").waitFor({ state: "detached", timeout: 12000 });
+  // Lost Full Disk Access: one plain line that names the fix's subject, not "Pix paused".
+  const { sealedReason } = await import("../plugins/foryou/access.ts");
+  const fda = trackHealth({}, [{ source: "WeChat: a", error: sealedReason("wechat", false) }, { source: "DingTalk", error: sealedReason("dingtalk", false) }], [], "x");
+  writeFileSync(join(dir, "health.json"), JSON.stringify({ state: fda, problems: healthSummary(fda) }));
+  await page.locator(".fy-warn", { hasText: /^Pix Proactive lost Full Disk Access$/ }).waitFor({ timeout: 12000 });
+  writeFileSync(join(dir, "health.json"), JSON.stringify({ state: {}, problems: [] }));
+  await page.locator(".fy-warn").waitFor({ state: "detached", timeout: 12000 });
   // Regression: the dot means "new since you looked". Opening For you calms it; it stays calm after
   // closing (and after a reload) until something new arrives.
   await page.locator("#closeForYou").click();
