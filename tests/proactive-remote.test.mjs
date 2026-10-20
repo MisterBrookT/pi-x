@@ -532,3 +532,30 @@ test("judge prompt: a question @-addressed to someone else is theirs; already-tr
   assert.match(p, /@mentions someone else[\s\S]*that question is\s+theirs/);
   assert.match(p, /already tracked or already done[\s\S]*do not create a new loop/);
 });
+
+test("job: a line of work with several loops is ONE card with its loops as tasks; For you can merge lines into one job", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "jev-training", name: "Jev training", state: "s", updated: "x" }, { id: "minara-product", name: "Minara product", state: "s", updated: "x" }, { id: "live-arena", name: "Live arena", state: "s", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { line: "jev-training", title: "Deploy Kairos", status: "onit", session: "s-m2", note: "Bench running" }), item("k2", { line: "minara-product", title: "Review Kairos doc" }), item("k3", { line: "live-arena", title: "Arena page", status: "onit", session: "s-m3" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const { mergeJobLines, forYouView } = await import("../plugins/foryou/proactive-store.ts");
+  assert.equal(mergeJobLines(["nope"], { id: "x" }, dir), undefined, "nothing to merge");
+  assert.deepEqual(mergeJobLines(["jev-training", "minara-product", "live-arena"], { id: "kairos-launch", name: "Kairos launch", state: "Launching Kairos" }, dir).sort(), ["k1", "k2", "k3"]);
+  const v = forYouView(dir);
+  assert.deepEqual(v.lines.map(l => l.id), ["kairos-launch"], "old lines retired");
+  assert.equal(v.lines[0].open, 3);
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.goto(`${base}/#token=${token}`);
+  await page.evaluate(() => document.getElementById("forYouOpen").click());
+  const job = page.locator('#forYouPage [data-fy-job="kairos-launch"]');
+  await job.waitFor({ timeout: 12000 });
+  assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one card for the job");
+  assert.match(await job.locator(".fj-h").textContent(), /Kairos launch\s*3 tasks · 1 need you/);
+  assert.equal(await job.locator('.fp[data-fy="k2"]').count(), 1, "the task that needs brook keeps its own buttons");
+  assert.match(await job.locator('[data-fy-detail="i:k1"]').textContent(), /Deploy Kairos[\s\S]*Bench running/);
+  assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 1, "not shown twice");
+  if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
+});

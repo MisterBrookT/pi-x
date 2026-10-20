@@ -85,3 +85,21 @@ export function hideLine(id: string, dir?: string): boolean {
 	l.hidden = true; l.updated = new Date().toISOString(); writeLines(lines, dir);
 	return true;
 }
+
+/**
+ * Merge lines of work into one (e.g. three Kairos lines into "Kairos launch"): the loops of every `from` line
+ * move to `into` (via `refile`), and the old lines are retired. `into` may be new (then `name` is required).
+ * Returns the moved loop ids, or undefined when nothing could be merged.
+ */
+export function mergeLines(from: string[], into: { id: string; name?: string; state?: string; project?: string }, refile: (loopLine: string, to: string) => string[], dir?: string, now = new Date().toISOString()): string[] | undefined {
+	const lines = readLines(dir);
+	const src = lines.filter(l => from.includes(l.id) && l.id !== into.id && !l.hidden);
+	let target = lines.find(l => l.id === into.id);
+	if (!src.length || (!target && !into.name)) return undefined;
+	if (!target) { target = { id: into.id, name: into.name!, state: into.state || src.map(l => l.state).filter(Boolean)[0] || "", updated: now, ...(into.project ?? src[0].project ? { project: into.project ?? src[0].project } : {}) }; lines.push(target); }
+	else { target.hidden = false; if (into.name) target.name = into.name; if (into.state) target.state = into.state; target.updated = now; }
+	for (const l of src) { l.hidden = true; l.updated = now; }
+	writeLines(lines, dir);
+	return src.flatMap(l => refile(l.id, target!.id));
+}
+

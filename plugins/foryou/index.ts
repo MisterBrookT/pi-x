@@ -16,10 +16,10 @@ import { homedir } from "node:os";
 import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
-import { applyLineEdits, parseLineEdits, readLines, writeLines } from "./proactive-lines.ts";
+import { applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
-import { forYouView, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
+import { forYouView, mergeJobLines, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -128,7 +128,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
-		description: "Act on brook's open loops (For you). remind: bring a loop back as a card at an exact time (at, text = what to remind). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next). create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
+		description: "Act on brook's open loops (For you). remind: bring a loop back as a card at an exact time (at, text = what to remind). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next); merge = other line ids to fold into it (one job: their loops become its tasks, one card). A line is a job: file every loop of the same job under one line, so brook sees one card with tasks, not many cards. create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
 			action: StringEnum(["remind", "remember", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
@@ -139,6 +139,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
+			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
 			source: Type.Optional(Type.String({ description: "create: the source name, as in the forwarded message" })),
@@ -162,6 +163,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				const ch = p.card ? applyCardEdits(memoryDirOf(deps.dir), [{ card: p.card, add: p.add ?? [], remove: p.remove ?? [] }], { source: "For you" }) : [];
 				if (ch.length) logCardChanges(proactivePaths(deps.dir).memoryLog, ch);
 				return done(ch.length ? `Remembered on ${ch[0].card} (+${ch[0].added.length} -${ch[0].removed.length}).` : "Nothing changed (name a card, and lines to add or remove).");
+			}
+			if (p.action === "line" && p.merge?.length) {
+				const id = p.id ?? (p.name ? slug(p.name) : "");
+				const moved = id ? mergeJobLines(p.merge, { id, name: p.name, state: p.state, project: p.project }, deps.dir) : undefined;
+				return done(moved ? `Merged ${p.merge.join(", ")} into ${id}; ${moved.length} loop(s) moved. They now show as tasks of one job.` : "Nothing merged (name existing lines in merge, and an id or name for the target).");
 			}
 			if (p.action === "line") {
 				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire }]);

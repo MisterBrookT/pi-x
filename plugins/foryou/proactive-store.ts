@@ -1,6 +1,6 @@
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { sessionLabeler } from "../core/session-label.ts";
-import { linesForPrompt, liveLines, readLines, trackLine } from "./proactive-lines.ts";
+import { linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -541,3 +541,13 @@ export function logActivity(e: { at: string; session: string; cwd?: string; did:
 	const old = existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean) : [];
 	writeFileSync(f, [...old.slice(-499), JSON.stringify(e)].join("\n") + "\n");
 }
+
+/** Merge lines into one job: every open loop of the `from` lines moves to `into`; the old lines retire. */
+export function mergeJobLines(from: string[], into: { id: string; name?: string; state?: string; project?: string }, dir?: string): string[] | undefined {
+	return mergeLines(from, into, (old, to) => {
+		const moved = readAll(dir).filter(i => i.line === old && isOpen(i));
+		for (const i of moved) write(dir, { id: i.id, line: to });
+		return moved.map(i => i.id);
+	}, dir);
+}
+
