@@ -492,6 +492,24 @@ test("phone: session buttons use unique board names with a short hint; a card na
   assert.deepEqual(await page.locator('.fp[data-fy="k1"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "In minara-2 · Three y2 GPU jobs are running…", "Discuss with For you first"]);
 });
 
+test("phone: a card a session handed back shows where it stands now, not the original ask or a past decision", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("h1", { title: "Arena landing page", why: "Lowes made two tasks", session: "s3", status: "pending",
+    note: "- 2026-10-20: Handed to minara over chat\n- 2026-10-20: Static mock built: hero, leaderboard", action: "Live arena has no Kairos. Launch how?",
+    choices: [{ label: "Add Kairos live first", run: "s3", prompt: "brook chose: add Kairos to the live arena first" }] })) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] }); t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
+  await fetch(`${base}/agent/s3`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara-3", named: true, cwd: dir, busy: false, messages: [] }) });
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  const post = page.locator('.fp[data-fy="h1"]');
+  assert.match(await post.locator(".fp-now").textContent(), /minara-3\s*Static mock built/, "who did what, latest step");
+  assert.match(await post.locator(".fp-text").textContent(), /Launch how\?/, "the open question");
+  assert.doesNotMatch(await post.textContent(), /Lowes made two tasks|brook chose|Handed to/, "not the original ask, not a past decision");
+});
+
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
   const { unfinishedLines } = await import("../plugins/foryou/index.ts");
   const rows = unfinishedLines({ pending: [{ id: "a", title: "Reply Lowes", due: "2026-10-20" }], onit: [{ id: "b", title: "Backtest" }], later: [{ id: "c", title: "ZIA prep", wakeAt: "2026-10-17T05:55:00Z" }] });
