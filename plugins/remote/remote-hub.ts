@@ -466,7 +466,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           const input = await body(req);
           const text = String(input.text ?? "").trim();
           const images = input.images ?? [];
-          if (!Array.isArray(images) || images.length > 2 || images.some((image: any) => !imageRef({ type: "image", ...image }))
+          if (!Array.isArray(images) || images.length > 4 || images.some((image: any) => !imageRef({ type: "image", ...image }))
             || images.reduce((sum: number, image: any) => sum + image.data.length, 0) > maxImageBase64) return send(res, 400, { error: "invalid or oversized image" });
           if (!text && !images.length) return send(res, 400, { error: "empty prompt" });
           const mode = input.mode === "followUp" ? "followUp" : input.mode === "steer" ? "steer" : undefined;

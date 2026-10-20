@@ -459,6 +459,14 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await touch("touchstart", box.x + 40); for (const dx of [20, 80, 160, 260]) await touch("touchmove", box.x + 40 + dx); await touch("touchend", box.x + 300);
   await page.locator('#messages .fp[data-fy="p2"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
+  // A line says what it waits on; its page shows its open loops in place (two levels at most, no third page).
+  assert.match(await page.locator('#messages .fw[data-fy-detail="l:bench"]').textContent(), /News bench[\s\S]*Open: Backtest fixes/);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("open") || document.body.classList.contains("files-open")), false, "swiping a card does not also open a side drawer");
+  await page.waitForTimeout(500); // the click right after a swipe is swallowed on purpose
+  await page.locator('#messages .fw[data-fy-detail="l:bench"] .fw-t').click();
+  assert.match(await page.locator('#messages .fd .fd-loop', { hasText: "Backtest fixes" }).textContent(), /3 of 5 fixed/);
+  assert.equal(await page.locator('#messages .fd [data-fy-detail]').count(), 0, "nothing on a detail page opens another page");
+  await page.locator("#messages [data-fy-back]").click();
   // Lines of work swipe away too (retired, not deleted).
   assert.equal((await fetch(`${base}/api/foryou/line/bench/hide`, { method: "POST", headers: auth })).status, 200);
   assert.equal(JSON.parse(readFileSync(join(dir, "lines.json"), "utf8"))[0].hidden, true);
