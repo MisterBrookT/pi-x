@@ -171,7 +171,9 @@ async function tick(cfg: Config) {
 				const memory = existsSync(memoryDir(P.dir)) ? memoryForPrompt(P.dir, { msgs: [...ctx, ...fresh], source: src }) : existsSync(P.memory) ? readFileSync(P.memory, "utf8") : "";
 				const prompt = filterPrompt({ me: String(src.me ?? cfg.me), source: src, context: ctx, fresh, memory, lines: linesForPrompt(readLines(P.dir)) });
 				let raw = "";
-				try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
+				// Meeting notes brook attended always go to For you: the summary and 待办 are his to sort, not the cheap filter's.
+				if (src.kind === "feishu-meeting") raw = JSON.stringify({ pass: true, why: "meeting notes: summary and 待办", ids: fresh.map(m => m.id) });
+				else try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
 				fine.push("model");
 				const v = parseFilter(raw);
 				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), raw, verdict: v });

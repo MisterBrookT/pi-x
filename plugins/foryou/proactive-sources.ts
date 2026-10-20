@@ -229,8 +229,43 @@ export function dingAdapters(load: (root?: string, account?: string) => DingChat
 		} },
 	};
 }
+/** A Feishu AI meeting note (docs +fetch XML-ish content) as plain text: title, 参会人, 总结, 待办 (with who asked). */
+export function meetingNoteText(content: string): string {
+	const strip = (x: string) => x.replace(/<cite[^>]*user-name="([^"]*)"[^>]*><\/cite>/g, " $1 ").replace(/<(whiteboard|img|readonly-block)[^>]*>(<\/\1>)?/g, "").replace(/<li>/g, "\n- ").replace(/<\/(p|h1|li|ul|blockquote)>/g, "\n").replace(/<[^>]+>/g, "").replace(/&#xA;/g, " ").replace(/&amp;/g, "&").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+	const title = content.match(/<title>([^<]*)<\/title>/)?.[1] ?? "";
+	const people = content.match(/参会人：([\s\S]*?)<\/p>/)?.[1] ?? "";
+	const sec = (h: string) => content.match(new RegExp(`<h1>${h}</h1>([\\s\\S]*?)(?=<h1>|$)`))?.[1] ?? "";
+	const todos = [...sec("待办").matchAll(/<checkbox done="(\w+)">([\s\S]*?)<\/checkbox>/g)].map(m => `- [${m[1] === "true" ? "x" : " "}] ${strip(m[2])}`);
+	return [title, people && `参会人：${strip(people)}`, sec("总结") && `总结：\n${strip(sec("总结"))}`, todos.length ? `待办：\n${todos.join("\n")}` : ""].filter(Boolean).join("\n\n");
+}
+/**
+ * Feishu meetings brook attended: one message per meeting that has AI notes (id = meeting_id, so the daemon's
+ * cursor dedupes). Ordered by note time: notes arrive minutes after the meeting, so a late note still lands after the cursor.
+ * Meetings without notes are skipped (and retried next round).
+ */
+const feishuMeetings: Adapter = {
+	async fetch(src) {
+		const lark = async (args: string[]) => JSON.parse((await run("lark-cli", [...args, "--as", "user"], { maxBuffer: 1 << 24, timeout: 60_000 })).stdout);
+		const days = Number(src.days ?? 2), start = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10), end = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+		const found = (await lark(["vc", "+search", "--start", start, "--end", end, "--page-size", "30"])).data?.items ?? [];
+		if (!found.length) return [];
+		const meetings = (await lark(["vc", "+detail", "--meeting-ids", found.map((m: any) => m.id).join(",")])).data?.meetings ?? [];
+		const out: Msg[] = [];
+		for (const m of meetings) {
+			if (!m.note_id) continue;
+			try {
+				const note = (await lark(["note", "+detail", "--note-id", m.note_id])).data?.note, token = note?.note_doc_token;
+				if (!token) continue;
+				const text = meetingNoteText((await lark(["docs", "+fetch", "--doc", token])).data?.document?.content ?? "");
+				if (text) out.push({ id: String(m.meeting_id), time: String(note.create_time || m.end_time || ""), sender: "Feishu meeting notes", text: text.slice(0, 6000) });
+			} catch { /* note not ready yet: next round */ }
+		}
+		return out.sort((a, b) => a.time.localeCompare(b.time));
+	},
+	howToRead: (_src, refs) => `Feishu meeting ${refs.join(", ") || "<meeting_id>"}. Read the AI notes with: lark-cli vc +detail --as user --meeting-ids <id> -> note +detail --note-id <note_id> -> docs +fetch --doc <note_doc_token> (all --as user).`,
+};
 const dingtalk = dingAdapters();
-export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat };
+export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat, "feishu-meeting": feishuMeetings };
 
 export interface ExpandHooks { onError?: (src: Source, error: Error) => void; onSuccess?: (src: Source) => void; guard?: (app: string) => Promise<string | undefined> }
 /**

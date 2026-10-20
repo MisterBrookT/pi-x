@@ -52,3 +52,13 @@ test("install: keeps the signed app and its certificate, so Full Disk Access is 
   assert.match(sh, /--identifier "\$id"/);
   assert.match(sh, /id=dev\.brook\.pix-proactive/);
 });
+
+test("Feishu meeting notes: title, people, 总结 and 待办 with who asked, as plain text", async () => {
+  const { meetingNoteText } = await import("../plugins/foryou/proactive-sources.ts");
+  const xml = '<title>智能纪要：推进会</title><blockquote><p>参会人：<cite type="user" user-id="a" user-name="凌子昂"></cite><cite type="user" user-id="b" user-name="唐英豪(Brook)"></cite></p></blockquote><h1>总结</h1><whiteboard token="x"></whiteboard><ul><li><b>方案</b>：二十条曲线</li></ul><img src="y"/><h1>待办</h1><checkbox done="false">拉人入群：拉凌子昂入群（来自唐英豪(Brook)）</checkbox><checkbox done="true">发 demo（来自凌子昂）</checkbox><h1>相关链接</h1><a href="z">x</a>';
+  const t = meetingNoteText(xml);
+  assert.match(t, /^智能纪要：推进会\n\n参会人：凌子昂 唐英豪\(Brook\)/);
+  assert.match(t, /总结：\n- 方案：二十条曲线/);
+  assert.match(t, /待办：\n- \[ \] 拉人入群：拉凌子昂入群（来自唐英豪\(Brook\)）\n- \[x\] 发 demo（来自凌子昂）$/);
+  assert.doesNotMatch(t, /<|相关链接|whiteboard/);
+});
