@@ -1,3 +1,4 @@
+import { questionTimeoutMs } from "../core/ask-timeout.ts";
 /**
  * `computer` — a Codex-style script surface over @injaneity/pi-computer-use.
  *
@@ -287,7 +288,7 @@ export default function computer(pi: ExtensionAPI, options?: { backend?: Backend
 				confirm:
 					ctx.mode === "tui"
 						? async (summary) =>
-								await ctx.ui.confirm("Irreversible action", `Allow: ${summary}?`)
+								await ctx.ui.confirm("Irreversible action", `Allow: ${summary}?`, questionTimeoutMs() ? { timeout: questionTimeoutMs() } : undefined) // unanswered = not allowed
 						: undefined,
 			});
 

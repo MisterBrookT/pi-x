@@ -27,7 +27,12 @@ interface QuestionDetails {
 	options: string[];
 	answer: string | null;
 	wasCustom?: boolean;
+	/** brook did not answer in time; the first (recommended) option was picked for him. */
+	timedOut?: boolean;
 }
+
+export { questionTimeoutMs } from "../core/ask-timeout.ts";
+import { questionTimeoutMs } from "../core/ask-timeout.ts";
 
 // Options with labels and optional descriptions
 const OptionSchema = Type.Object({
@@ -128,6 +133,10 @@ export default function question(pi: ExtensionAPI) {
 				finish?.(remoteAnswer);
 			});
 			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, options: params.options });
+			// Away from the Mac: never leave the session stuck. After the timeout the first option wins.
+			const waitMs = questionTimeoutMs();
+			let timedOut = false;
+			const timer = waitMs ? setTimeout(() => { timedOut = true; remoteAnswer = { answer: params.options[0].label, wasCustom: false, index: 1 }; finish?.(remoteAnswer); }, waitMs) : undefined;
 
 			const result = remoteAnswer ?? await ctx.ui.custom<{ answer: string; wasCustom: boolean; index?: number } | null>(
 				(tui, theme, _kb, done) => {
@@ -228,10 +237,19 @@ export default function question(pi: ExtensionAPI) {
 				},
 			);
 
+			if (timer) clearTimeout(timer);
 			offAnswer();
 			pi.events.emit(QUESTION_CLOSE, { id: _toolCallId });
 			// Build simple options list for details
 			const simpleOptions = params.options.map((o) => o.label);
+
+			if (timedOut && result && result.index === 1 && !result.wasCustom) {
+				const mins = Math.round(waitMs / 60_000);
+				return {
+					content: [{ type: "text", text: `brook did not answer within ${mins} min; defaulted to: 1. ${result.answer}. Go ahead with it, and tell brook plainly that you chose this for him so he can override it.` }],
+					details: { question: params.question, options: simpleOptions, answer: result.answer, wasCustom: false, timedOut: true } as QuestionDetails,
+				};
+			}
 
 			if (!result) {
 				return {
@@ -285,6 +303,7 @@ export default function question(pi: ExtensionAPI) {
 					0,
 				);
 			}
+			if (details.timedOut) return new Text(theme.fg("warning", "⏱ No answer, defaulted to ") + theme.fg("accent", `1. ${details.answer}`), 0, 0);
 			const idx = details.options.indexOf(details.answer) + 1;
 			const display = idx > 0 ? `${idx}. ${details.answer}` : details.answer;
 			return new Text(theme.fg("success", "✓ ") + theme.fg("accent", display), 0, 0);

@@ -41,3 +41,22 @@ test("the question tool tells the model to ask decisions as choices", async () =
   assert.ok(tool.promptSnippet);
   assert.match(tool.promptGuidelines.join(" "), /instead of writing the question in your reply/);
 });
+
+test("a question nobody answers takes the first option after the timeout, says so to the agent, and shows it", async () => {
+  const { default: register, questionTimeoutMs } = await import("../plugins/question/index.ts");
+  assert.equal(questionTimeoutMs({}), 15 * 60_000, "default 15 min");
+  assert.equal(questionTimeoutMs({ PIX_QUESTION_TIMEOUT_MIN: "2" }), 120_000);
+  assert.equal(questionTimeoutMs({ PIX_QUESTION_TIMEOUT_MIN: "0" }), 0, "0 waits forever");
+  let tool; const emitted = [];
+  register({ registerTool: t => { tool = t; }, events: { on: () => () => {}, emit: (n, d) => emitted.push(n) } });
+  process.env.PIX_QUESTION_TIMEOUT_MIN = String(0.05 / 60); // 50 ms
+  try {
+    // The real ctx.ui.custom contract: a factory gets done(); nobody presses a key.
+    const ctx = { mode: "tui", ui: { custom: factory => new Promise(res => { factory({ requestRender() {} }, plain, {}, res); }) } };
+    const r = await tool.execute("q1", { question: "Ship now?", options: [{ label: "Ship" }, { label: "Wait" }] }, undefined, undefined, ctx);
+    assert.match(r.content[0].text, /brook did not answer within \d+ min; defaulted to: 1\. Ship/);
+    assert.equal(r.details.timedOut, true);
+    assert.match(tool.renderResult(r, {}, plain, {}).render(80).join(""), /No answer, defaulted to 1\. Ship/);
+    assert.ok(emitted.length >= 2, "phone card opens and closes");
+  } finally { delete process.env.PIX_QUESTION_TIMEOUT_MIN; }
+});
