@@ -12,9 +12,10 @@ import { basename, resolve } from "node:path";
 import { Type } from "typebox";
 import { board, chatRoot, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
-import { loadWaiting, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingPath, waitingText, type Waiting } from "./waiting.ts";
+import { loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
 const WAIT_STATUS = "pix-chat";
+const WAITS_STATUS = "pix-chat-waits";  // the footer shows this on its own line
 const TICK_MS = 30_000;
 
 const MSG = "pix-chat";
@@ -51,7 +52,8 @@ export default function (pi: ExtensionAPI) {
     const old = loadWaiting(f), w = next(old);
     if (!sameWaiting(old, w)) saveWaiting(f, w);
     const text = waitingText(w);
-    ui?.setStatus?.(WAIT_STATUS, text);
+    ui?.setStatus?.(WAIT_STATUS, noticeText(w));
+    ui?.setStatus?.(WAITS_STATUS, waitingLines(w));
     if (text !== shown) { shown = text; pi.events?.emit?.(CHAT_WAITING, { text }); }
   };
   const check = () => setWaiting(w => tick(w, new Set(board().map(x => x.name))));
@@ -151,7 +153,7 @@ export default function (pi: ExtensionAPI) {
         hops.set(n.thread, hop);
         sent = { ...n, to };
         const live = board().some((x) => x.name === to);
-        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at }, live));
+        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message }, live));
         return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
           (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
       })();

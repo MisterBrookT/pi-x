@@ -123,7 +123,9 @@ export default function (pi: ExtensionAPI) {
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
-        return [truncateToWidth(theme.fg("dim", location), width), stats];
+        // Who this session waits on gets its own line (like background jobs), hidden when nothing is pending.
+        const waits = statuses.get("pix-chat-waits");
+        return [truncateToWidth(theme.fg("dim", location), width), ...(waits ? [truncateToWidth(theme.fg("dim", waits), width)] : []), stats];
       },
     };
   });

@@ -178,6 +178,19 @@ test("footer repaints periodically only while background work runs", async (t) =
 	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
 });
 
+test("footer: pending waits get their own middle line; three lines only while something is pending", async (t) => {
+	const h = await harness(t);
+	const two = h.render().length;
+	h.ctx.ui.setStatus("pix-chat-waits", "⏳ minara-3: restyle leaderboard · 12m   ⏳ minara-2 · 3m");
+	const lines = h.render();
+	assert.equal(lines.length, two + 1);
+	assert.match(lines[1], /⏳ minara-3: restyle leaderboard · 12m/);
+	assert.doesNotMatch(lines[0], /minara/, "not squeezed beside remote/memory");
+	for (const line of h.render(30)) assert.ok(visibleWidth(line) <= 30);
+	h.ctx.ui.setStatus("pix-chat-waits", undefined);
+	assert.equal(h.render().length, two);
+});
+
 test("footer never exceeds a narrow pane, even with a background job label", async (t) => {
 	const h = await harness(t);
 	h.data.setExtensionStatus("pix-background", "1 job running · look 18:00 · /jobs");

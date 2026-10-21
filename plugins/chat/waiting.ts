@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 export const WAIT_MS = 2 * 60 * 60_000;   // after this, say "No reply from X"
 export const NOTICE_MS = 10 * 60_000;      // how long "X left" / "No reply from X" stays
 
-export type Wait = { thread: string; to: string; kind: string; at: number; live: boolean };
+export type Wait = { thread: string; to: string; kind: string; at: number; live: boolean; what?: string };
 export type Notice = { thread: string; text: string; at: number };
 export type Waiting = { waits: Wait[]; notices: Notice[] };
 
@@ -27,9 +27,9 @@ export function saveWaiting(path: string, w: Waiting): void {
 }
 
 /** A sent ask or handoff starts a wait (notes and replies expect nothing back). */
-export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number }, live: boolean): Waiting {
+export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number; message?: string }, live: boolean): Waiting {
 	if (n.kind !== "ask" && n.kind !== "handoff") return w;
-	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live }], notices: w.notices.filter(x => x.thread !== n.thread) };
+	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...(n.message ? { what: gist(n.message) } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
 }
 
 /** Any message back on the thread ends the wait. */
@@ -49,6 +49,26 @@ export function tick(w: Waiting, live: Set<string>, now = Date.now()): Waiting {
 		else waits.push({ ...x, live: x.live || live.has(x.to) });
 	}
 	return { waits, notices };
+}
+
+/** A few words on what was asked: the first line, without a leading "[...]" tag or "Please", cut at ~48 chars. */
+export function gist(message: string): string {
+	const line = message.split("\n").map(x => x.trim()).find(x => x && !/^\[[^\]]*\]$/.test(x)) ?? "";
+	const t = line.replace(/^\[[^\]]*\]\s*/, "").replace(/^(please|pls|can you|could you)\s+/i, "").replace(/\s+/g, " ");
+	return t.length > 48 ? t.slice(0, 47).trimEnd() + "…" : t;
+}
+
+const ago = (ms: number) => ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h${Math.floor(ms % 3_600_000 / 60_000) ? Math.floor(ms % 3_600_000 / 60_000) + "m" : ""}`;
+/** The footer's own line: one entry per pending ask/handoff, "⏳ minara-3: restyle leaderboard · 12m". */
+export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
+	const parts = w.waits.map(x => `⏳ ${x.to}${x.what ? `: ${x.what}` : ""} · ${ago(now - x.at)}`);
+	return parts.length ? parts.join("   ") : undefined;
+}
+
+/** The short status beside remote/memory: only notices ("pix left", "No reply from pix"); waits have their own line. */
+export function noticeText(w: Waiting): string | undefined {
+	const parts = [...new Set(w.notices.map(x => x.text))];
+	return parts.length ? parts.join(" · ") : undefined;
 }
 
 /** The footer text, or undefined when there is nothing to say. */

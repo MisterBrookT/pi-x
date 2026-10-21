@@ -60,16 +60,17 @@ test("chat plugin: sending an ask shows 'Waiting for pix', survives reload, clea
   };
   let s = start();
   await s.tools.chat.execute("1", { action: "send", to: "pix", kind: "ask", message: "status?" }, undefined, undefined, s.ctx);
-  assert.equal(s.status.get("pix-chat"), "Waiting for pix");
+  assert.match(s.status.get("pix-chat-waits"), /^⏳ pix: status\? · now$/);
+  assert.equal(s.status.get("pix-chat"), undefined, "not squeezed beside remote/memory");
   const file = W.waitingPath(root, "for-you");
   assert.ok(existsSync(file));
   // /reload: a fresh plugin instance reads the file back.
   s.stop(); s = start(); t.after(() => s.stop());
-  assert.equal(s.status.get("pix-chat"), "Waiting for pix");
+  assert.match(s.status.get("pix-chat-waits"), /^⏳ pix: status\?/);
   const thread = W.loadWaiting(file).waits[0].thread;
   chat.send("pix", "for-you", "reply", "all good", { thread, hop: 1 }, root);
-  for (let i = 0; i < 100 && s.status.has("pix-chat"); i++) await new Promise((r) => setTimeout(r, 20));
-  assert.equal(s.status.get("pix-chat"), undefined);
+  for (let i = 0; i < 100 && s.status.has("pix-chat-waits"); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(s.status.get("pix-chat-waits"), undefined);
 });
 
 test("phone: a session waiting on another shows the same quiet 'Waiting for pix' in the list and the chat", async (t) => {
@@ -134,4 +135,14 @@ test("real Pi session: an ask sent with the chat tool reaches the phone as peerW
   const thread = W.loadWaiting(W.waitingPath(root, me)).waits[0].thread;
   chat.send("pix", me, "reply", "done", { thread, hop: 1 }, root);
   await until(s => !s.peerWait, "the reply clears it on the phone");
+});
+
+test("footer: each pending ask/handoff on its own line with what was asked and how long; gone when the reply arrives", () => {
+  let w = { waits: [], notices: [] };
+  w = W.sentNote(w, { thread: "t1", to: "minara-3", kind: "handoff", at: 0, message: "[For you] Please restyle leaderboard (DMind blue)\nmore detail" }, true);
+  w = W.sentNote(w, { thread: "t2", to: "minara-2", kind: "ask", at: 60 * 60_000 }, true);
+  assert.equal(W.waitingLines(w, 72 * 60_000), "⏳ minara-3: restyle leaderboard (DMind blue) · 1h12m   ⏳ minara-2 · 12m");
+  assert.equal(W.noticeText(w), undefined, "waits are not squeezed beside remote/memory");
+  assert.equal(W.waitingLines(W.receivedNote(W.receivedNote(w, { thread: "t1" }), { thread: "t2" })), undefined, "line hidden when nothing is pending");
+  assert.equal(W.gist("x".repeat(80)).length, 48);
 });
