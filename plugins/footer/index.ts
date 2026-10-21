@@ -121,10 +121,13 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const linkText = [...pinnedLinks(), ...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const pins = pinnedLinks().map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
-        const withLinks = [core, linkText].filter(Boolean).join(" · ");
-        const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;
+        // Pins always show (they are what brook looks for); the other links only when they fit.
+        const base = [pins, core].filter(Boolean).join(" · ");
+        const withLinks = [base, linkText].filter(Boolean).join(" · ");
+        const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : base) || undefined;
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);

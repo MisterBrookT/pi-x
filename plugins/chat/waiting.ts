@@ -14,7 +14,7 @@ export { CHECK_DEFAULT_MIN, CHECK_MAX_MS, checkDelay, type Check };
 export type Wait = { thread: string; to: string; kind: string; at: number; live: boolean; what?: string; check?: Check;
 	/** The receiver was seen busy after the send, and since when it is idle again (no reply yet). */
 	busySeen?: boolean; idleSince?: number };
-export const CHECK_GIVE_UP_MS = 24 * 60 * 60_000;
+export const CHECK_GIVE_UP_MS = 6 * 60 * 60_000;
 export const IDLE_GRACE_MS = 60_000;       // idle this long after working, with no reply -> wake now
 /** The default schedule: handoffs exponential from 15 min, everything else off. */
 export function checkFor(kind: string, mode?: string, minutes?: number, at = Date.now()): Check | undefined {
@@ -43,9 +43,19 @@ export function sentNote(w: Waiting, n: { thread: string; to: string; kind: stri
 	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...((n.message || n.label) ? { what: gist(n.message ?? "", n.label) } : {}), ...(n.check ? { check: n.check } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
 }
 
-/** Any message back on the thread ends the wait. */
-export function receivedNote(w: Waiting, n: { thread: string }): Waiting {
-	return { waits: w.waits.filter(x => x.thread !== n.thread), notices: w.notices.filter(x => x.thread !== n.thread) };
+export const SETTLE_MS = 30 * 60_000;  // a reply from X on any thread also closes my waits on X older than this
+/** A message back on the thread ends the wait. A reply from the same peer on another thread also ends
+ * that peer's waits older than 30 min: it answered, just not on the formal thread. */
+export function receivedNote(w: Waiting, n: { thread: string; from?: string; kind?: string; at?: number }, now = n.at ?? Date.now()): Waiting {
+	const settled = (x: Wait) => x.thread === n.thread || (!!n.from && n.kind === "reply" && x.to === n.from && now - x.at >= SETTLE_MS);
+	const gone = new Set(w.waits.filter(settled).map(x => x.thread));
+	return { waits: w.waits.filter(x => !gone.has(x.thread)), notices: w.notices.filter(x => !gone.has(x.thread) && x.thread !== n.thread) };
+}
+
+/** Close waits by hand: one thread, or every wait on a session (name), or "all". */
+export function closeWaits(w: Waiting, which: string): { w: Waiting; closed: Wait[] } {
+	const hit = (x: Wait) => which === "all" || x.thread === which || x.to === which;
+	return { w: { waits: w.waits.filter(x => !hit(x)), notices: w.notices.filter(x => !w.waits.some(y => hit(y) && y.thread === x.thread)) }, closed: w.waits.filter(hit) };
 }
 
 /**
@@ -115,7 +125,8 @@ export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
 
 /** The short status beside remote/memory: only notices ("pix left", "No reply from pix"); waits have their own line. */
 export function noticeText(w: Waiting): string | undefined {
-	const parts = [...new Set(w.notices.map(x => x.text))];
+	// "No reply from X" is redundant while the waits line still lists X.
+	const parts = [...new Set(w.notices.filter(x => !w.waits.some(y => x.text.endsWith(` ${y.to}`) && x.text.startsWith("No reply"))).map(x => x.text))];
 	return parts.length ? parts.join(" · ") : undefined;
 }
 

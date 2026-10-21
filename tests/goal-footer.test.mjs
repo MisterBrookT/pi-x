@@ -249,5 +249,8 @@ test("footer: what this session pinned shows as 'Docs 1 · Links 1' on the first
 	await h.emit("session_start");
 	assert.match(h.render(200)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/);
 	assert.match(h.render(200)[0], /\x1b\]8;;https:\/\/byterum\.feishu\.cn\/docx\/A1\x07Docs 1\x1b\]8;;\x07/, "Docs 1 opens the doc itself, not the hub");
-	assert.doesNotMatch(h.render(200)[0], /open=pinned/);
+	assert.doesNotMatch(h.render(200)[0], /open=pinned/);	// Regression: with remote on and a chat notice, the pins were dropped for lack of room. They always show now.
+	const set = h.ctx.ui.setStatus;
+	set("pix-remote", "remote on"); set("pix-chat", "No reply from minara-2 · something long enough to crowd the line");
+	assert.match(h.render(90)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/, "pins survive a crowded line");
 });

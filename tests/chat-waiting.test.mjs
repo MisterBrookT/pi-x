@@ -206,3 +206,18 @@ test("chat plugin: a handoff carries a check schedule; when the receiver leaves 
   assert.match(wake.m.content, /^Check on vLLM batching \(thread \w+, to minara-2\): minara-2 left without replying/);
   assert.equal(wake.o.triggerTurn, true);
 });
+
+test("stale waits: a reply from the same peer on another thread closes its older waits; close by hand; no duplicate 'No reply' notice", () => {
+  const M = 60_000;
+  let w = W.sentNote(empty, { thread: "a", to: "minara-2", kind: "handoff", at: 0, label: "model-server watchdog" }, true);
+  w = W.sentNote(w, { thread: "b", to: "minara-2", kind: "handoff", at: 50 * M, label: "fresh" }, true);
+  w = W.sentNote(w, { thread: "c", to: "pix", kind: "ask", at: 0 }, true);
+  w = W.receivedNote(w, { thread: "z", from: "minara-2", kind: "reply", at: 60 * M });
+  assert.deepEqual(w.waits.map(x => x.thread), ["b", "c"], "the old minara-2 wait closes; the 10-min-old one stays");
+  assert.deepEqual(W.receivedNote(w, { thread: "z", from: "minara-2", kind: "note", at: 90 * M }).waits.map(x => x.thread), ["b", "c"], "a note does not settle anything");
+  assert.deepEqual(W.closeWaits(w, "b").w.waits.map(x => x.thread), ["c"]);
+  assert.deepEqual(W.closeWaits(w, "pix").w.waits.map(x => x.thread), ["b"]);
+  assert.deepEqual(W.closeWaits(w, "all").w.waits, []);
+  assert.equal(W.noticeText({ waits: [{ thread: "b", to: "minara-2", kind: "ask", at: 0, live: true }], notices: [{ thread: "x", text: "No reply from minara-2", at: 0 }] }), undefined);
+  assert.equal(W.noticeText({ waits: [], notices: [{ thread: "x", text: "No reply from minara-2", at: 0 }] }), "No reply from minara-2");
+});

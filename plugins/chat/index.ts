@@ -12,7 +12,7 @@ import { basename, resolve } from "node:path";
 import { Type } from "typebox";
 import { board, chatRoot, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
-import { checkFor, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
+import { checkFor, closeWaits, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
 const WAIT_STATUS = "pix-chat";
 const WAITS_STATUS = "pix-chat-waits";  // the footer shows this on its own line
@@ -121,16 +121,17 @@ export default function (pi: ExtensionAPI) {
     description: "Coordinate with other Pi sessions on this Mac, instead of asking brook to relay. " +
       "board: who is doing what and who claims which files / machines / services. " +
       "set: publish what I am doing and what I claim (absolute file paths, or names like a800c, nd-fresh); other sessions cannot edit my claimed files. " +
+      "close: stop waiting on a handoff/ask that will not get a formal reply (thread, or to=session). " +
       "send: kind note (FYI, does not wake them), ask (they answer), handoff (they own the task and report back), reply (answer an ask/handoff; pass its thread). " +
       "To let another session edit a file you claim, reply with grant=[path]. " +
       "Before editing files or using machines another session might own, check the board; if claimed, ask the owner.",
     parameters: Type.Object({
-      action: StringEnum(["board", "set", "send"]),
+      action: StringEnum(["board", "set", "send", "close"]),
       to: Type.Optional(Type.String({ description: "Session name (unique prefix works)" })),
       kind: Type.Optional(StringEnum([...KINDS])),
       message: Type.Optional(Type.String()),
       label: Type.Optional(Type.String({ maxLength: 60, description: "ask/handoff: a short task summary (≤40 chars) shown in your footer while you wait, e.g. 'restyle leaderboard'" })),
-      thread: Type.Optional(Type.String({ description: "Thread id when replying" })),
+      thread: Type.Optional(Type.String({ description: "Thread id when replying; close: the wait to stop (or to= a session to close all waits on it, or thread=\"all\")" })),
       doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
       grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
@@ -151,6 +152,12 @@ export default function (pi: ExtensionAPI) {
       const text = ((): string => {
         if (!me || !room) return "chat is not ready";
         if (p.action === "board") return `You are "${me.name}".\n${show(board())}`;
+        if (p.action === "close") {
+          const which = p.thread ?? p.to; if (!which) return "close needs thread (or to, or thread=\"all\")";
+          let closed: { what?: string; to: string }[] = [];
+          setWaiting(w => { const r = closeWaits(w, which); closed = r.closed; return r.w; });
+          return closed.length ? `Stopped waiting on: ${closed.map(x => `${x.to}${x.what ? ` (${x.what})` : ""}`).join("; ")}.` : "No open wait matches.";
+        }
         if (p.action === "set") {
           const claims = p.claims?.map((c) => (c.includes("/") ? resolve(ctx.cwd, c) : c));
           const clash = (claims ?? []).map((c) => [c, owner(c, me!.name)] as const).filter(([, o]) => o);
