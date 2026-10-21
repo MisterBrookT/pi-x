@@ -14,6 +14,8 @@ import { parseInbox } from "../plugins/foryou/proactive.ts";
 const token = "foryou-token-1234567890";
 const item = (id, extra = {}) => ({ id, at: new Date().toISOString(), source: "Group", sourceKey: "feishu:c", title: `Title ${id}`, why: `Why ${id}`, action: "Draft a reply", refs: [], howToRead: "lark-cli ...", status: "pending", ...extra });
 
+// The timeline is rows; tap one to open its post (with buttons). Waits for the post page.
+const openPost = async (scope, id) => { const row = scope.locator(`.fp.fr[data-fy="${id}"]`); await row.waitFor({ timeout: 12000 }); await row.click(); const post = scope.locator(`.fd .fp[data-fy="${id}"]`).filter({ visible: true }).first(); await post.waitFor({ timeout: 8000 }); return post; };
 async function folder(t) {
   const dir = await mkdtemp(join(tmpdir(), "pix-foryou-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -124,7 +126,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator("#forYouDot").waitFor({ timeout: 8000 });
   await page.locator("#forYouOpen").click();
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "n1", status: "dismissed" }) + "\n");
-  await page.locator('[data-fy="n1"] [data-fy-act="act"]').waitFor({ state: "detached", timeout: 8000 });
+  await page.locator('[data-fy="n1"]').waitFor({ state: "detached", timeout: 8000 });
   pushes.length = 0;
 
   // A new item appears on the Mac side: the phone list updates and a push goes out.
@@ -134,12 +136,15 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.locator('[data-fy-tab]').count(), 0, "one feed, no tabs");
   // Transparency: an open row says where it came from, and each button says where it runs and what it does.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
-  const main = page.locator('[data-fy="c"] [data-fy-pick="0"]');
-  await main.waitFor({ state: "attached", timeout: 8000 });
+  await page.locator('.fp.fr[data-fy="c"]').waitFor({ timeout: 8000 });
   assert.match(await page.locator('.fp[data-fy="c"] .fp-meta').textContent(), /Group· now\s*Due/);
+  assert.equal(await page.locator('.fp.fr[data-fy="c"] button').count(), 0, "the timeline row has no buttons");
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
-  await page.locator('.fp[data-fy="a"] .fp-prep').getByText("Draft: Hi, here is the list").waitFor({ timeout: 8000 });
+  await page.waitForTimeout(1500);
+  assert.match(await (await openPost(page, "a")).locator(".fp-prep").textContent(), /Draft: Hi, here is the list/);
+  await page.locator("[data-fy-back]").click();
   // Nested: an action first shows the task, then asks where (here / new session / discuss), like question cards.
+  await openPost(page, "c");
   await page.locator('[data-fy="c"] [data-fy-pick="0"]').click();
   assert.deepEqual(await page.locator('[data-fy="c"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
   assert.match(await page.locator('[data-fy="c"] [data-fy-pick="0"]').textContent(), /Start test[\s\S]*Run the Databento test/);
@@ -149,10 +154,12 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('.fp[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
 
+  await openPost(page, "b");
   await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
   await page.locator('.fp[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
+  await openPost(page, "a");
   await page.locator('[data-fy="a"] [data-fy-pick="0"]').click();
   await page.locator('[data-fy="a"] .fp-where button', { hasText: "Here, in For you" }).click();
   await page.locator('.fp[data-fy="a"]').waitFor({ state: "detached" });
@@ -169,6 +176,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
+  await openPost(page, "d");
   await page.locator('.fp[data-fy="d"] [data-fy-act="done"]').click();
   await page.locator('.fp[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
@@ -244,9 +252,9 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
   assert.equal(await page.locator("#forYouCount").textContent(), "1");
   assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
   await page.locator("#forYouRow").click();
-  const post = page.locator('#messages .fp[data-fy="j1"]');
-  await post.waitFor();
+  await page.locator('#messages .fp.fr[data-fy="j1"]').waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the For you chat itself");
+  const post = await openPost(page.locator("#messages"), "j1");
   assert.equal(await page.locator("#messages .job-card, #messages .feed-head, #messages .ln-box").count(), 0, "no second card UI");
   assert.doesNotMatch(await page.locator("#messages").textContent(), /Morning\. Two things today\./, "the feed shows posts, not the chat");
   assert.equal(await page.locator("#input").isVisible(), false, "no composer on the feed");
@@ -294,13 +302,15 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   assert.match(await page.locator("#messages .fy-status").textContent(), /Thinking… · 2 cards wait/);
   assert.equal(await p1.count(), 1, "posts stay put while it works");
   await put(false);
-  await p1.locator(".fp-bar [data-fy-else]").click();
-  await p1.locator(".fp-reply textarea").fill("Only draft a reply");
+  const q1 = await openPost(page.locator("#messages"), "k1");
+  await q1.locator(".fp-bar [data-fy-else]").click();
+  await q1.locator(".fp-reply textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await p1.locator("[data-fy-else-send]").click();
+  await q1.locator("[data-fy-else-send]").click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
-  await p1.locator(".fp-mine").waitFor();
-  await p2.locator('.fp-bar [data-fy-act="later"]').click();
+  await page.locator('#messages .fp.fr[data-fy="k2"]').waitFor({ timeout: 8000 }); // answered: back to the timeline
+  const q2 = await openPost(page.locator("#messages"), "k2");
+  await q2.locator('.fp-bar [data-fy-act="later"]').click();
   await p2.waitFor({ state: "detached", timeout: 8000 });
   assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });
@@ -317,7 +327,7 @@ test("bell page: every card has Something else; brook's words go to For you", as
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
-  const card = page.locator('#forYou [data-fy="e1"]');
+  const card = await openPost(page.locator("#forYou"), "e1");
   await card.locator("[data-fy-else]").click();
   const box = card.locator(".fy-else textarea");
   await box.fill("Ask Minara for the newest data snapshot first");
@@ -353,9 +363,13 @@ test("related asks in one line of work share one card, and one answer handles th
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const rel = page.locator('#messages .fp[data-fy="h1"] .fp-rel');
-  await rel.waitFor();
-  assert.match(await rel.textContent(), /Same thread · News bench[\s\S]*Data for 欧阳/);
+  // On the phone the two asks are one job row; its page holds both.
+  const job = page.locator('#messages [data-fy-job="bench"]');
+  await job.waitFor();
+  assert.match(await job.textContent(), /News bench[\s\S]*2 tasks · 2 need you/);
+  await job.click();
+  await page.locator('#messages .fd .fp[data-fy="h1"]').first().waitFor();
+  assert.match(await page.locator("#messages .fd").first().textContent(), /Curve for Lowes[\s\S]*Data for 欧阳/);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
@@ -432,16 +446,16 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the bell opens the For you chat");
   assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
   assert.equal(await page.locator("#messages .fp:not(.fw)").count(), 2, "one post per thing that needs brook");
-  for (const b of await post.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
-  // Reply = a comment: it goes to For you as brook's instruction, and shows under the post.
-  await post.locator(".fp-bar [data-fy-else]").click();
-  await post.locator(".fp-reply textarea").fill("Say OK, I'll be there at 18:30");
+  // Reply = a comment, on the post's page: it goes to For you as brook's instruction.
+  const full = await openPost(page.locator("#messages"), "p1");
+  for (const b of await full.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
+  await full.locator(".fp-bar [data-fy-else]").click();
+  await full.locator(".fp-reply textarea").fill("Say OK, I'll be there at 18:30");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await post.locator("[data-fy-else-send]").click();
+  await full.locator("[data-fy-else-send]").click();
   assert.match((await next).prompts[0], /I'll be there at 18:30/);
-  await post.locator(".fp-mine").waitFor();
-  assert.match(await post.locator(".fp-mine").textContent(), /You Say OK/);
+  await page.locator('#messages .fp.fr[data-fy="p2"]').waitFor({ timeout: 8000 });
   // In progress, below the posts in the same feed: what's being worked on, with the latest note.
   assert.match(await page.locator("#messages .fy-feed").textContent(), /Doing[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed[\s\S]*News bench/);
   assert.equal(await page.locator("#messages .fw-trail li.now").count() > 0, true, "the newest note is highlighted");
@@ -455,7 +469,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await page.locator('#messages [data-fy-filter="all"]').click();
   // Tap a post: its own page with the full progress, a comment box, and a jump to the session.
   await page.locator('#messages .fw[data-fy-detail="i:p3"] .fw-t').click();
-  await page.locator("#messages .fd .fd-steps li.now", { hasText: "3 of 5 fixed" }).waitFor();
+  await page.locator("#messages .fd .fd-thread .fd-rp.now", { hasText: "3 of 5 fixed" }).waitFor();
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-detail.png") });
   assert.equal(await page.locator("#messages .fd .fd-reply textarea").count(), 1);
   await page.locator("#messages [data-fy-back]").click();
@@ -495,8 +509,9 @@ test("phone: session buttons use unique board names with a short hint; a card na
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
-  await page.locator('.fp[data-fy="k1"] [data-fy-pick="0"]').click();
-  assert.deepEqual(await page.locator('.fp[data-fy="k1"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "In minara-2 · Three y2 GPU jobs are running…", "Discuss with For you first"]);
+  const k1 = await openPost(page.locator("#forYouPage"), "k1");
+  await k1.locator('[data-fy-pick="0"]').click();
+  assert.deepEqual(await page.locator('.fd .fp[data-fy="k1"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "In minara-2 · Three y2 GPU jobs are running…", "Discuss with For you first"]);
 });
 
 test("phone: a card a session handed back shows where it stands now, not the original ask or a past decision", async t => {
@@ -511,7 +526,9 @@ test("phone: a card a session handed back shows where it stands now, not the ori
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
-  const post = page.locator('.fp[data-fy="h1"]');
+  // The row already says where it stands; the post page has the open question.
+  assert.match(await page.locator('.fp.fr[data-fy="h1"] .fr-s').textContent(), /minara-3\s*Static mock built/);
+  const post = await openPost(page.locator("#forYouPage"), "h1");
   assert.match(await post.locator(".fp-now").textContent(), /minara-3\s*Static mock built/, "who did what, latest step");
   assert.match(await post.locator(".fp-text").textContent(), /Launch how\?/, "the open question");
   assert.doesNotMatch(await post.textContent(), /Lowes made two tasks|brook chose|Handed to/, "not the original ask, not a past decision");
@@ -552,11 +569,16 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   await page.evaluate(() => document.getElementById("forYouOpen").click());
   const job = page.locator('#forYouPage [data-fy-job="kairos-launch"]');
   await job.waitFor({ timeout: 12000 });
-  assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one card for the job");
-  assert.match(await job.locator(".fj-h").textContent(), /Kairos launch\s*3 tasks · 1 need you/);
-  assert.equal(await job.locator('.fp[data-fy="k2"]').count(), 1, "the task that needs brook keeps its own buttons");
-  assert.match(await job.locator('[data-fy-detail="i:k1"]').textContent(), /Deploy Kairos[\s\S]*Bench running/);
-  assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 1, "not shown twice");
+  assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one row for the job");
+  assert.match(await job.textContent(), /Kairos launch[\s\S]*3 tasks · 1 need you/);
+  assert.equal(await job.locator("button").count(), 0, "the timeline has no buttons; tap opens the post");
+  assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 0, "its tasks are inside the job, not in the list");
+  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-list.png") });
+  await job.click();
+  const k2 = page.locator('#forYouPage .fd .fp[data-fy="k2"]');
+  await k2.waitFor();
+  assert.ok(await k2.locator(".fp-go").count(), "the task that needs brook has its buttons on the job page");
+  assert.match(await page.locator("#forYouPage .fd").textContent(), /Deploy Kairos[\s\S]*Bench running/);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
