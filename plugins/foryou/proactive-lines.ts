@@ -11,10 +11,12 @@ import { join } from "node:path";
 const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
 
 export interface Line { id: string; name: string; project?: string; state: string; next?: string; updated: string; hidden?: boolean;
+	/** The job's face on the phone: one emoji For you picks and may change as the job evolves. */
+	avatar?: string;
 	/** The Pi session working on this line, and what it last said (tracked on every turn end). */
 	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean } }
 /** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
-export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean }
+export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string }
 
 const file = (dir = PROACTIVE_DIR) => join(dir, "lines.json");
 export const slug = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40);
@@ -37,6 +39,8 @@ export function parseLineEdits(x: unknown): LineEdit[] {
 		if (next) out.next = next;
 		if (project && /^(~\/|\/)/.test(project)) out.project = project;
 		if (e.retire === true) out.retire = true;
+		const av = typeof e.avatar === "string" ? Array.from(e.avatar.trim()).slice(0, 4).join("") : "";
+		if (av && /\p{Extended_Pictographic}/u.test(av)) out.avatar = av;
 		return out;
 	});
 }
@@ -49,10 +53,10 @@ export function applyLineEdits(lines: Line[], edits: LineEdit[], now = new Date(
 		const l = out.find(x => x.id === e.id);
 		if (l) {
 			if (e.retire) l.hidden = true;
-			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; l.hidden = false; }
+			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; if (e.avatar) l.avatar = e.avatar; l.hidden = false; }
 			l.updated = now; changed.push(e.id);
 		} else if (!e.retire && e.name && e.state) {
-			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), updated: now });
+			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), ...(e.avatar ? { avatar: e.avatar } : {}), updated: now });
 			changed.push(e.id);
 		}
 	}

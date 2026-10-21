@@ -366,7 +366,7 @@ test("related asks in one line of work share one card, and one answer handles th
   // On the phone the two asks are one job row; its page holds both.
   const job = page.locator('#messages [data-fy-job="bench"]');
   await job.waitFor();
-  assert.match(await job.textContent(), /News bench[\s\S]*2 need you[\s\S]*Curve for Lowes[\s\S]*Data for 欧阳/);
+  assert.match(await job.textContent(), /News bench[\s\S]*Curve for Lowes[\s\S]*\+1 more need you[\s\S]*2 need you/);
   await job.click();
   await page.locator('#messages .fd .fp[data-fy="h1"]').first().waitFor();
   assert.match(await page.locator("#messages .fd").first().textContent(), /Curve for Lowes[\s\S]*Data for 欧阳/);
@@ -395,7 +395,7 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
   await page.locator("#messages .fy-feed .fw").first().waitFor();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /All 5 fixes are done[\s\S]*News bench[\s\S]*minara[\s\S]*Open: Title w1/);
+  assert.match(await page.locator("#messages .fy-feed").textContent(), /All 5 fixes are done[\s\S]*News bench[\s\S]*1 in progress/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 
@@ -445,7 +445,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await post.waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the bell opens the For you chat");
   assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
-  assert.equal(await page.locator("#messages .fp:not(.fw)").count(), 2, "one post per thing that needs brook");
+  assert.equal(await page.locator("#messages .fp:not(.fw):not(.fj)").count(), 2, "one post per thing that needs brook (jobs are their own posts)");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
   // Reply = a comment, on the post's page: it goes to For you as brook's instruction.
   const full = await openPost(page.locator("#messages"), "p1");
@@ -481,11 +481,13 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   await page.locator('#messages .fp[data-fy="p2"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
   // A line says what it waits on; its page shows its open loops in place (two levels at most, no third page).
-  assert.match(await page.locator('#messages .fw[data-fy-detail="l:bench"]').textContent(), /News bench[\s\S]*Open: Backtest fixes/);
+  assert.match(await page.locator('#messages .fj[data-fy-detail="l:bench"]').textContent(), /News bench[\s\S]*1 in progress/);
   assert.equal(await page.evaluate(() => document.body.classList.contains("open") || document.body.classList.contains("files-open")), false, "swiping a card does not also open a side drawer");
   await page.waitForTimeout(500); // the click right after a swipe is swallowed on purpose
-  await page.locator('#messages .fw[data-fy-detail="l:bench"] .fw-t').click();
-  assert.match(await page.locator('#messages .fd .fd-loop', { hasText: "Backtest fixes" }).textContent(), /3 of 5 fixed/);
+  await page.locator('#messages .fj[data-fy-detail="l:bench"]').click();
+  assert.match(await page.locator('#messages .fd .fd-loop', { hasText: "Backtest fixes" }).textContent(), /Backtest fixes/);
+  // Its updates read like replies under the post, newest first.
+  assert.match(await page.locator('#messages .fd .fj-replies .fj-rp').first().textContent(), /3 of 5 fixed/);
   assert.equal(await page.locator('#messages .fd [data-fy-detail]').count(), 0, "nothing on a detail page opens another page");
   await page.locator("#messages [data-fy-back]").click();
   // Lines of work swipe away too (retired, not deleted).
@@ -571,9 +573,10 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   await job.waitFor({ timeout: 12000 });
   assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one row for the job");
   assert.match(await job.textContent(), /Kairos launch[\s\S]*1 needs you[\s\S]*2 in progress/);
-  // The row names its tasks, the ones that need brook first, each marked by state (orange = you, green = in progress).
-  assert.deepEqual(await job.locator(".fj-l li").evaluateAll(L => L.map(li => li.className + ":" + li.textContent)), ["you:Review Kairos doc", "doing:Deploy Kairos", "doing:Arena page"]);
-  const [you, doing] = await job.locator(".fj-pill").evaluateAll(L => L.map(e => getComputedStyle(e).color));
+  // Like a post: the job's face, where it stands, the one thing waiting on brook, and a bar (updates · needs you · in progress).
+  assert.equal(await job.locator(".fj-q .you").textContent(), "Review Kairos doc");
+  assert.match(await job.locator(".fj-bar").textContent(), /^\d+1 needs you2 in progress$/);
+  const [you, doing] = await job.locator(".fj-bar .you, .fj-bar .doing").evaluateAll(L => L.map(e => getComputedStyle(e).color));
   assert.notEqual(you, doing, "needs-you and in-progress read as different colors");
   assert.equal(await job.locator("button").count(), 0, "the timeline has no buttons; tap opens the post");
   assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 0, "its tasks are inside the job, not in the list");
@@ -612,6 +615,39 @@ test("a line with one ask that waits on brook is one row (no second 'Waiting on 
   await page.evaluate(() => document.getElementById("forYouOpen").click());
   await page.locator('#forYouPage [data-fy-job="phd"]').waitFor({ timeout: 12000 });
   assert.equal(await page.locator("#forYouPage .fp").count(), 1, "one row");
-  assert.match(await page.locator('#forYouPage [data-fy-job="phd"]').textContent(), /PhD \/ ZJU[\s\S]*1 needs you[\s\S]*回复陈老师/);
+  assert.match(await page.locator('#forYouPage [data-fy-job="phd"]').textContent(), /PhD \/ ZJU[\s\S]*回复陈老师[\s\S]*1 needs you/);
   assert.doesNotMatch(await page.locator("#forYouPage").textContent(), /Waiting on you/);
+});
+
+test("jobs read like X: each job has its own face For you picks; its page is the post with every update as a reply, newest first", async t => {
+  const dir = await folder(t);
+  const { parseLineEdits, applyLineEdits } = await import("../plugins/foryou/proactive-lines.ts");
+  const e = parseLineEdits([{ id: "kairos", name: "Kairos launch", state: "Arena live; site next", avatar: "🚀" }, { id: "x", name: "X", state: "s", avatar: "not an emoji" }]);
+  assert.equal(e[0].avatar, "🚀"); assert.equal(e[1].avatar, undefined, "only emoji faces");
+  const lines = applyLineEdits([], e, "2026-10-21T08:00:00Z").lines;
+  assert.equal(applyLineEdits(lines, parseLineEdits([{ id: "kairos", avatar: "🏁" }])).lines[0].avatar, "🏁", "the face can change as the job evolves");
+  writeFileSync(join(dir, "lines.json"), JSON.stringify(lines));
+  writeFileSync(join(dir, "inbox.jsonl"), [
+    item("a", { line: "kairos", at: "2026-10-19T08:00:00Z", title: "Website arena page", note: "- 2026-10-20: 10-20 09:00: draft started\n- 2026-10-21: 10-21 15:22: Lowes made it a Feishu task" }),
+    item("b", { line: "kairos", at: "2026-10-19T08:00:00Z", title: "Serve 27B", status: "onit", session: "s1", note: "- 2026-10-21: weights downloading" }),
+  ].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  await page.evaluate(() => document.getElementById("forYouOpen").click());
+  const job = page.locator('#forYouPage [data-fy-job="kairos"]');
+  await job.waitFor({ timeout: 12000 });
+  assert.equal(await job.locator(".fj-av").textContent(), "🚀");
+  assert.match(await job.locator(".fj-say").textContent(), /Arena live; site next/);
+  assert.equal(await job.locator("button").count(), 0, "a post in the timeline has no buttons");
+  await job.click();
+  const replies = page.locator("#forYouPage .fd .fj-replies .fj-rp");
+  await replies.first().waitFor();
+  const texts = await replies.locator(".fj-rt").allTextContents();
+  assert.equal(texts[0], "Lowes made it a Feishu task", "newest first, date prefix stripped");
+  assert.ok(texts.includes("draft started") && texts.includes("weights downloading"));
+  assert.match(await page.locator("#forYouPage .fd .fj-main").textContent(), /Kairos launch[\s\S]*Arena live; site next/);
+  assert.ok(await page.locator('#forYouPage .fd .fp[data-fy="a"] .fp-go').count(), "what needs brook keeps its buttons on the post page");
 });

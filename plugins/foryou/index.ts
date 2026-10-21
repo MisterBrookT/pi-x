@@ -152,6 +152,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
+			avatar: Type.Optional(Type.String({ description: "line: one emoji as the job's face on the phone (e.g. 🚀 launch, 📊 backtest); give every line one, change it when the job changes" })),
 			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
@@ -183,7 +184,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(moved ? `Merged ${p.merge.join(", ")} into ${id}; ${moved.length} loop(s) moved. They now show as tasks of one job.` : "Nothing merged (name existing lines in merge, and an id or name for the target).");
 			}
 			if (p.action === "line") {
-				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire }]);
+				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, avatar: p.avatar }]);
 				const r = applyLineEdits(readLines(deps.dir), edits);
 				if (r.changed.length) writeLines(r.lines, deps.dir);
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");
