@@ -35,7 +35,7 @@ export function parseLineEdits(x: unknown): LineEdit[] {
 	const str = (v: unknown, n: number) => (typeof v === "string" && v.trim() ? v.trim().replace(/\s+/g, " ").slice(0, n) : undefined);
 	return x.filter(e => e && (str(e.id, 40) || str(e.name, 40))).slice(0, 6).map((e: any) => {
 		const out: LineEdit = { id: slug(str(e.id, 40) ?? str(e.name, 40)!) };
-		const name = str(e.name, 40), state = str(e.state, 160), next = str(e.next, 120), project = str(e.project, 300);
+		const name = str(e.name, 40), state = str(e.state, 400), next = str(e.next, 120), project = str(e.project, 300);
 		if (name) out.name = name;
 		if (state) out.state = state;
 		if (next) out.next = next;

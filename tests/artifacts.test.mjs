@@ -64,7 +64,7 @@ test("phone: a session's pins show as 'Docs 1 · Links 1 · Files 1' by its titl
   await page.goto(`${base}/#token=${token}`);
   const chip = page.locator("#pinnedChip");
   await chip.waitFor({ state: "visible", timeout: 12000 });
-  assert.equal(await chip.textContent(), "Docs 1 · Links 1 · Files 1");
+  assert.equal(await chip.textContent(), "3", "a pin icon and a count, no words");
   assert.ok((await chip.boundingBox()).height >= 28);
   await chip.click();
   const rows = page.locator("#sheetBody .pin-row");

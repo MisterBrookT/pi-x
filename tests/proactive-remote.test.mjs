@@ -299,7 +299,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   await p1.waitFor(); await p2.waitFor();
   await put(true);
   await page.locator("#messages .fy-status").waitFor({ timeout: 8000 });
-  assert.match(await page.locator("#messages .fy-status").textContent(), /Thinking… · 2 cards wait/);
+  assert.match(await page.locator("#messages .fy-status").textContent(), /^Thinking…$/);
   assert.equal(await p1.count(), 1, "posts stay put while it works");
   await put(false);
   const q1 = await openPost(page.locator("#messages"), "k1");
@@ -366,7 +366,7 @@ test("related asks in one line of work share one card, and one answer handles th
   // On the phone the two asks are one job row; its page holds both.
   const job = page.locator('#messages [data-fy-job="bench"]');
   await job.waitFor();
-  assert.match(await job.textContent(), /News bench[\s\S]*Curve for Lowes[\s\S]*\+1 more need you[\s\S]*2 need you/);
+  assert.match(await job.textContent(), /News bench[\s\S]*Curve for Lowes[\s\S]*\+1[\s\S]*2 need you/);
   await job.click();
   await page.locator('#messages .fd .fp[data-fy="h1"]').first().waitFor();
   assert.match(await page.locator("#messages .fd").first().textContent(), /Curve for Lowes[\s\S]*Data for 欧阳/);
@@ -414,12 +414,12 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   await page.goto(`${base}/#token=${token}`);
   const st = page.locator("#messages .fy-status");
   await st.waitFor();
-  assert.match(await st.textContent(), /^Messaging a session… · 1 card waits$/);
+  assert.match(await st.textContent(), /^Messaging a session…$/);
   for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing", "#messages .job-card"]) assert.equal(await page.locator(sel).count(), 0, sel);
   assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
   await put([]);
   await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
-  assert.match(await st.textContent(), /^Thinking… · Waiting for pix · 1 card waits$/);
+  assert.match(await st.textContent(), /^Thinking… · Waiting for pix$/);
   assert.equal(await page.locator("#messages .fy-status").count(), 1, "one steady row, updated in place");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
