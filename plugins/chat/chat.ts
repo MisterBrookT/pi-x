@@ -43,10 +43,15 @@ export const board = (root = chatRoot()): Peer[] =>
   entries(root).filter((p) => p.live).map(({ live: _, ...p }) => p).sort((a, b) => a.name.localeCompare(b.name));
 
 /** Pick a free name for a new session: base, base-2, ... (a dead holder's name can be taken over, with its mail). */
-export function claimName(base: string, pid: number, root = chatRoot()): string {
-  const taken = new Map(entries(root).map((p) => [p.name, p]));
+export function claimName(base: string, pid: number, root = chatRoot(), session?: string): string {
+  const all = entries(root), taken = new Map(all.map((p) => [p.name, p]));
+  // The same Pi session gets its old name back (so a rename like minara -> minara-1 sticks across restarts).
+  const mine = session && all.find((p) => p.session === session && (!p.live || p.pid === pid));
+  if (mine) return mine.name;
+  // Once a family is numbered (minara-1, minara-2), new members are numbered too: no bare "minara".
+  const numbered = taken.has(`${slug(base)}-1`);
   for (let i = 1; ; i++) {
-    const n = i === 1 ? slug(base) : `${slug(base)}-${i}`;
+    const n = i === 1 && !numbered ? slug(base) : `${slug(base)}-${i}`;
     const p = taken.get(n);
     if (!p || !p.live || p.pid === pid) return n;
   }

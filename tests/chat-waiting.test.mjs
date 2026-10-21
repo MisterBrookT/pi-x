@@ -150,3 +150,59 @@ test("footer: each pending ask/handoff on its own line with what was asked and h
   assert.equal(W.gist("brook's request (low-risk Pix UI, already approved): in the footer, move waits to their own line."), "in the footer, move waits to their own…");
   assert.equal(W.gist("anything long here", "restyle leaderboard"), "restyle leaderboard", "an explicit label wins");
 });
+
+test("check schedule: a handoff checks exponentially from 15 min; a due check wakes the sender once and moves on; the footer shows the next check", () => {
+  const M = 60_000;
+  assert.equal(W.checkFor("note"), undefined, "notes never check");
+  assert.equal(W.checkFor("ask"), undefined, "asks are off by default");
+  const c = W.checkFor("handoff", undefined, undefined, 0);
+  assert.deepEqual(c, { mode: "exponential", every: 15 * M, n: 0, next: 15 * M });
+  assert.deepEqual([0, 1, 2, 3].map(n => W.checkDelay({ mode: "exponential", every: 10 * M }, n) / M), [10, 20, 40, 60], "10, 20, 40, then capped at 60");
+  assert.deepEqual([0, 3].map(n => W.checkDelay({ mode: "fixed", every: 10 * M }, n) / M), [10, 10]);
+  let w = W.sentNote(empty, { thread: "t", to: "minara-2", kind: "handoff", at: 0, label: "vLLM batching", check: c }, true);
+  const peers = new Map([["minara-2", "busy"]]);
+  let r = W.tick(w, peers, 14 * M); assert.deepEqual(r.wakes, []);
+  r = W.tick(r, peers, 15 * M);
+  assert.equal(r.wakes.length, 1);
+  assert.match(r.wakes[0], /^Check on vLLM batching \(thread t, to minara-2\): no reply for 15 min\. It is busy/);
+  assert.equal(r.waits[0].check.next, 45 * M, "next check 30 min later");
+  assert.deepEqual(W.tick(r, peers, 16 * M).wakes, [], "one wake per due check");
+  assert.match(W.waitingLines(r, 15 * M), /^⏳ minara-2: vLLM batching · check \d\d:\d\d$/);
+  assert.equal(W.waitingLines(W.receivedNote(r, { thread: "t" })), undefined, "a reply ends the checks");
+});
+
+test("check schedule: the receiver exiting, or going idle after working without replying, wakes the sender right away", () => {
+  const M = 60_000, c = W.checkFor("handoff", "fixed", 30, 0);
+  const w = W.sentNote(empty, { thread: "t", to: "pix", kind: "handoff", at: 0, check: c }, true);
+  const gone = W.tick(w, new Map(), 2 * M);
+  assert.match(gone.wakes[0], /pix left without replying/); assert.equal(gone.waits.length, 0);
+  let r = W.tick(w, new Map([["pix", "busy"]]), M);
+  r = W.tick(r, new Map([["pix", "idle"]]), 2 * M); assert.deepEqual(r.wakes, [], "a short idle is grace");
+  r = W.tick(r, new Map([["pix", "idle"]]), 3 * M); assert.match(r.wakes[0], /pix stopped working without replying/);
+  assert.deepEqual(W.tick(r, new Map([["pix", "idle"]]), 4 * M).wakes, [], "said once");
+  // Without a schedule nothing wakes (only the quiet footer notice).
+  assert.deepEqual(W.tick(W.sentNote(empty, { thread: "u", to: "pix", kind: "ask", at: 0 }, true), new Map(), M).wakes, []);
+});
+
+test("chat plugin: a handoff carries a check schedule; when the receiver leaves without replying, the sender is woken with 'Check on …'", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "chat-check-"));
+  process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
+  const peer = chat.join_({ name: "minara-2", cwd: "/x", pid: process.pid, at: 0, status: "busy", doing: "", claims: [] }, () => {}, root);
+  const handlers = {}, tools = {}, status = new Map(), sent = [];
+  const pi = { on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage: (m, o) => sent.push({ m, o }), getSessionName: () => "for-you" };
+  registerChat(pi);
+  const ctx = { cwd: "/y", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
+  for (const f of handlers.session_start) f({}, ctx);
+  t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
+  const r = await tools.chat.execute("1", { action: "send", to: "minara-2", kind: "handoff", message: "batch it", label: "vLLM batching", checkMinutes: 10 }, undefined, undefined, ctx);
+  assert.match(r.content[0].text, /First check in 10 min \(exponential\)/);
+  assert.match(status.get("pix-chat-waits"), /^⏳ minara-2: vLLM batching · check \d\d:\d\d$/);
+  assert.equal(W.loadWaiting(W.waitingPath(root, "for-you")).waits[0].check.every, 600_000);
+  peer.close();
+  // The plugin's own tick (every 30 s) notices; trigger it the way a reload would.
+  for (const f of handlers.session_start) f({}, ctx);
+  const wake = sent.find(x => x.m.customType === "pix-chat-check");
+  assert.ok(wake, "the sender is woken");
+  assert.match(wake.m.content, /^Check on vLLM batching \(thread \w+, to minara-2\): minara-2 left without replying/);
+  assert.equal(wake.o.triggerTurn, true);
+});

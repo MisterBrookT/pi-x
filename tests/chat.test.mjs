@@ -51,3 +51,29 @@ test("board, names, claims, kinds, hop limit, and mail that waits for a restart"
   assert.match(readFileSync(join(root, "log.md"), "utf8"), /legacy → bench · reply[\s\S]*from old code/);
   rb2.close(); rk.close();
 });
+
+test("names: a session gets its own board name back by session id; a numbered family stays numbered", () => {
+  const root = mkdtempSync(join(tmpdir(), "chat-names-"));
+  const r1 = chat.join_(peer("minara-1", { session: "S1", pid: 0 }), () => {}, root); r1.close();
+  assert.equal(chat.claimName("minara", 4242, root, "S1"), "minara-1", "renamed session keeps minara-1");
+  const live = chat.join_(peer("minara-1", { session: "S1" }), () => {}, root);
+  assert.equal(chat.claimName("minara", 4243, root, "S9"), "minara-2", "no bare 'minara' once numbered");
+  live.close();
+  assert.equal(chat.claimName("pix", 4244, root, "S2"), "pix", "unnumbered families keep the plain name");
+});
+
+test("title: the terminal tab shows the board name, 'π - <name>', and is re-applied when Pi resets it", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "chat-title-"));
+  process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
+  const registerChat = await jiti.import("../plugins/chat/index.ts", { default: true });
+  const handlers = {}, titles = [];
+  registerChat({ on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "minara" });
+  const ctx = { cwd: "/m", hasUI: true, sessionManager: { getSessionId: () => "S1" }, ui: { setStatus() {}, setTitle: (x) => titles.push(x) } };
+  for (const f of handlers.session_start) f({}, ctx);
+  t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
+  assert.equal(titles.at(-1), "π - minara");
+  titles.length = 0;
+  for (const f of handlers.session_info_changed) f({}, ctx);
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(titles, ["π - minara"]);
+});

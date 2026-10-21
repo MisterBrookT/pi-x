@@ -9,7 +9,18 @@ import { dirname, join } from "node:path";
 export const WAIT_MS = 2 * 60 * 60_000;   // after this, say "No reply from X"
 export const NOTICE_MS = 10 * 60_000;      // how long "X left" / "No reply from X" stays
 
-export type Wait = { thread: string; to: string; kind: string; at: number; live: boolean; what?: string };
+import { advance, CHECK_DEFAULT_MIN, CHECK_MAX_MS, checkDelay, clock, makeCheck, type Check } from "../core/check-schedule.ts";
+export { CHECK_DEFAULT_MIN, CHECK_MAX_MS, checkDelay, type Check };
+export type Wait = { thread: string; to: string; kind: string; at: number; live: boolean; what?: string; check?: Check;
+	/** The receiver was seen busy after the send, and since when it is idle again (no reply yet). */
+	busySeen?: boolean; idleSince?: number };
+export const CHECK_GIVE_UP_MS = 24 * 60 * 60_000;
+export const IDLE_GRACE_MS = 60_000;       // idle this long after working, with no reply -> wake now
+/** The default schedule: handoffs exponential from 15 min, everything else off. */
+export function checkFor(kind: string, mode?: string, minutes?: number, at = Date.now()): Check | undefined {
+	const m = mode ?? (kind === "handoff" ? "exponential" : "off");
+	return (kind === "ask" || kind === "handoff") ? makeCheck(m, minutes, at) : undefined;
+}
 export type Notice = { thread: string; text: string; at: number };
 export type Waiting = { waits: Wait[]; notices: Notice[] };
 
@@ -27,9 +38,9 @@ export function saveWaiting(path: string, w: Waiting): void {
 }
 
 /** A sent ask or handoff starts a wait (notes and replies expect nothing back). */
-export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number; message?: string; label?: string }, live: boolean): Waiting {
+export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number; message?: string; label?: string; check?: Check }, live: boolean): Waiting {
 	if (n.kind !== "ask" && n.kind !== "handoff") return w;
-	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...((n.message || n.label) ? { what: gist(n.message ?? "", n.label) } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
+	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...((n.message || n.label) ? { what: gist(n.message ?? "", n.label) } : {}), ...(n.check ? { check: n.check } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
 }
 
 /** Any message back on the thread ends the wait. */
@@ -40,15 +51,40 @@ export function receivedNote(w: Waiting, n: { thread: string }): Waiting {
 /**
  * Periodic check: a peer that was running and is gone -> "X left"; too long -> "No reply from X".
  * A peer that was not running at send time is not "left"; its message waits for it (until the timeout).
+ * Waits with a check schedule also return wake-ups for the sender: a due check, the receiver gone, or the
+ * receiver back to idle after working without replying. `peers` maps live session name -> status (busy/idle).
  */
-export function tick(w: Waiting, live: Set<string>, now = Date.now()): Waiting {
-	const waits: Wait[] = [], notices = w.notices.filter(x => now - x.at < NOTICE_MS);
+export function tick(w: Waiting, live: Set<string> | Map<string, string>, now = Date.now()): Waiting & { wakes: string[] } {
+	const status = live instanceof Map ? live : new Map([...live].map(n => [n, ""]));
+	const waits: Wait[] = [], notices = w.notices.filter(x => now - x.at < NOTICE_MS), wakes: string[] = [];
 	for (const x of w.waits) {
-		if (x.live && !live.has(x.to)) notices.push({ thread: x.thread, text: `${x.to} left`, at: now });
-		else if (now - x.at >= WAIT_MS) notices.push({ thread: x.thread, text: `No reply from ${x.to}`, at: now });
-		else waits.push({ ...x, live: x.live || live.has(x.to) });
+		const on = status.has(x.to), st = status.get(x.to), mins = Math.round((now - x.at) / 60_000);
+		const head = `Check on ${x.what || x.kind} (thread ${x.thread}, to ${x.to})`;
+		if (x.live && !on) {
+			notices.push({ thread: x.thread, text: `${x.to} left`, at: now });
+			if (x.check) wakes.push(`${head}: ${x.to} left without replying (${mins} min after the ${x.kind}). Decide: resend, take it over, or tell brook.`);
+			continue;
+		}
+		if (now - x.at >= (x.check ? CHECK_GIVE_UP_MS : WAIT_MS)) { notices.push({ thread: x.thread, text: `No reply from ${x.to}`, at: now }); continue; }
+		const y: Wait = { ...x, live: x.live || on };
+		if (x.check) {
+			if (st === "busy") { y.busySeen = true; delete y.idleSince; }
+			else if (st === "idle" && y.busySeen) {
+				y.idleSince ??= now;
+				if (now - y.idleSince >= IDLE_GRACE_MS) {
+					wakes.push(`${head}: ${x.to} stopped working without replying (${mins} min after the ${x.kind}). Look at its status and last output on the board, then decide.`);
+					y.busySeen = false; delete y.idleSince;
+				}
+			}
+			if (now >= x.check.next) {
+				const state = !on ? "not running" : st || "running";
+				wakes.push(`${head}: no reply for ${mins} min. It is ${state}. Look at its status and what it is doing on the board, then decide: wait, nudge it, or take over.`);
+				y.check = advance(x.check, now);
+			}
+		}
+		waits.push(y);
 	}
-	return { waits, notices };
+	return { waits, notices, wakes };
 }
 
 /**
@@ -73,7 +109,7 @@ export function gist(message: string, label?: string): string {
 const ago = (ms: number) => ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h${Math.floor(ms % 3_600_000 / 60_000) ? Math.floor(ms % 3_600_000 / 60_000) + "m" : ""}`;
 /** The footer's own line: one entry per pending ask/handoff, "⏳ minara-3: restyle leaderboard · 12m". */
 export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
-	const parts = w.waits.map(x => `⏳ ${x.to}${x.what ? `: ${x.what}` : ""} · ${ago(now - x.at)}`);
+	const parts = w.waits.map(x => `⏳ ${x.to}${x.what ? `: ${x.what}` : ""} · ${x.check ? `check ${clock(x.check.next)}` : ago(now - x.at)}`);
 	return parts.length ? parts.join("   ") : undefined;
 }
 

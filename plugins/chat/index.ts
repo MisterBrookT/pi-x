@@ -12,13 +12,14 @@ import { basename, resolve } from "node:path";
 import { Type } from "typebox";
 import { board, chatRoot, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
-import { loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
+import { checkFor, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
 const WAIT_STATUS = "pix-chat";
 const WAITS_STATUS = "pix-chat-waits";  // the footer shows this on its own line
 const TICK_MS = 30_000;
 
 const MSG = "pix-chat";
+const MSG_CHECK = "pix-chat-check";
 /** Sessions that never join chat. (For you joins: it hands work out and gets replies back here.) */
 const OFF = new Set<string>();
 
@@ -56,7 +57,11 @@ export default function (pi: ExtensionAPI) {
     ui?.setStatus?.(WAITS_STATUS, waitingLines(w));
     if (text !== shown) { shown = text; pi.events?.emit?.(CHAT_WAITING, { text }); }
   };
-  const check = () => setWaiting(w => tick(w, new Set(board().map(x => x.name))));
+  const check = () => {
+    let wakes: string[] = [];
+    setWaiting(w => { const r = tick(w, new Map(board().map(x => [x.name, x.status ?? ""]))); wakes = r.wakes; return { waits: r.waits, notices: r.notices }; });
+    for (const text of wakes) pi.sendMessage({ customType: MSG_CHECK, display: true, details: { text }, content: text }, { triggerTurn: true, deliverAs: "followUp" });
+  };
 
   const receive = (n: Note) => {
     hops.set(n.thread, n.hop);
@@ -70,14 +75,19 @@ export default function (pi: ExtensionAPI) {
     room?.close(); room = undefined; me = undefined;
     const base = pi.getSessionName() || basename(ctx.cwd) || "pi";
     if (OFF.has(slug(base)) || process.env.PIX_CHAT_OFF) return;  // brook's personal session stays out of project chat
-    const name = claimName(base, process.pid);
+    const name = claimName(base, process.pid, undefined, ctx.sessionManager?.getSessionId?.());
     me = { name, cwd: ctx.cwd, pid: process.pid, session: ctx.sessionManager?.getSessionId?.(), at: Date.now(), status: "idle", doing: "", claims: [] };
     room = join_(me, receive);
     ui = ctx.hasUI ? ctx.ui : undefined;
+    title(ctx);
     check();
     clearInterval(timer); timer = setInterval(check, TICK_MS); timer.unref?.();
   });
-  pi.on("agent_start", () => room?.update({ status: "busy" }));
+  // The terminal tab/pane title is the board name ("π - minara-2"), so Otty tabs match the board.
+  // Pi rewrites the title on session_info_changed and some redraws; re-apply ours after it.
+  const title = (ctx: ExtensionContext) => { if (me && ctx.hasUI) (ctx.ui as { setTitle?: (t: string) => void }).setTitle?.(`π - ${me.name}`); };
+  pi.on("session_info_changed" as any, (_e: unknown, ctx: ExtensionContext) => { setTimeout(() => title(ctx), 0); });
+  pi.on("agent_start", (_e, ctx) => { room?.update({ status: "busy" }); title(ctx); });
   pi.on("agent_end", () => room?.update({ status: "idle" }));
   pi.on("session_shutdown", () => { clearInterval(timer); timer = undefined; room?.close(); room = undefined; });
 
@@ -99,6 +109,8 @@ export default function (pi: ExtensionAPI) {
     const head = `${theme.fg("dim", `↳ ${n.kind} from ${n.from}`)}`;
     return new Text(expanded ? `${head}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", ` · ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
   });
+
+  pi.registerMessageRenderer(MSG_CHECK, (message, _o, theme) => new Text(theme.fg("dim", `⏳ ${(message.details as { text: string }).text.split(":")[0]}`), 0, 0));
 
   const show = (ps: Peer[]) => ps.map((p) =>
     `${p.name === me?.name ? "* " : "  "}${p.name} [${p.status}] ${p.cwd}\n    doing: ${p.doing || "-"}\n    claims: ${(p.claims ?? []).join(", ") || "-"}`).join("\n");
@@ -122,6 +134,8 @@ export default function (pi: ExtensionAPI) {
       doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
       grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
+      check: Type.Optional(StringEnum(["off", "fixed", "exponential"], { description: "ask/handoff: when to wake you to check on it if no reply came (like a background job). Default: exponential for handoff, off for ask. You are also woken at once if the receiver exits or stops working without replying." })),
+      checkMinutes: Type.Optional(Type.Number({ minimum: 1, maximum: 1440, description: "First check after this many minutes (default 15); fixed repeats it, exponential doubles it up to 1 h" })),
     }),
     renderCall(args, theme) {
       if (args.action !== "send") return new Text(theme.fg("muted", `chat ${args.action}`), 0, 0);
@@ -154,9 +168,11 @@ export default function (pi: ExtensionAPI) {
         hops.set(n.thread, hop);
         sent = { ...n, to };
         const live = board().some((x) => x.name === to);
-        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message, label: (p as any).label }, live));
+        const chk = checkFor(kind, (p as any).check, (p as any).checkMinutes, n.at);
+        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message, label: (p as any).label, check: chk }, live));
         return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
-          (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
+          (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.") +
+          (chk ? ` First check in ${Math.round(chk.every / 60_000)} min (${chk.mode}).` : "");
       })();
       const details = p.action === "send" && sent ? { sent } : {};
       sent = undefined;
