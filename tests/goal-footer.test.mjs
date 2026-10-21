@@ -246,5 +246,7 @@ test("footer: what this session pinned shows as 'Docs 1 · Links 1' on the first
 	pinArtifact(h.sm.getSessionId(), { title: "Site", url: "https://x.dev" }, d);
 	pinArtifact("someone-else", { url: "https://y.dev" }, d);
 	await h.emit("session_start");
-	assert.match(h.render(200)[0], /Docs 1 · Links 1/);
+	assert.match(h.render(200)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/);
+	assert.match(h.render(200)[0], /\x1b\]8;;https:\/\/byterum\.feishu\.cn\/docx\/A1\x07Docs 1\x1b\]8;;\x07/, "Docs 1 opens the doc itself, not the hub");
+	assert.doesNotMatch(h.render(200)[0], /open=pinned/);
 });

@@ -10,7 +10,7 @@ import { cacheHitRate, defaultFooterOptions, formatTokens, tokenSpeed, type Foot
 import { linkFits, readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPath } from "../core/hub-paths.ts";
 import { memoryUnseen } from "../core/memory-badge.ts";
 import { queuedCount } from "../core/foryou-queue.ts";
-import { artifactsLabel, loadArtifacts } from "../core/artifacts.ts";
+import { artifactLinks, loadArtifacts } from "../core/artifacts.ts";
 
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
@@ -42,9 +42,9 @@ export default function (pi: ExtensionAPI) {
   // "· N queued": For you batches held while brook is mid-thread (see core/foryou-queue.ts).
   let queued = { at: 0, n: 0 };
   const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? ` · ${queued.n} queued` : ""; };
-  // "Docs 2 · Links 3": what this session pinned (core/artifacts.ts); click opens the list on the local hub page.
-  let pinned = { at: 0, label: "" }, sessionId = "", hubUrl: string | undefined;
-  const pinnedLabel = () => { if (Date.now() - pinned.at > 5000) pinned = { at: Date.now(), label: sessionId ? artifactsLabel(loadArtifacts(sessionId)) : "" }; return pinned.label; };
+  // "Docs 1 · Cookbook… +1": what this session pinned (core/artifacts.ts), each a terminal link straight to its target.
+  let pinned: { at: number; links: { label: string; url: string }[] } = { at: 0, links: [] }, sessionId = "";
+  const pinnedLinks = () => { if (Date.now() - pinned.at > 5000) pinned = { at: Date.now(), links: sessionId ? artifactLinks(loadArtifacts(sessionId)) : [] }; return pinned.links; };
   const memoryLabel = () => { if (Date.now() - memoryNew.at > 5000) memoryNew = { at: Date.now(), n: memoryUnseen() }; return memoryNew.n ? `Memory +${memoryNew.n}` : "Memory"; };
 
   pi.on("message_start", (event) => {
@@ -66,7 +66,6 @@ export default function (pi: ExtensionAPI) {
     // For you's memory, readable on the local hub page (same view as the phone). Dim "+N" until viewed.
     const token = (await readFile(remoteTokenPath, "utf8").catch(() => "")).trim();
     sessionId = ctx.sessionManager.getSessionId(); pinned.at = 0;
-    hubUrl = token ? `http://${remoteHost}:${remoteDefaultPort}/#token=${encodeURIComponent(token)}&open=pinned&session=${encodeURIComponent(sessionId)}` : undefined;
     memoryUrl = token ? `http://${remoteHost}:${remoteDefaultPort}/#token=${encodeURIComponent(token)}&open=memory` : undefined;
     installFooter?.(ctx);
   });
@@ -122,8 +121,7 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const pin = pinnedLabel();
-        const linkText = [...(pin ? [{ label: pin, url: hubUrl ?? "" }] : []), ...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...pinnedLinks(), ...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         const withLinks = [core, linkText].filter(Boolean).join(" · ");
         const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : core) || undefined;

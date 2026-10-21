@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { artifactKind, artifactsLabel, detectArtifacts, loadArtifacts, pinArtifact, redactUrl, unpinArtifact } from "../plugins/core/artifacts.ts";
+import { artifactLinks, artifactKind, artifactsLabel, detectArtifacts, loadArtifacts, pinArtifact, redactUrl, unpinArtifact } from "../plugins/core/artifacts.ts";
 import registerArtifacts from "../plugins/artifacts/index.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "artifacts-"));
@@ -74,4 +74,17 @@ test("phone: a session's pins show as 'Docs 1 · Links 1 · Files 1' by its titl
   await rows.nth(2).click();
   await page.locator("#fileView:not([hidden])").waitFor({ timeout: 8000 });
   assert.equal(await page.locator("#fileTitle").textContent(), "demo.md");
+});
+
+test("footer links go straight to targets: one item -> 'Docs 1'; several -> newest title +N; files as file://", () => {
+  const d = dir();
+  pinArtifact("s", { title: "Kairos 回测结果与图表说明", url: "https://byterum.feishu.cn/docx/A" }, d);
+  pinArtifact("s", { title: "Cookbook", url: "https://decision.brooktang.fun" }, d);
+  pinArtifact("s", { title: "Cookbook leaderboard", url: "https://decision.brooktang.fun/leaderboard?token=x" }, d);
+  pinArtifact("s", { title: "Demo", url: "~/Desktop/Kairos demo.md" }, d);
+  assert.deepEqual(artifactLinks(loadArtifacts("s", d), "/Users/b"), [
+    { label: "Docs 1", url: "https://byterum.feishu.cn/docx/A" },
+    { label: "Cookbook leaderbo… +1", url: "https://decision.brooktang.fun/leaderboard?token=x" },
+    { label: "Files 1", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
+  ]);
 });

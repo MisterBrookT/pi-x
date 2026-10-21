@@ -54,6 +54,20 @@ export function artifactsLabel(items: Artifact[]): string {
 	return ([["Docs", n("doc")], ["Links", n("link")], ["Files", n("file")]] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}`).join(" · ");
 }
 
+/**
+ * Footer links straight to the targets (no hub hop): one kind with one item -> "Docs 1" opening it;
+ * several -> the newest item's title (short) opening it, then "+N". Files open as file:// URLs.
+ */
+export function artifactLinks(items: Artifact[], home = homedir()): { label: string; url: string }[] {
+	const target = (a: Artifact) => a.kind === "file" ? "file://" + encodeURI(a.url.replace(/^~(?=\/|$)/, home)) : a.url;
+	const short = (t: string) => t.length > 18 ? t.slice(0, 17).trimEnd() + "…" : t;
+	return (([["doc", "Docs"], ["link", "Links"], ["file", "Files"]] as const)).flatMap(([k, name]) => {
+		const of = items.filter(x => x.kind === k), last = of.at(-1);
+		if (!last) return [];
+		return [{ label: of.length === 1 ? `${name} 1` : `${short(last.title)} +${of.length - 1}`, url: target(last) }];
+	});
+}
+
 /** Hide secrets in text that may reach logs or the agent: query tokens/keys become "…". */
 export const redactUrl = (url: string) => url.replace(/([?&](token|key|secret|sig|signature|access_token|auth)=)[^&#\s]+/gi, "$1…");
 
