@@ -129,7 +129,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         const message = openRelayFrame(secret, String(event.data));
         if (message.kind === "hello") { await publishSessions(typeof message.active === "string" ? message.active : undefined); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || typeof message.body !== "string") return;
-        if (phoneUse(message.path, String(message.method), message.body) === "gone") markPhoneGone(); else markPhoneActive();
+        { const use = phoneUse(message.path, String(message.method), message.body); if (use === "gone") markPhoneGone(); else if (use === "here") markPhoneActive(); }
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.
         if (!relayAllowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }
         if (message.body.length > relayRequestLimit) { send({ kind: "response", id: message.id, status: 413, error: "Message and image are too large to send" }); return; }

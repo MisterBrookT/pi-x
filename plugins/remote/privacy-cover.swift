@@ -4,13 +4,13 @@
 // still see and drive the real screen underneath.
 //
 // Shown while the phone is in use (the hub writes "until" epoch ms to argv[1]: while the Pix page is visible on the phone) and no one touched the
-// Mac's real mouse or keyboard for 10 s. Real input = hardware events (source pid 0); synthetic input
+// Mac's real mouse or keyboard for 2 min. Real input = hardware events (source pid 0); synthetic input
 // from computer use or Screen Sharing has a process id and does not lift the cover.
 import AppKit
 import CoreGraphics
 
 let flag = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : NSHomeDirectory() + "/.pix/phone-active"
-let idleNeeded = 10.0
+let idleNeeded = Double(ProcessInfo.processInfo.environment["PIX_COVER_MAC_IDLE_SEC"] ?? "") ?? 120  // never cover while brook uses the Mac
 var lastReal = Date()
 // One cover per Mac: several Pi hubs each start a helper; only the first keeps running.
 let lockFd = open(NSHomeDirectory() + "/.pix/cover.lock", O_CREAT | O_RDWR, 0o644)

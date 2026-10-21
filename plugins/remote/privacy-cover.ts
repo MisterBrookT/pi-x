@@ -1,8 +1,7 @@
 // Privacy cover while brook uses the phone: see privacy-cover.swift. This side marks the phone as active
 // (each relayed phone request pushes "until" ahead in ~/.pix/phone-active) and keeps the helper running.
-// "In use" = the Pix page is open and visible on the phone. The page pings presence every 10 s while visible
-// (also while brook just reads) and says "hidden" when he locks the phone or leaves the app, which clears the
-// cover at once. If pings stop without a goodbye (iOS froze the page), it expires PIX_COVER_HOLD_SEC (45 s) later.
+// "In use" = brook did something on the phone (sent, tapped, Mac screen view) in the last PIX_COVER_HOLD_SEC
+// (default 10 min); just having Pix open does not count. Locking the phone / leaving Pix clears it at once.
 // Real Mac input lifts it at once.
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -13,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 const source = join(dirname(fileURLToPath(import.meta.url)), "privacy-cover.swift");
 export const phoneActivePath = () => process.env.PIX_PHONE_ACTIVE || join(homedir(), ".pix", "phone-active");
-export const phoneActiveMs = (() => { const s = Number(process.env.PIX_COVER_HOLD_SEC); return (Number.isFinite(s) && s > 0 ? s : 45) * 1000; })();
+export const phoneActiveMs = (() => { const s = Number(process.env.PIX_COVER_HOLD_SEC); return (Number.isFinite(s) && s > 0 ? s : 600) * 1000; })();
 
 /** Mark the phone active until now + phoneActiveMs. Writes at most every 5 s. Returns whether it wrote. */
 let lastWrite = -Infinity;
@@ -28,10 +27,13 @@ export function markPhoneGone(path = phoneActivePath()): void {
 	try { writeFileSync(path, "0"); } catch {}
 }
 /** What a relayed phone request says about use: presence pings carry "visible"/"hidden". */
-export function phoneUse(path: string, method: string, body: string): "here" | "gone" {
+export function phoneUse(path: string, method: string, body: string): "here" | "gone" | "idle" {
 	if (path.split("?")[0] === "/api/push" && method === "POST" && /"presence"\s*:\s*"hidden"/.test(body)) return "gone";
 	if (/^\/api\/here\?v=0\b/.test(path)) return "gone";
-	return "here";
+	// Only real actions count: sending, tapping a button, the Mac screen view. Pix merely open (reads, pings) does not.
+	if (method === "POST" && !/^\/api\/(push|here)\b/.test(path)) return "here";
+	if (/^\/api\/desktop\b/.test(path)) return "here";
+	return "idle";
 }
 /** For tests: forget the write throttle. */
 export const resetPhoneActive = () => { lastWrite = -Infinity; };
