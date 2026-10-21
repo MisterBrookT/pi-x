@@ -83,9 +83,9 @@ export default function (pi: ExtensionAPI) {
     check();
     clearInterval(timer); timer = setInterval(check, TICK_MS); timer.unref?.();
   });
-  // The terminal tab/pane title is the board name ("π - minara-2"), so Otty tabs match the board.
+  // The terminal tab/pane title is the board name ("minara-2"), so Otty tabs match the board.
   // Pi rewrites the title on session_info_changed and some redraws; re-apply ours after it.
-  const title = (ctx: ExtensionContext) => { if (me && ctx.hasUI) (ctx.ui as { setTitle?: (t: string) => void }).setTitle?.(`π - ${me.name}`); };
+  const title = (ctx: ExtensionContext) => { if (me && ctx.hasUI) (ctx.ui as { setTitle?: (t: string) => void }).setTitle?.(me.name); };
   pi.on("session_info_changed" as any, (_e: unknown, ctx: ExtensionContext) => { setTimeout(() => title(ctx), 0); });
   pi.on("agent_start", (_e, ctx) => { room?.update({ status: "busy" }); title(ctx); });
   pi.on("agent_end", () => room?.update({ status: "idle" }));

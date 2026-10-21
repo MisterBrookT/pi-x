@@ -62,7 +62,7 @@ test("names: a session gets its own board name back by session id; a numbered fa
   assert.equal(chat.claimName("pix", 4244, root, "S2"), "pix", "unnumbered families keep the plain name");
 });
 
-test("title: the terminal tab shows the board name, 'π - <name>', and is re-applied when Pi resets it", async (t) => {
+test("title: the terminal tab shows the board name, '<name>' with no prefix, and is re-applied when Pi resets it", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "chat-title-"));
   process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
   const registerChat = await jiti.import("../plugins/chat/index.ts", { default: true });
@@ -71,9 +71,9 @@ test("title: the terminal tab shows the board name, 'π - <name>', and is re-app
   const ctx = { cwd: "/m", hasUI: true, sessionManager: { getSessionId: () => "S1" }, ui: { setStatus() {}, setTitle: (x) => titles.push(x) } };
   for (const f of handlers.session_start) f({}, ctx);
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
-  assert.equal(titles.at(-1), "π - minara");
+  assert.equal(titles.at(-1), "minara");
   titles.length = 0;
   for (const f of handlers.session_info_changed) f({}, ctx);
   await new Promise((r) => setTimeout(r, 5));
-  assert.deepEqual(titles, ["π - minara"]);
+  assert.deepEqual(titles, ["minara"]);
 });
