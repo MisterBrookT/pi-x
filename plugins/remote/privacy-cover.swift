@@ -3,7 +3,7 @@
 // keyboard focus, and screen capture skips it (sharingType = .none), so computer use and screenshots
 // still see and drive the real screen underneath.
 //
-// Shown while the phone is active (the hub writes "until" epoch ms to argv[1]) and no one touched the
+// Shown while the phone is in use (the hub writes "until" epoch ms to argv[1], 60 min after the last phone request) and no one touched the
 // Mac's real mouse or keyboard for 10 s. Real input = hardware events (source pid 0); synthetic input
 // from computer use or Screen Sharing has a process id and does not lift the cover.
 import AppKit
@@ -12,6 +12,11 @@ import CoreGraphics
 let flag = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : NSHomeDirectory() + "/.pix/phone-active"
 let idleNeeded = 10.0
 var lastReal = Date()
+// One cover per Mac: several Pi hubs each start a helper; only the first keeps running.
+let lockFd = open(NSHomeDirectory() + "/.pix/cover.lock", O_CREAT | O_RDWR, 0o644)
+// The others wait (and quit with their hub), taking over if the running one goes away.
+FileHandle.standardInput.readabilityHandler = { h in if h.availableData.isEmpty { exit(0) } }
+while lockFd >= 0 && flock(lockFd, LOCK_EX | LOCK_NB) != 0 { sleep(5) }
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 

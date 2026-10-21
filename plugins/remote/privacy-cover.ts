@@ -1,5 +1,7 @@
 // Privacy cover while brook uses the phone: see privacy-cover.swift. This side marks the phone as active
-// (each relayed phone request pushes "until" 60 s ahead in ~/.pix/phone-active) and keeps the helper running.
+// (each relayed phone request pushes "until" ahead in ~/.pix/phone-active) and keeps the helper running.
+// The phone counts as in use for PIX_COVER_HOLD_MIN minutes (default 60) after its last request: reading on the
+// phone sends nothing, and the cover must not drop while brook reads. Real Mac input lifts it at once.
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -9,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const source = join(dirname(fileURLToPath(import.meta.url)), "privacy-cover.swift");
 export const phoneActivePath = () => process.env.PIX_PHONE_ACTIVE || join(homedir(), ".pix", "phone-active");
-export const phoneActiveMs = 60_000;
+export const phoneActiveMs = (() => { const m = Number(process.env.PIX_COVER_HOLD_MIN); return (Number.isFinite(m) && m > 0 ? m : 60) * 60_000; })();
 
 /** Mark the phone active until now + phoneActiveMs. Writes at most every 5 s. Returns whether it wrote. */
 let lastWrite = -Infinity;
@@ -42,5 +44,6 @@ export function startPrivacyCover(log: (s: string) => void = () => {}): () => vo
 		child.stderr?.on("data", d => log(String(d).trim()));
 		child.on("exit", () => { child = undefined; });
 	});
-	return () => { stopped = true; child?.kill(); child = undefined; try { writeFileSync(phoneActivePath(), "0"); } catch {} };
+	// Stopping one hub's helper must not clear the shared phone-active mark: another Pi may be covering.
+	return () => { stopped = true; child?.kill(); child = undefined; };
 }
