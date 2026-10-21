@@ -55,6 +55,8 @@ const parser = new Marked({ renderer: {
   image(token) {
     let raw = token.href; try { raw = decodeURIComponent(raw); } catch {}
     const file = mentionContext && !/^[a-z]+:/i.test(raw) ? resolveMention(raw, mentionContext) : undefined;
+    if (file && !file.dir && file.kind === "video") return `<video class="md-image md-video" data-src-path="${escapeHtml(file.path)}" controls playsinline preload="metadata" aria-label="${escapeHtml(token.text || file.name)}"></video>`;
+    if (file && !file.dir && file.kind === "pdf") return `<img class="md-image md-pdf" data-pdf-path="${escapeHtml(file.path)}" alt="${escapeHtml(token.text || file.name)}">`;
     if (file && !file.dir && file.kind === "image") return `<img class="md-image" data-src-path="${escapeHtml(file.path)}" alt="${escapeHtml(token.text || file.name)}">`;
     return `<span class="image-reference">Image: ${escapeHtml(token.text || "untitled")}</span>`;
   },

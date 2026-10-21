@@ -355,3 +355,33 @@ test("chat: a markdown image with an absolute path in a message shows the pictur
   await page.waitForFunction(() => !document.getElementById("imageViewer").hidden && document.getElementById("fullImage").naturalWidth > 0);
   assert.deepEqual(errors, []);
 });
+
+test("chat: a markdown video plays inline (controls, playsinline) and a PDF shows its first page that opens the viewer", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pix-chatvid-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const home = join(dir, "home"), shots = join(home, "Desktop", "v");
+  await mkdir(shots, { recursive: true });
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("ffmpeg", ["-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=10", "-t", "1", "-pix_fmt", "yuv420p", join(shots, "clip.mp4")]);
+  const pdf = (() => { const objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>", "<< /Length 35 >>\nstream\n0 0 1 rg 20 20 160 160 re f\nendstream"]; let out = "%PDF-1.4\n"; const offs = []; objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; }); const x = out.length; out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") + `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF\n`; return out; })();
+  await writeFile(join(shots, "doc.pdf"), pdf);
+  const hub = await startRemoteHub({ token, port: 0, home, memoryRoot: join(home, "hub") });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const md = `Demo:\n\n![clip](${join(shots, "clip.mp4")})\n\n![doc](${join(shots, "doc.pdf")})`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "s", cwd: home, busy: false, messages: [{ role: "user", text: "show" }, { role: "assistant", text: "Demo:", html: renderRemoteMarkdown(md, { home }) }] }) });
+  const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForFunction(() => { const v = document.querySelector("#messages video.md-video"); return v && v.readyState >= 1 && v.videoWidth === 160; }, null, { timeout: 15000 });
+  const v = page.locator("#messages video.md-video");
+  assert.equal(await v.getAttribute("playsinline"), "");
+  assert.ok(await v.getAttribute("controls") !== null);
+  await page.waitForFunction(() => document.querySelector("#messages img.md-pdf")?.naturalWidth > 0, null, { timeout: 20000 });
+  await page.locator("#messages img.md-pdf").click();
+  await page.waitForFunction(() => !document.getElementById("fileView").hidden && document.querySelector("#fileBody .document-page"));
+  assert.deepEqual(errors, []);
+});
