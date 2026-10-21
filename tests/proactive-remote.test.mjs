@@ -622,10 +622,10 @@ test("a line with one ask that waits on brook is one row (no second 'Waiting on 
 test("jobs read like X: each job has its own face For you picks; its page is the post with every update as a reply, newest first", async t => {
   const dir = await folder(t);
   const { parseLineEdits, applyLineEdits } = await import("../plugins/foryou/proactive-lines.ts");
-  const e = parseLineEdits([{ id: "kairos", name: "Kairos launch", state: "Arena live; site next", avatar: "🚀" }, { id: "x", name: "X", state: "s", avatar: "not an emoji" }]);
-  assert.equal(e[0].avatar, "🚀"); assert.equal(e[1].avatar, undefined, "only emoji faces");
+  const e = parseLineEdits([{ id: "kairos", name: "Kairos launch", state: "Arena live; site next", avatar: "rocket" }, { id: "x", name: "X", state: "s", avatar: "not a face" }]);
+  assert.equal(e[0].avatar, "rocket"); assert.equal(e[1].avatar, undefined, "only known faces");
   const lines = applyLineEdits([], e, "2026-10-21T08:00:00Z").lines;
-  assert.equal(applyLineEdits(lines, parseLineEdits([{ id: "kairos", avatar: "🏁" }])).lines[0].avatar, "🏁", "the face can change as the job evolves");
+  assert.equal(applyLineEdits(lines, parseLineEdits([{ id: "kairos", avatar: "owl" }])).lines[0].avatar, "owl", "the face can change as the job evolves");
   writeFileSync(join(dir, "lines.json"), JSON.stringify(lines));
   writeFileSync(join(dir, "inbox.jsonl"), [
     item("a", { line: "kairos", at: "2026-10-19T08:00:00Z", title: "Website arena page", note: "- 2026-10-20: 10-20 09:00: draft started\n- 2026-10-21: 10-21 15:22: Lowes made it a Feishu task" }),
@@ -639,7 +639,7 @@ test("jobs read like X: each job has its own face For you picks; its page is the
   await page.evaluate(() => document.getElementById("forYouOpen").click());
   const job = page.locator('#forYouPage [data-fy-job="kairos"]');
   await job.waitFor({ timeout: 12000 });
-  assert.equal(await job.locator(".fj-av").textContent(), "🚀");
+  assert.match(await job.locator(".fj-av img").getAttribute("src"), /^data:image\/webp;base64,/);
   assert.match(await job.locator(".fj-say").textContent(), /Arena live; site next/);
   assert.equal(await job.locator("button").count(), 0, "a post in the timeline has no buttons");
   await job.click();

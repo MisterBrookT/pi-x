@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { FACE_NAMES } from "../core/job-faces.ts";
 
 const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "proactive");
 
@@ -17,6 +18,7 @@ export interface Line { id: string; name: string; project?: string; state: strin
 	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean } }
 /** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
 export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string }
+
 
 const file = (dir = PROACTIVE_DIR) => join(dir, "lines.json");
 export const slug = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").slice(0, 40);
@@ -41,6 +43,7 @@ export function parseLineEdits(x: unknown): LineEdit[] {
 		if (e.retire === true) out.retire = true;
 		const av = typeof e.avatar === "string" ? Array.from(e.avatar.trim()).slice(0, 4).join("") : "";
 		if (av && /\p{Extended_Pictographic}/u.test(av)) out.avatar = av;
+		else if (typeof e.avatar === "string" && FACE_NAMES.includes(e.avatar.trim().toLowerCase())) out.avatar = e.avatar.trim().toLowerCase();
 		return out;
 	});
 }

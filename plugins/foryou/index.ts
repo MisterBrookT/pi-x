@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
+import { FACE_NAMES } from "../core/job-faces.ts";
 import { applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
@@ -152,7 +153,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
-			avatar: Type.Optional(Type.String({ description: "line: one emoji as the job's face on the phone (e.g. 🚀 launch, 📊 backtest); give every line one, change it when the job changes" })),
+			avatar: Type.Optional(Type.String({ description: "line: the job's face on the phone, one of: " + FACE_NAMES.join(", ") + ". Pick what fits the job (rocket = launch, owl = review/eval, hamster or chart = data, cap = study, sprout = training); give every line one; change it when the job changes" })),
 			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),

@@ -1,3 +1,4 @@
+import { FACE_IMAGES } from "../core/job-faces.ts";
 import { desktopCss, desktopHtml, desktopScript, desktopSidebarButton } from "../desktop/remote-desktop-web.ts";
 
 // Static mobile web app served by the remote-control hub. Kept dependency-free so the hub has no build step.
@@ -128,6 +129,7 @@ textarea{flex:1;min-width:0;border:0;outline:0;resize:none;background:transparen
 .fr{cursor:pointer}.fr .fp-meta .fw-st{margin-left:auto;background:none;padding:0}.fr-t{display:block;font-size:16px;font-weight:600;line-height:1.35;margin:1px 0 2px}.fj,.fd{--you:#c2410c;--doing:#2f8a52}
 @media (prefers-color-scheme:dark){.fj,.fd{--you:#f0a35e;--doing:#6cc48a}}
 .fj-av{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;font-size:20px;font-weight:650;line-height:1;color:hsl(var(--h) 45% 36%);background:hsl(var(--h) 60% 93%)}.fj-av.big{width:48px;height:48px;font-size:24px}
+.fj-av.img{background:hsl(var(--h) 45% 93%)}.fj-av img{width:72%;height:72%;object-fit:contain;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.12))}@media (prefers-color-scheme:dark){.fj-av.img{background:hsl(var(--h) 18% 22%)}}
 @media (prefers-color-scheme:dark){.fj-av{color:hsl(var(--h) 60% 80%);background:hsl(var(--h) 28% 20%)}}
 .fj-say{margin:2px 0 6px;font-size:15.5px;line-height:1.42;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .fj-q{display:flex;align-items:center;gap:8px;margin:2px 0 6px;padding:8px 10px;border:1px solid var(--line);border-radius:14px;font-size:14.5px;min-width:0}.fj-q span{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}.fj-q small{flex:none;margin-left:auto;color:var(--muted);font-size:12.5px}
@@ -277,7 +279,8 @@ function fyJobs(){const all=[...(forYou.pending||[]),...(forYou.onit||[])],J=new
 const FYH=[210,25,150,280,340,190,45];const fyHue=n=>{let k=0;for(const c of String(n||''))k=(k*31+c.charCodeAt(0))>>>0;return FYH[k%FYH.length]};
 /* A job is a person in the timeline: its own face (emoji For you picks, tinted circle), a post that says where it stands,
    and an X-like bar (updates · needs you · in progress). Its page is the post with every update as a reply, newest first. */
-const fyFace=(l,big)=>'<span class="fj-av'+(big?' big':'')+'" style="--h:'+fyHue(l.name)+'" role="img" aria-label="'+esc(l.name)+'">'+esc(l.avatar||Array.from(String(l.name||'·').replace(/^[^\p{L}\p{N}]+/u,''))[0]?.toUpperCase()||'·')+'</span>';
+const FYFACES=${JSON.stringify(FACE_IMAGES)};
+const fyFace=(l,big)=>'<span class="fj-av'+(big?' big':'')+(FYFACES[l.avatar]?' img':'')+'" style="--h:'+fyHue(l.name)+'" role="img" aria-label="'+esc(l.name)+'">'+(FYFACES[l.avatar]?'<img src="'+FYFACES[l.avatar]+'" alt="">':esc(l.avatar||Array.from(String(l.name||'·').replace(/^[^\p{L}\p{N}]+/u,''))[0]?.toUpperCase()||'·'))+'</span>';
 const fyTs=t=>{const d=/^\d{4}-\d\d-\d\d$/.test(t)?Date.parse(t+'T12:00'):Date.parse(t);return Number.isFinite(d)?d:0};
 const fyWhen=ms=>{const m=Math.round((Date.now()-ms)/60000);return m<1?'now':m<60?m+'m':m<1440?Math.round(m/60)+'h':m<10080?Math.round(m/1440)+'d':new Date(ms).toLocaleDateString([],{month:'short',day:'numeric'})};
 function fyUpdates(l,items){const U=[],sesName=id=>(sessions.find(s=>s.id===id)||{}).name;
