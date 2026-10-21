@@ -111,7 +111,7 @@ test("reload preserves the active goal footer and continuation count", async (t)
 	await h.emit("session_shutdown", { reason: "reload" });
 	await h.emit("session_start", { reason: "reload" });
 	assert.match(h.render()[0], /goal on · 1\/10/);
-	assert.equal(h.render().length, 2, "goal status does not add another footer line");
+	assert.equal(h.render().length, 3, "goal status does not add another footer line");
 	await h.command("pause");
 	await h.emit("session_shutdown", { reason: "reload" });
 	await h.emit("session_start", { reason: "reload" });
@@ -123,7 +123,7 @@ test("footer shows remote control only while this Pi session is exposed", async 
 	assert.doesNotMatch(h.render()[0], /remote/);
 	h.ctx.ui.setStatus("pix-remote", "remote on");
 	assert.match(h.render()[0], /remote on/);
-	assert.equal(h.render().length, 2);
+	assert.equal(h.render().length, 3);
 	for (const width of [1, 6, 10, 20, 40, 80]) {
 		for (const line of h.render(width)) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width >= 10) assert.match(h.render(width)[0], /remote on/);
@@ -140,7 +140,7 @@ test("goal visibility takes priority over a long path and all footer lines fit o
 	await h.command("A goal.");
 	for (const width of [1, 6, 10, 20, 40, 80, 160]) {
 		const lines = h.render(width);
-		assert.equal(lines.length, 2);
+		assert.equal(lines.length, 3);
 		for (const line of lines) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width >= 10) assert.match(lines[0], /goal on/);
 	}
@@ -178,17 +178,18 @@ test("footer repaints periodically only while background work runs", async (t) =
 	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
 });
 
-test("footer: pending waits get their own middle line; three lines only while something is pending", async (t) => {
+test("footer: waits are always the last line; one entry per pending session, else a dim 'waiting: none'", async (t) => {
 	const h = await harness(t);
-	const two = h.render().length;
+	const idle = h.render();
+	assert.match(idle.at(-1), /⏳ waiting: none/);
 	h.ctx.ui.setStatus("pix-chat-waits", "⏳ minara-3: restyle leaderboard · 12m   ⏳ minara-2 · 3m");
 	const lines = h.render();
-	assert.equal(lines.length, two + 1);
-	assert.match(lines[1], /⏳ minara-3: restyle leaderboard · 12m/);
-	assert.doesNotMatch(lines[0], /minara/, "not squeezed beside remote/memory");
+	assert.equal(lines.length, idle.length, "the layout never jumps");
+	assert.match(lines.at(-1), /⏳ minara-3: restyle leaderboard · 12m/);
+	assert.doesNotMatch(lines.slice(0, -1).join("\n"), /minara/);
 	for (const line of h.render(30)) assert.ok(visibleWidth(line) <= 30);
 	h.ctx.ui.setStatus("pix-chat-waits", undefined);
-	assert.equal(h.render().length, two);
+	assert.match(h.render().at(-1), /waiting: none/);
 });
 
 test("footer never exceeds a narrow pane, even with a background job label", async (t) => {

@@ -117,6 +117,7 @@ export default function (pi: ExtensionAPI) {
       to: Type.Optional(Type.String({ description: "Session name (unique prefix works)" })),
       kind: Type.Optional(StringEnum([...KINDS])),
       message: Type.Optional(Type.String()),
+      label: Type.Optional(Type.String({ maxLength: 60, description: "ask/handoff: a short task summary (≤40 chars) shown in your footer while you wait, e.g. 'restyle leaderboard'" })),
       thread: Type.Optional(Type.String({ description: "Thread id when replying" })),
       doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
@@ -153,7 +154,7 @@ export default function (pi: ExtensionAPI) {
         hops.set(n.thread, hop);
         sent = { ...n, to };
         const live = board().some((x) => x.name === to);
-        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message }, live));
+        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message, label: (p as any).label }, live));
         return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
           (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.");
       })();

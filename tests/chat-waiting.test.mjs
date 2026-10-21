@@ -144,5 +144,9 @@ test("footer: each pending ask/handoff on its own line with what was asked and h
   assert.equal(W.waitingLines(w, 72 * 60_000), "⏳ minara-3: restyle leaderboard (DMind blue) · 1h12m   ⏳ minara-2 · 12m");
   assert.equal(W.noticeText(w), undefined, "waits are not squeezed beside remote/memory");
   assert.equal(W.waitingLines(W.receivedNote(W.receivedNote(w, { thread: "t1" }), { thread: "t2" })), undefined, "line hidden when nothing is pending");
-  assert.equal(W.gist("x".repeat(80)).length, 48);
+  assert.equal(W.gist("x".repeat(80)).length, 40);
+  assert.equal(W.gist("[chat handoff from session \"for-you\", thread c26d4060]\n\nbrook feedback on the footer waits line (0f8646e), screenshot /x.png:\n1. Move the waits line"), "Move the waits line");
+  assert.equal(W.gist("Feedback from brook on the artifacts (thread 246b7aad). He clicked the footer item and it opened the hub."), "He clicked the footer item and it opene…");
+  assert.equal(W.gist("brook's request (low-risk Pix UI, already approved): in the footer, move waits to their own line."), "in the footer, move waits to their own…");
+  assert.equal(W.gist("anything long here", "restyle leaderboard"), "restyle leaderboard", "an explicit label wins");
 });

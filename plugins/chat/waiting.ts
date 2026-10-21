@@ -27,9 +27,9 @@ export function saveWaiting(path: string, w: Waiting): void {
 }
 
 /** A sent ask or handoff starts a wait (notes and replies expect nothing back). */
-export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number; message?: string }, live: boolean): Waiting {
+export function sentNote(w: Waiting, n: { thread: string; to: string; kind: string; at?: number; message?: string; label?: string }, live: boolean): Waiting {
 	if (n.kind !== "ask" && n.kind !== "handoff") return w;
-	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...(n.message ? { what: gist(n.message) } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
+	return { waits: [...w.waits.filter(x => x.thread !== n.thread), { thread: n.thread, to: n.to, kind: n.kind, at: n.at ?? Date.now(), live, ...((n.message || n.label) ? { what: gist(n.message ?? "", n.label) } : {}) }], notices: w.notices.filter(x => x.thread !== n.thread) };
 }
 
 /** Any message back on the thread ends the wait. */
@@ -51,11 +51,23 @@ export function tick(w: Waiting, live: Set<string>, now = Date.now()): Waiting {
 	return { waits, notices };
 }
 
-/** A few words on what was asked: the first line, without a leading "[...]" tag or "Please", cut at ~48 chars. */
-export function gist(message: string): string {
-	const line = message.split("\n").map(x => x.trim()).find(x => x && !/^\[[^\]]*\]$/.test(x)) ?? "";
-	const t = line.replace(/^\[[^\]]*\]\s*/, "").replace(/^(please|pls|can you|could you)\s+/i, "").replace(/\s+/g, " ");
-	return t.length > 48 ? t.slice(0, 47).trimEnd() + "…" : t;
+/**
+ * A short task summary (≤40 chars): the sender's label if given, else the first real sentence with
+ * boilerplate removed ("[chat handoff …]", "brook's request (…):", "Feedback from brook on …:", thread ids, "Please").
+ */
+export function gist(message: string, label?: string): string {
+	const cut = (t: string) => t.length > 40 ? t.slice(0, 39).trimEnd() + "…" : t;
+	if (label?.trim()) return cut(label.trim().replace(/\s+/g, " "));
+	const boiler = /^(?:(?:brook'?s?|second|third|new|another|follow-?up|context|fyi|feedback|request)\b[^:]{0,80}?:|this task is now yours\.?)\s*/i;
+	for (let line of message.split("\n")) {
+		line = line.replace(/\[[^\]]*\]/g, " ").replace(/\([^()]*\b(?:thread|commit|[0-9a-f]{7,})\b[^()]*\)/gi, " ").replace(/\s+/g, " ").trim();
+		for (let i = 0; i < 3 && boiler.test(line); i++) line = line.replace(boiler, "");
+		// "Feedback from brook on the artifacts. He clicked …": the lead-in sentence about brook is boilerplate too.
+		line = line.replace(/^(?:feedback|request|note)\b[^.]{0,80}\.\s+/i, "").replace(/^(?:\d+[.)]|[-•*])\s+/, "").replace(/^(please|pls|can you|could you)\s+/i, "");
+		const sentence = line.split(/(?<=[.!?。！？])\s/)[0].replace(/[.:;,。]+$/, "").trim();
+		if (sentence) return cut(sentence);
+	}
+	return "";
 }
 
 const ago = (ms: number) => ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h${Math.floor(ms % 3_600_000 / 60_000) ? Math.floor(ms % 3_600_000 / 60_000) + "m" : ""}`;
