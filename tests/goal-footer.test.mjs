@@ -234,3 +234,17 @@ test("footer: Decision book and Arena only under ~/workspace/minara; other links
 	assert.equal(linkFits("Arena", "/h/workspace/minara-old", "/h"), false);
 	assert.equal(linkFits("Memory", "/h", "/h"), true);
 });
+
+test("footer: what this session pinned shows as 'Docs 1 · Links 1' on the first line, and nothing when empty", async (t) => {
+	const { mkdtempSync } = await import("node:fs"), { join } = await import("node:path"), { tmpdir } = await import("node:os");
+	const d = mkdtempSync(join(tmpdir(), "pins-")); process.env.PIX_ARTIFACTS_DIR = d; t.after(() => delete process.env.PIX_ARTIFACTS_DIR);
+	const h = await harness(t);
+	h.ctx.cwd = "/p";
+	assert.doesNotMatch(h.render(200).join("\n"), /Docs|Links/);
+	const { pinArtifact } = await import("../plugins/core/artifacts.ts");
+	pinArtifact(h.sm.getSessionId(), { title: "Plan", url: "https://byterum.feishu.cn/docx/A1" }, d);
+	pinArtifact(h.sm.getSessionId(), { title: "Site", url: "https://x.dev" }, d);
+	pinArtifact("someone-else", { url: "https://y.dev" }, d);
+	await h.emit("session_start");
+	assert.match(h.render(200)[0], /Docs 1 · Links 1/);
+});

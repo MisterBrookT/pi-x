@@ -38,6 +38,8 @@ export interface RemoteSnapshot {
   waiting?: number;
   /** Chat asks/handoffs to other sessions without a reply yet ("Waiting for pix"); not running work. */
   peerWait?: string;
+  /** Docs, links and files this session pinned for brook (core/artifacts.ts); file urls are absolute paths. */
+  pinned?: { title: string; url: string; kind: "doc" | "link" | "file" }[];
   /** Next scheduled background health check (epoch ms), shown on the phone like the Mac footer. */
   nextLook?: number;
   messages: RemoteMessage[];

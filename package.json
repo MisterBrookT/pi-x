@@ -92,7 +92,8 @@
       "./plugins/subagents/index.ts",
       "./plugins/web/index.ts",
       "./plugins/core/tool.ts",
-      "./plugins/foryou/index.ts"
+      "./plugins/foryou/index.ts",
+      "./plugins/artifacts/index.ts"
     ]
   },
   "engines": {
