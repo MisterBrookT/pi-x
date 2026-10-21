@@ -366,7 +366,7 @@ test("related asks in one line of work share one card, and one answer handles th
   // On the phone the two asks are one job row; its page holds both.
   const job = page.locator('#messages [data-fy-job="bench"]');
   await job.waitFor();
-  assert.match(await job.textContent(), /News bench[\s\S]*2 tasks · 2 need you/);
+  assert.match(await job.textContent(), /News bench[\s\S]*2 need you[\s\S]*Curve for Lowes[\s\S]*Data for 欧阳/);
   await job.click();
   await page.locator('#messages .fd .fp[data-fy="h1"]').first().waitFor();
   assert.match(await page.locator("#messages .fd").first().textContent(), /Curve for Lowes[\s\S]*Data for 欧阳/);
@@ -570,7 +570,11 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   const job = page.locator('#forYouPage [data-fy-job="kairos-launch"]');
   await job.waitFor({ timeout: 12000 });
   assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one row for the job");
-  assert.match(await job.textContent(), /Kairos launch[\s\S]*3 tasks · 1 need you/);
+  assert.match(await job.textContent(), /Kairos launch[\s\S]*1 needs you[\s\S]*2 in progress/);
+  // The row names its tasks, the ones that need brook first, each marked by state (orange = you, green = in progress).
+  assert.deepEqual(await job.locator(".fj-l li").evaluateAll(L => L.map(li => li.className + ":" + li.textContent)), ["you:Review Kairos doc", "doing:Deploy Kairos", "doing:Arena page"]);
+  const [you, doing] = await job.locator(".fj-pill").evaluateAll(L => L.map(e => getComputedStyle(e).color));
+  assert.notEqual(you, doing, "needs-you and in-progress read as different colors");
   assert.equal(await job.locator("button").count(), 0, "the timeline has no buttons; tap opens the post");
   assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 0, "its tasks are inside the job, not in the list");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-list.png") });
@@ -594,4 +598,20 @@ test("Mac: the Unfinished list and the card pager show one row per job (a line w
   const card = { line: "Kairos launch", related: [{ title: "Arena page" }], title: "Review doc", source: "s", left: 0, choices: [] };
   assert.match(cardLines(card)[0], /Kairos launch · 2 tasks/);
   assert.match(cardTitle(card), /^Kairos launch · 2 tasks\n  • Review doc\n  • Arena page/);
+});
+
+test("a line with one ask that waits on brook is one row (no second 'Waiting on you' post for the same thing)", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD / ZJU", state: "Ongoing", updated: "x" }]));
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c1", { line: "phd", source: "WeChat: 陈为老师", title: "回复陈老师" })) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const browser = await launch(); t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  await page.evaluate(() => document.getElementById("forYouOpen").click());
+  await page.locator('#forYouPage [data-fy-job="phd"]').waitFor({ timeout: 12000 });
+  assert.equal(await page.locator("#forYouPage .fp").count(), 1, "one row");
+  assert.match(await page.locator('#forYouPage [data-fy-job="phd"]').textContent(), /PhD \/ ZJU[\s\S]*1 needs you[\s\S]*回复陈老师/);
+  assert.doesNotMatch(await page.locator("#forYouPage").textContent(), /Waiting on you/);
 });
