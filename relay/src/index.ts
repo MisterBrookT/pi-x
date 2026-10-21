@@ -19,7 +19,7 @@ export default {
     if (url.pathname === "/") {
       const nonce = crypto.randomUUID().replace(/-/g, "");
       return text(html.replace("<script>", `<script nonce="${nonce}">`), "text/html; charset=utf-8", {
-        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' wss://${url.host}; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+        "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self' wss://${url.host}; img-src 'self' data: blob:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
       });
     }
     if (url.pathname === "/version") return text(JSON.stringify({ build }), "application/json");

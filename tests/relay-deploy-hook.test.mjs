@@ -18,3 +18,9 @@ test("post-commit relay deploy watches every file the relay bundles", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(pkg.scripts.prepare, /core\.hooksPath scripts\/git-hooks/);
 });
+
+test("the relay page lets the phone show pictures it fetched from the Mac (blob: images in chat bubbles)", () => {
+  const src = readFileSync(new URL("../relay/src/index.ts", import.meta.url), "utf8");
+  const csp = src.match(/"content-security-policy": `([^`]+)`/)[1];
+  assert.match(csp, /img-src [^;]*\bblob:/, "chat images are blob: URLs; without this the relay shows grey boxes");
+});
