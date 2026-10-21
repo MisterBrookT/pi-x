@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { markPhoneActive, resetPhoneActive, phoneActiveMs } from "../plugins/remote/privacy-cover.ts";
+import { markPhoneActive, markPhoneGone, phoneUse, resetPhoneActive, phoneActiveMs } from "../plugins/remote/privacy-cover.ts";
 
-test("privacy cover: a phone request marks the phone in use for 60 min (reading sends nothing), throttled to one write per 5 s", () => {
+test("privacy cover: a phone request marks the phone in use for 45 s (the visible page pings every 10 s), throttled to one write per 5 s", () => {
   const path = join(mkdtempSync(join(tmpdir(), "cover-")), "phone-active");
   resetPhoneActive();
   assert.equal(markPhoneActive(1000, path), true);
   assert.equal(Number(readFileSync(path, "utf8")), 1000 + phoneActiveMs);
-  assert.equal(phoneActiveMs, 60 * 60_000, "default hold is one hour");
+  assert.equal(phoneActiveMs, 45_000, "covers only while pings keep coming");
   assert.equal(markPhoneActive(3000, path), false, "throttled");
   assert.equal(markPhoneActive(7000, path), true);
 });
@@ -36,4 +36,25 @@ test("privacy cover: one Pi stopping its helper does not drop the cover another 
   } finally { delete process.env.PIX_PHONE_ACTIVE; delete process.env.PIX_PRIVACY_COVER; }
   const src = readFileSync(new URL("../plugins/remote/privacy-cover.swift", import.meta.url), "utf8");
   assert.match(src, /flock\(lockFd, LOCK_EX \| LOCK_NB\)/, "a second helper waits instead of drawing its own cover");
+});
+
+test("privacy cover: locking the phone or leaving Pix drops the cover at once; anything else from the phone keeps it", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "cover-")), "phone-active");
+  resetPhoneActive(); markPhoneActive(Date.now(), path);
+  assert.equal(phoneUse("/api/push", "POST", '{"presence":"hidden","endpoint":"e"}'), "gone");
+  assert.equal(phoneUse("/api/push", "POST", '{"presence":"visible","endpoint":"e"}'), "here");
+  assert.equal(phoneUse("/api/sessions", "GET", ""), "here");
+  assert.equal(phoneUse("/api/here?v=0", "GET", ""), "gone", "the page's own beacon, even without notifications");
+  assert.equal(phoneUse("/api/here?v=1", "GET", ""), "here");
+  markPhoneGone(path);
+  assert.equal(readFileSync(path, "utf8"), "0");
+  assert.equal(markPhoneActive(Date.now(), path), true, "the next visible ping covers again without waiting for the throttle");
+});
+
+test("phone page beacons presence through the relay while visible and says goodbye when hidden, even with notifications off", async (t) => {
+  const { relayAllowed } = await import("../plugins/remote/remote-relay-agent.ts");
+  assert.ok(relayAllowed("/api/here?v=1", "GET"));
+  const src = readFileSync(new URL("../plugins/remote/remote-web.ts", import.meta.url), "utf8");
+  assert.match(src, /if\(paired\)\{const here=/, "beacon runs in the relay page only, independent of push");
+  assert.match(src, /visibilitychange',here/);
 });

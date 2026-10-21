@@ -1,5 +1,5 @@
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import { markPhoneActive } from "./privacy-cover.ts";
+import { markPhoneActive, markPhoneGone, phoneUse } from "./privacy-cover.ts";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -50,7 +50,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
   return JSON.parse((value.z === 1 ? inflateRawSync(plain, { maxOutputLength: 20_000_000 }) : plain).toString("utf8"));
 };
 
-export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
+export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return path === "/api/push" && (method === "GET" || method === "POST") || path === "/api/here" && method === "GET" || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
   || pluginRelayAllowed(path, method)
   || method === "GET" && (path === "/api/folders" || path === "/api/links" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume")
   || method === "POST" && path === "/api/desktop/open" || method === "GET" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/read$/.test(path) || method === "POST" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/(write|close|input)$/.test(path)
@@ -129,7 +129,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         const message = openRelayFrame(secret, String(event.data));
         if (message.kind === "hello") { await publishSessions(typeof message.active === "string" ? message.active : undefined); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || typeof message.body !== "string") return;
-        markPhoneActive();
+        if (phoneUse(message.path, String(message.method), message.body) === "gone") markPhoneGone(); else markPhoneActive();
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.
         if (!relayAllowed(message.path, message.method)) { send({ kind: "response", id: message.id, status: 404, error: "This Mac's Pix is older than the phone. Reload Pi on the Mac." }); return; }
         if (message.body.length > relayRequestLimit) { send({ kind: "response", id: message.id, status: 413, error: "Message and image are too large to send" }); return; }

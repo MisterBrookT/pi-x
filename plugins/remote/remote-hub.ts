@@ -305,6 +305,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
 
       if (path === "/agent/version" && req.method === "GET") return send(res, 200, { version: options.version ?? "" });
       if (path === "/agent/retire" && req.method === "POST") { send(res, 200, { ok: true }); setTimeout(() => options.onRetire?.(), 50); return; }
+      if (path === "/api/here" && req.method === "GET") return send(res, 200, { ok: true });  // phone presence for the privacy cover (read by the relay agent)
       if (path === "/api/push" && req.method === "GET") return push ? send(res, 200, { publicKey: await push.publicKey(), phones: await push.count() }) : send(res, 404, { error: "notifications are off" });
       if (path === "/api/push" && req.method === "POST") {
         if (!push) return send(res, 404, { error: "notifications are off" });

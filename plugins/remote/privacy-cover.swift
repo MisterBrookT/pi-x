@@ -3,7 +3,7 @@
 // keyboard focus, and screen capture skips it (sharingType = .none), so computer use and screenshots
 // still see and drive the real screen underneath.
 //
-// Shown while the phone is in use (the hub writes "until" epoch ms to argv[1], 60 min after the last phone request) and no one touched the
+// Shown while the phone is in use (the hub writes "until" epoch ms to argv[1]: while the Pix page is visible on the phone) and no one touched the
 // Mac's real mouse or keyboard for 10 s. Real input = hardware events (source pid 0); synthetic input
 // from computer use or Screen Sharing has a process id and does not lift the cover.
 import AppKit
