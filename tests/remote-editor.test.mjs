@@ -349,6 +349,8 @@ test("chat: a markdown image with an absolute path in a message shows the pictur
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: home, busy: false, messages: [{ role: "user", text: "show me" }, { role: "assistant", text: "Here:", html: renderRemoteMarkdown(`Here:\n\n![backtest](${join(shots, "curve.png")})`, { home }) }, { role: "user", text: "nice" }] }) });
   await page.getByText("nice").waitFor();
   await page.waitForFunction(() => document.querySelector("#messages img.md-image")?.naturalWidth > 0);
+  const box = await page.locator("#messages img.md-image").boundingBox();
+  assert.ok(box.width <= 280 && box.height <= 300, "inline like a tool picture, not full width");
   await page.locator("#messages img.md-image").click();
   await page.waitForFunction(() => !document.getElementById("imageViewer").hidden && document.getElementById("fullImage").naturalWidth > 0);
   assert.deepEqual(errors, []);
