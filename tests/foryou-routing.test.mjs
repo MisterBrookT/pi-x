@@ -583,7 +583,20 @@ test("regression: Gmail IMAP retries through the proxy, then direct; mail that n
 	assert.ok(mustPass(m("PacificVis 2027 Papers (Journal Track)", "[submission 3549] new discussion comment")));
 	assert.ok(mustPass(m("chenvis", "Fw: 转发: 【重要】2027年度省自然科学基金“新苗项目”附件-10.23前反馈")));
 	assert.ok(mustPass(m("Microsoft CMT", "WISE26 : Invitation to chair sessions")));
+	assert.ok(mustPass(m("徐洁婷", "@10 没打勾的是还没交学年小结的 ddl为周三晚上八点前。")), "a class deadline ask passes");
 	assert.ok(!mustPass(m("NLP Newsletter", "Top AI Papers of the Week")));
 	assert.ok(!mustPass(m("X", "Your receipt from X")));
 	assert.ok(mustPass(m("Someone", "hello"), ["^Someone$"]), "config passList adds patterns");
+});
+
+test("regression: DingTalk is started when closed (its local DB only updates while it runs), and the snapshot's newest time is kept", async () => {
+	const src = await import("../plugins/foryou/proactive-sources.ts");
+	const calls = [];
+	assert.equal(await src.ensureDingTalk(async (c, a) => { calls.push([c, ...a].join(" ")); if (c === "pgrep") throw new Error("no"); return { stdout: "" }; }), true);
+	assert.deepEqual(calls, ["pgrep -x DingTalk", "open -ga DingTalk"]);
+	assert.equal(await src.ensureDingTalk(async () => ({ stdout: "123" })), false, "running: left alone");
+	assert.equal(src.newestTime([{ messages: [{ time: "2026-10-19T02:00:00Z" }] }, { messages: [{ time: "2026-10-21T02:00:00Z" }, { time: "x" }] }]), "2026-10-21T02:00:00Z");
+	const { all } = src.dingAdapters(() => [{ id: "c", name: "博2班", me: "m", messages: [{ id: "1", time: "2026-10-19T02:00:00Z", sender: "a", text: "x" }] }], async () => false);
+	await all.expand({ kind: "dingtalk-all", id: "", name: "DingTalk" });
+	assert.equal(src.dingNewest.at, "2026-10-19T02:00:00Z");
 });

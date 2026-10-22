@@ -235,7 +235,21 @@ const gmail: Adapter = {
 };
 
 /** One immutable local snapshot per expansion; each chat reads from the same batch. */
-export function dingAdapters(load: (root?: string, account?: string) => DingChat[] | Promise<DingChat[]> = readDingTalkIsolated): { all: Adapter; chat: Adapter } {
+/**
+ * DingTalk only writes its local DB while the app runs. Closed for days (10-19 to 10-22), the collector read a stale
+ * snapshot that looked healthy, and a 学年小结 deadline was missed. So before each read: if DingTalk is not running,
+ * start it hidden (open -ga) and say so. Returns true when it launched it.
+ */
+export async function ensureDingTalk(exec: (cmd: string, a: string[], o: object) => Promise<{ stdout: string }> = run): Promise<boolean> {
+	try { await exec("pgrep", ["-x", "DingTalk"], { timeout: 5_000 }); return false; } catch { /* not running */ }
+	await exec("open", ["-ga", "DingTalk"], { timeout: 15_000 });
+	return true;
+}
+/** Newest message time in a snapshot (ISO), or undefined. */
+export const newestTime = (chats: { messages: { time: string }[] }[]) => chats.flatMap(c => c.messages.map(m => m.time)).filter(t => !Number.isNaN(Date.parse(t))).sort().at(-1);
+export const dingNewest: { at?: string; launched?: boolean } = {};
+
+export function dingAdapters(load: (root?: string, account?: string) => DingChat[] | Promise<DingChat[]> = readDingTalkIsolated, ensure: () => Promise<boolean> = ensureDingTalk): { all: Adapter; chat: Adapter } {
 	let snapshot: DingChat[] = [];
 	const inFlight = new Map<string, Promise<DingChat[]>>();
 	const howToRead = (_src: Source, _refs: string[]) => "DingTalk local Mac cache. Read with readDingTalk from src/dingtalk-local.ts; open DingTalk to sync. Attachments are not downloaded.";
@@ -245,10 +259,11 @@ export function dingAdapters(load: (root?: string, account?: string) => DingChat
 			const key = JSON.stringify([root, account]);
 			let pending = inFlight.get(key);
 			if (!pending) {
-				pending = Promise.resolve().then(() => load(root, account)).finally(() => inFlight.delete(key));
+				pending = ensure().catch(() => false).then(l => { dingNewest.launched = l; if (l) return new Promise(r => setTimeout(r, 20_000)); }).then(() => load(root, account)).finally(() => inFlight.delete(key));
 				inFlight.set(key, pending);
 			}
 			snapshot = await pending;
+			dingNewest.at = newestTime(snapshot);
 			return snapshot.map(c => ({ kind: "dingtalk", id: c.id, name: `DingTalk: ${c.name}`, me: c.me }));
 		} },
 		chat: { howToRead, fetch: async src => {

@@ -13,7 +13,7 @@ export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urge
  * offices, and his reviewer/PC duties. brook missed a PacificVis reviewer discussion and an advisor funding notice
  * because the filter read "not addressed to him by name" as noise. Extra patterns: config "passList" (regex strings).
  */
-export const DEFAULT_PASS = ["chenvis", "zju\\.edu\\.cn", "浙江大学", "PacificVis", "\\bPCS\\b", "precisionconference", "\\[submission \\d+\\]", "reviewer", "审稿", "研究生院|yjsy", "财务|cwc@", "基金|funding", "deadline|截止|前反馈", "invitation to chair|invit(e|ation) to (review|serve|speak)"];
+export const DEFAULT_PASS = ["chenvis", "zju\\.edu\\.cn", "浙江大学", "PacificVis", "\\bPCS\\b", "precisionconference", "\\[submission \\d+\\]", "reviewer", "审稿", "研究生院|yjsy", "财务|cwc@", "基金|funding", "deadline|\\bddl\\b|截止|前反馈|@所有人|@all\\b", "invitation to chair|invit(e|ation) to (review|serve|speak)"];
 export function mustPass(m: Msg, extra: string[] = []): boolean {
 	const hay = [m.sender, m.text.split("\n")[0].replace(/^Subject: /, "")];
 	return [...DEFAULT_PASS, ...extra].some(p => { try { const re = new RegExp(p, "i"); return hay.some(h => re.test(h)); } catch { return false; } });

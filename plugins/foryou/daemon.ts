@@ -26,7 +26,7 @@ import { ensureUnlocked } from "./unlock.ts";
 import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
 import { filterPrompt, forwardPrompt, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
-import { adapterFor, expandSources } from "./proactive-sources.ts";
+import { adapterFor, dingNewest, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
@@ -268,7 +268,11 @@ async function tick(cfg: Config) {
 		const seen = { ...prev }; for (const n of fine) { const k = sourceKind(n); if (k) seen[k] = at; }
 		const kinds = [...new Set(cfg.sources.map(s => sourceKind(s.name)).filter(Boolean))];
 		for (const k of kinds) seen[k] ??= at;  // start the clock for a kind never seen
-		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6))];
+		// A read that works on a stale local DB is not "seen": DingTalk counts only up to its newest message.
+		// Quiet nights are normal, so this uses 24 h, not the silence window.
+		const dingStale = dingNewest.at && Date.now() - Date.parse(dingNewest.at) > 24 * 3_600_000 ? [{ text: `DingTalk: newest message is ${Math.round((Date.now() - Date.parse(dingNewest.at)) / 3_600_000)} h old (app closed or not syncing?)`, since: dingNewest.at }] : [];
+		if (dingNewest.launched) { log("DingTalk was not running: started it (open -ga DingTalk)"); dingNewest.launched = false; }
+		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6)), ...dingStale];
 		blockedApps.clear();
 		for (const f of failed) if (/lost Full Disk Access/.test(f.error)) blockedApps.add(f.source.startsWith("WeChat") ? "wechat" : "dingtalk");
 		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);
