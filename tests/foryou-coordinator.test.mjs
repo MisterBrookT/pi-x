@@ -54,7 +54,7 @@ test("coordinator: loops tool and context only in the For you session", async ()
 	assert.equal(await run({ action: "note", id: "a", text: "signed up" }), "Noted.");
 	assert.equal(await run({ action: "later", id: "a" }), "Parked.");
 	assert.equal(await run({ action: "drop", id: "a" }), "Dropped.");
-	assert.match(await run({ action: "create", title: "Reply to Lowes", why: "He asks for the curve", source: "群", refs: ["m1"], line: "bench" }), /^Card \w+ is on brook's For you\.$/);
+	assert.match(await run({ action: "create", title: "Reply to Lowes", why: "He asks for the curve", source: "群", refs: ["m1"], line: "bench" }), /^Card \w+ is on brook's For you \(discuss: default\)\.$/);
 	assert.equal(await run({ action: "create", title: "x" }), "create needs title, why and source.");
 	assert.equal(await run({ action: "note", text: "x" }), "This action needs id.");
 	assert.match(await run({ action: "remember", card: "index", add: ["Prefers Cmd shortcuts, never Option"] }), /^Remembered on index \(\+1 -0\)\.$/);

@@ -71,7 +71,7 @@ export interface Verdict { alerts: (Alert & { state?: LoopState })[]; update: Lo
  * done/dismissed/resolved = closed. `quiet` = kept but not pushed. `session` = the Pi session on it.
  */
 export type Status = "pending" | "onit" | "later" | "waiting" | "done" | "dismissed" | "resolved";
-export interface Item extends Alert { id: string; at: string; source: string; sourceKey: string; howToRead: string; status: Status; quiet?: boolean; session?: string; wakeAt?: string; at_status?: string;
+export interface Item extends Alert { autonomy?: "do" | "prepare" | "discuss"; autonomyWhy?: string; id: string; at: string; source: string; sourceKey: string; howToRead: string; status: Status; quiet?: boolean; session?: string; wakeAt?: string; at_status?: string;
 	/** Folder of the session working on it, so a closed session can be resumed there. */
 	sessionCwd?: string;
 	/** The loop's brief: dated progress lines written by whoever worked on it. Survives any chat. */
@@ -410,7 +410,7 @@ export function pruneLog(text: string, now: number, days = 30): string {
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ prepared: i.prepared ?? "", line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
+export const publicItem = (i: Item) => ({ autonomy: i.autonomy ?? "", prepared: i.prepared ?? "", line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
 
 /** A note line appended to a loop's brief, keeping the brief short (newest lines win). */
 export function addNote(old: string | undefined, text: string, now = new Date()): string {

@@ -17,6 +17,7 @@ import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { FACE_NAMES } from "../core/job-faces.ts";
+import { addRule, removeRule, rulesForPrompt } from "./autonomy.ts";
 import { AUTONOMY, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
@@ -144,7 +145,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		label: "Loops",
 		description: "Act on brook's open loops (For you). remind: bring a loop back as a card at an exact time (at, text = what to remind). remember: keep a lasting fact about brook (preference, person, project) on a memory card. line: create, move or retire a line of work (id or name, state, step = next); merge = other line ids to fold into it (one job: their loops become its tasks, one card). A line is a job: file every loop of the same job under one line, so brook sees one card with tasks, not many cards. create: put a new card on brook's For you (title, why, source, sourceKey, howToRead, refs, line, optional due, choices, text = what you prepared, step = the next step). prepared: the result of preparing a new loop under the hood (text = the draft or facts brook will see on the card). handoff: send a loop to another Pi session (an open one by id, the one already on it, or \"new\" in a folder). note: add a progress line to a loop's brief. finished: the whole loop is done (text = what was done); it goes back to brook once to check and close. next: a step is finished and the next one is brook's; give the new button (1-3 word outcome, e.g. \"Send results to Amber\") and next step, and it comes back to him. choices: brook must decide; put 1-3 buttons (label + run: here|discuss|<session id>|new|later|no, optional prompt) and an optional question on his card, then end your turn without waiting (he can also type his own answer or pick Later). later: park it until near its due date. done: brook handled it. drop: not worth tracking.",
 		parameters: Type.Object({
-			action: StringEnum(["remind", "remember", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
+			action: StringEnum(["remind", "remember", "rule", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
 			at: Type.Optional(Type.String({ description: "remind: ISO time with timezone, when the card comes back" })),
 			card: Type.Optional(Type.String({ description: "remember: the memory card, e.g. index, people/Knight, projects/newsdecision" })),
@@ -154,7 +155,9 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
 			avatar: Type.Optional(Type.String({ description: "line: the job's face on the phone, one of: " + FACE_NAMES.join(", ") + ". Pick what fits the job (rocket = launch, owl = review/eval, hamster or chart = data, cap = study, sprout = training); give every line one; change it when the job changes" })),
-			autonomy: Type.Optional(StringEnum(AUTONOMY, { description: "line: how much may happen without brook: do (just do it, report after), prepare (do read-only/draft work, put it on the card), discuss (ask first). Set when brook states a preference for this job." })),
+			autonomy: Type.Optional(StringEnum(AUTONOMY, { description: "line, rule, create: how much may happen without brook: do (just do it, report after), prepare (do read-only/draft work, put it on the card), discuss (ask first). Set when brook states a preference for this job." })),
+			scope: Type.Optional(StringEnum(["line", "person", "type"] as const, { description: "rule: what it matches: a line id, a person/source name, or a work-type word (e.g. replay)" })),
+			match: Type.Optional(Type.String({ description: "rule: the line id, person name, or work-type word" })),
 			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
@@ -180,6 +183,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				if (ch.length) logCardChanges(proactivePaths(deps.dir).memoryLog, ch);
 				return done(ch.length ? `Remembered on ${ch[0].card} (+${ch[0].added.length} -${ch[0].removed.length}).` : "Nothing changed (name a card, and lines to add or remove).");
 			}
+			if (p.action === "rule") {
+				const pd = proactivePaths(deps.dir).dir;
+				if (p.retire) return done(p.match && removeRule(pd, p.match, p.scope) ? `Rule "${p.match}" removed.` : "No such rule.");
+				if (!p.match || !p.scope || !p.autonomy) return done("rule needs scope (line|person|type), match and autonomy.");
+				return done(`Rule saved: ${p.scope} "${p.match}" -> ${p.autonomy}. Rules now:\n${rulesForPrompt(addRule(pd, { scope: p.scope, match: p.match, level: p.autonomy }))}`);
+			}
 			if (p.action === "line" && p.merge?.length) {
 				const id = p.id ?? (p.name ? slug(p.name) : "");
 				const moved = id ? mergeJobLines(p.merge, { id, name: p.name, state: p.state, project: p.project }, deps.dir) : undefined;
@@ -192,8 +201,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");
 			}
 			if (p.action === "create") {
-				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text }, deps.dir);
-				return done(it ? `Card ${it.id} is on brook's For you.` : "create needs title, why and source.");
+				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, autonomy: p.autonomy, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text }, deps.dir);
+				return done(it ? `Card ${it.id} is on brook's For you (${it.autonomy}: ${it.autonomyWhy}).` : "create needs title, why and source.");
 			}
 			if (!p.id) return done("This action needs id.");
 			if (p.action === "remind") return done(remindItem(p.id, p.at ?? "", p.text ?? "", deps.dir) ? `Reminder set; the card comes back at ${p.at}.` : `No loop ${p.id}, or the time is missing or past.`);

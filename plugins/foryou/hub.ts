@@ -4,7 +4,7 @@ import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { editMemoryLine, markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
-import { contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
+import { setItemAutonomy, contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export interface ForYouHubOptions {
 	/** Proactive list folder; defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
@@ -15,7 +15,7 @@ export interface ForYouHubOptions {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context";
+	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/autonomy$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
@@ -96,6 +96,17 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 			const lm = method === "POST" && path.match(/^\/api\/foryou\/line\/([A-Za-z0-9_-]{1,60})\/hide$/);
 			const am = method === "POST" && path.match(/^\/api\/foryou\/line\/([A-Za-z0-9_-]{1,60})\/autonomy$/);
 			if (am) { const want = (await body().catch(() => ({})) as any)?.level; const v = setLineAutonomy(am[1], isAutonomy(want) ? want : undefined, dir); onProactive(); return v ? { status: 200, body: { autonomy: v } } : { status: 404, body: { error: "no such line" } }; }
+			// The card's chip: brook changes a loop's level; For you hears it and re-routes.
+			const im = method === "POST" && path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/autonomy$/);
+			if (im && im[1] !== "line") {
+				const want = (await body().catch(() => ({})) as any)?.level;
+				const r = setItemAutonomy(im[1], want, dir);
+				if (!r) return { status: 404, body: { error: "no such loop" } };
+				const msg = `[autonomy] brook set loop ${im[1]} to ${r.level}. Re-route it: do = start it now (or hand it to the owner) and report after; prepare = do the work, put the result on the card, wait for OK; discuss = stop any work on it and ask him first.`;
+				try { if (!hub.queue(forYouSession.id, msg)) await (options.start ?? startForYou)(msg); } catch { /* For you will see it on its next turn */ }
+				onProactive();
+				return { status: 200, body: { autonomy: r.level } };
+			}
 			if (lm) { const ok = hideLine(lm[1], dir); onProactive(); return ok ? { status: 200, body: { ok } } : { status: 404, body: { error: "no such line" } }; }
 			const m = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
 			if (method !== "POST" || !m) return undefined;

@@ -1,5 +1,6 @@
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { sessionLabeler } from "../core/session-label.ts";
+import { isAutonomy, levelFor, risky, readRules, rulesForPrompt } from "./autonomy.ts";
 import { linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
@@ -275,7 +276,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
 	const it = waiting[at];
 	if (!it) return undefined;
 	const rel = heads[at].related, ln = lineOf(it);
-	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), ...(ln?.autonomy ? { autonomy: ln.autonomy } : {}), at: at + 1, when: it.at, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
+	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), ...((it.autonomy ?? ln?.autonomy) ? { autonomy: it.autonomy ?? ln?.autonomy } : {}), at: at + 1, when: it.at, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**
@@ -410,7 +411,7 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 	const memory = existsSync(memoryDir(P.dir)) ? withCardList(readIndex(P.dir), listCards(P.dir)).trim() || "(empty)" : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
 	const open = readOpen(dir, now);
 	const loop = (i: Item) => [
-		`- id=${i.id} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}${!needsYou(i, now) && i.wakeAt ? `, back ${i.wakeAt.slice(0, 10)}` : ""}] ${i.title} (${i.source})`,
+		`- id=${i.id}${i.autonomy ? ` <${i.autonomy}>` : ""} [${needsYou(i, now) ? "needs brook" : i.status === "onit" ? "Pi is on it" : i.status}${i.due ? `, due ${i.due}` : ""}${!needsYou(i, now) && i.wakeAt ? `, back ${i.wakeAt.slice(0, 10)}` : ""}] ${i.title} (${i.source})`,
 		i.prepared ? `  prepared: ${i.prepared.replace(/\s+/g, " ").slice(0, 200)}` : "",
 		i.project ? `  project: ${i.project}` : "",
 		i.session ? `  session: ${i.session}${i.session === forYouSession.id ? " (this one)" : ""}` : "",
@@ -453,11 +454,12 @@ Decisions: when a loop needs brook to choose, do not ask with a blocking questio
 put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
 own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
 Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
-Autonomy (his "preferences"): each line may carry [autonomy: do|prepare|discuss]. do = you or the owner just do it and
-report after; prepare = do the read-only and drafting work, then put it on the card; discuss = bring it to him before any
-work. No tag: use the preference rules in memory (default: money, outbound, credentials, new contacts -> discuss; reply
-drafts -> prepare; internal analysis, replays, Pix/tooling fixes -> do). Outbound always needs his yes, whatever the level.
-When he says e.g. "treat Kairos replays as do", set it with the loops tool "line" (id, autonomy).
+Autonomy (his "preferences"): every loop has <do|prepare|discuss>. do = you or the owner do it and report after;
+prepare = do the work, put the result on the card (loops "prepared"), wait for his OK; discuss = ask him before any work.
+On "create", pass your guess as autonomy; his rules (below) win, unsure = discuss, and money / outbound messages /
+credentials / new contacts are never "do" (the tool caps them). When he states a rule ("Kairos replays -> do",
+"恩浩 -> prepare", "anything from Lowes -> discuss"), save it with loops action "rule" (scope line|person|type, match, autonomy);
+remove one with action "rule" and retire=true. When he changes a loop's level, you get "[autonomy] …": act on it.
 Never interrupt: while you and brook are working on something, do not switch to a newly arrived loop. If a new loop is
 about the same thing, fold it in quietly ("also, Lowes just asked about the same curve"). Otherwise, when you finish the
 current thing, end with one line: "<n> new waiting — next: <the most urgent one>. Show it?" Only something due today, or
@@ -479,6 +481,9 @@ The whole picture: you know every open job (below). When he asks "what's next", 
 Be proactive: when you finish a task or a thread ends, close with one line, "Next: <the next job> — do it?".
 He can also just chat with you about a card ("why this?", "send it to pix", "merge with the other one"): answer, and use
 the loops tool when he asks for a change.
+
+### Autonomy rules (brook's; ~/.pix/proactive/autonomy-rules.json, change with loops "rule")
+${rulesForPrompt(readRules(paths(dir).dir))}
 
 ### Lines of work (the map; ~/.pix/proactive/lines.json, edit it when brook asks)
 ${linesForPrompt(readLines(dir), open)}
@@ -521,7 +526,7 @@ export function trackTurn(session: { id: string; name?: string; cwd?: string }, 
 }
 
 /** For you creates a loop itself (the new flow: the filter forwards, For you decides). */
-export function createItem(a: { title: string; why: string; action?: string; source: string; sourceKey?: string; howToRead?: string; refs?: string[]; line?: string; project?: string; due?: string; choices?: Choice[]; prepared?: string; quiet?: boolean }, dir?: string, now = new Date()): Item | undefined {
+export function createItem(a: { autonomy?: string; title: string; why: string; action?: string; source: string; sourceKey?: string; howToRead?: string; refs?: string[]; line?: string; project?: string; due?: string; choices?: Choice[]; prepared?: string; quiet?: boolean }, dir?: string, now = new Date()): Item | undefined {
 	const title = a.title?.trim(), why = a.why?.trim();
 	if (!title || !why || !a.source?.trim()) return undefined;
 	const it: Item = {
@@ -532,6 +537,8 @@ export function createItem(a: { title: string; why: string; action?: string; sou
 	};
 	const clean = cleanChoices(a.choices ?? []);
 	if (clean?.length) it.choices = clean;
+	const lv = levelFor({ ...it, line: a.line }, isAutonomy(a.autonomy) ? a.autonomy : undefined, readRules(paths(dir).dir));
+	it.autonomy = lv.level; it.autonomyWhy = lv.why;
 	appendFileSync(paths(dir).inbox, JSON.stringify(it) + "\n");
 	return it;
 }
@@ -562,3 +569,16 @@ export function mergeJobLines(from: string[], into: { id: string; name?: string;
 	}, dir);
 }
 
+
+/** brook changed a loop's level (tap on the chip): store it. Returns the new level, or undefined for no such open loop. */
+export function setItemAutonomy(id: string, level: string | undefined, dir?: string): { level: "do" | "prepare" | "discuss"; capped: boolean } | undefined {
+	const it = readAll(dir).find(i => i.id === id && isOpen(i));
+	if (!it) return undefined;
+	const order = ["do", "prepare", "discuss"] as const;
+	let next = isAutonomy(level) ? level : order[(order.indexOf(it.autonomy ?? "discuss") + 1) % 3];
+	// Money, outbound, credentials, new contacts: never "do", even by tap (the cycle skips it).
+	const capped = next === "do" && risky([it.title, it.why, it.action].join(" "));
+	if (capped) next = isAutonomy(level) ? "prepare" : order[(order.indexOf(next) + 1) % 3];
+	write(dir, { id, autonomy: next, autonomyWhy: "brook" });
+	return { level: next, capped };
+}
