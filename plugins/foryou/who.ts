@@ -13,6 +13,7 @@ const ROLE = /^(Website|Kairos|X|Pi|For you|Review|Fix|Add|Test|Run)$/i;
 export function guessWho(it: { title?: string; why?: string; prepared?: string; source?: string; sourceKey?: string; kind?: string }, people: string[]): Who | undefined {
 	const t = String(it.title ?? ""), body = `${it.why ?? ""} ${it.prepared ?? ""}`;
 	const head = t.match(/^([^:：\s]{1,12})[:：]/)?.[1];
-	const name = head && !ROLE.test(head) ? head : people.find(p => t.includes(p)) ?? people.find(p => body.includes(p));
+	const first = (text: string) => people.filter(p => text.includes(p)).sort((a, b) => text.indexOf(a) - text.indexOf(b))[0];
+	const name = head && !ROLE.test(head) ? head : first(t) ?? first(body);
 	return name ? whoFor(name, it.kind ?? it.source ?? "", it.sourceKey) : undefined;
 }

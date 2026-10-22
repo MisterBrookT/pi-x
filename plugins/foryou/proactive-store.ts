@@ -7,9 +7,11 @@ import { linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./p
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem, wakeTime, type Item } from "./proactive.ts";
+import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem as basePublic, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "../core/launch.ts";
 import { relayConfigPath } from "../core/hub-paths.ts";
+import { readStatus } from "./session-status.ts";
+import { whoFor } from "./who.ts";
 import { listCards, memoryDir, readForYouRules, readIndex, withCardList } from "./proactive-memory.ts";
 
 export function readPending(dir?: string): Item[] {
@@ -29,9 +31,25 @@ export function readOpen(dir?: string, now = Date.now()): Item[] {
  * What the phone's For you page shows: loops that need brook now; loops Pi is on; loops parked for
  * later or waiting on others (with when they come back); what closed in the last day; how many sources are watched.
  */
+/**
+ * The loop's latest word, for its one comment: the owner session's status line (status.json) when it is newer
+ * than the loop's last note, else that note. So a card says where the work stands now, not an old note.
+ */
+export function latestWord(i: Item, status: { session: string; name?: string; at: string; line: string }[]): { text: string; at: string; by: string } | undefined {
+	const notes = String(i.note ?? "").split("\n").filter(Boolean), last = notes.at(-1);
+	const m = last?.match(/^- (\d{4}-\d{2}-\d{2}): (.*)$/);
+	const note = last ? { text: (m ? m[2] : last.replace(/^- /, "")).replace(/^\d\d-\d\d:?\s+/, ""), at: m ? `${m[1]}T00:00:00Z` : "", by: "note" } : undefined;
+	const s = i.session ? status.find(x => x.session === i.session) : undefined;
+	const live = s?.line ? { text: s.line, at: s.at, by: s.name || "session" } : undefined;
+	if (live && (!note || Date.parse(live.at) >= Date.parse(note.at || "0"))) return live;
+	return note ?? (i.prepared ? { text: i.prepared, at: "", by: "prepared" } : undefined);
+}
+
 export function forYouView(dir?: string, now = Date.now()) {
 	const P = paths(dir);
 	const all = readAll(dir);
+	const status = readStatus(dir);
+	const publicItem = (i: Item) => { const w = latestWord(i, status); return { ...basePublic(i), ...(w ? { latest: w } : {}) }; };
 	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
 	const handled = all.filter(i => !isOpen(i) && now - Date.parse(i.at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
 	const parked = all.filter(i => isOpen(i) && !needsYou(i, now));
@@ -529,7 +547,7 @@ export function trackTurn(session: { id: string; name?: string; cwd?: string }, 
 }
 
 /** For you creates a loop itself (the new flow: the filter forwards, For you decides). */
-export function createItem(a: { autonomy?: string; title: string; why: string; action?: string; source: string; sourceKey?: string; howToRead?: string; refs?: string[]; line?: string; project?: string; due?: string; choices?: Choice[]; prepared?: string; quiet?: boolean }, dir?: string, now = new Date()): Item | undefined {
+export function createItem(a: { autonomy?: string; title: string; why: string; action?: string; source: string; sourceKey?: string; howToRead?: string; refs?: string[]; line?: string; project?: string; due?: string; choices?: Choice[]; prepared?: string; quiet?: boolean; who?: string }, dir?: string, now = new Date()): Item | undefined {
 	const title = a.title?.trim(), why = a.why?.trim();
 	if (!title || !why || !a.source?.trim()) return undefined;
 	const it: Item = {
@@ -537,6 +555,7 @@ export function createItem(a: { autonomy?: string; title: string; why: string; a
 		source: a.source.trim().slice(0, 80), sourceKey: a.sourceKey ?? "", howToRead: a.howToRead ?? "", refs: (a.refs ?? []).map(String).slice(0, 20), status: "pending",
 		...(a.line ? { line: a.line } : {}), ...(a.project ? { project: a.project } : {}), ...(a.due && /^\d{4}-\d{2}-\d{2}$/.test(a.due) ? { due: a.due } : {}),
 		...(a.prepared?.trim() ? { prepared: a.prepared.trim().slice(0, 4000) } : {}), ...(a.quiet ? { quiet: true } : {}),
+		...(a.who?.trim() ? { who: whoFor(a.who, a.source, a.sourceKey) } : {}),
 	};
 	const clean = cleanChoices(a.choices ?? []);
 	if (clean?.length) it.choices = clean;

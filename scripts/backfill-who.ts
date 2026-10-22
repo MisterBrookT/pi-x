@@ -6,7 +6,7 @@ import { guessWho } from "../plugins/foryou/who.ts";
 
 const P = paths();
 const people = [...new Set([...(existsSync(join(P.dir, "memory/people")) ? readdirSync(join(P.dir, "memory/people")).map(f => f.replace(/\.md$/, "")) : []),
-	"Lowes", "Tony", "Olivia", "恩浩", "欧阳", "易健", "陈老师", "王翼", "沈琦"])].sort((a, b) => b.length - a.length);
+	"Knight", "Lowes", "Tony", "Olivia", "恩浩", "欧阳", "易健", "陈老师", "王翼", "沈琦"])].sort((a, b) => b.length - a.length);
 const dry = process.argv.includes("--dry");
 for (const it of parseInbox(readFileSync(P.inbox, "utf8")).filter(i => isOpen(i) && !i.who)) {
 	const who = guessWho(it as any, people);

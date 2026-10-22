@@ -114,12 +114,10 @@ function face(i){
 const viaName=i=>{const k=(i.kind||"")+" "+(i.source||"");return/gmail|mail/i.test(k)?"Gmail":/feishu|lark/i.test(k)?"Feishu":/wechat/i.test(k)?"WeChat":/dingtalk/i.test(k)?"DingTalk":"Pi"};
 const avatar=(src,alt)=>`<img src="${src}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((alt||'?').slice(0,1))}'))">`;
 /* One latest comment: brook's last action, else Pi's last note or prepared result. */
+/* One latest comment: the hub's `latest` (the owner session's current status line, or the loop's newest note). */
 function latest(i){
-  const notes=String(i.note||"").split("\n").filter(Boolean);
-  const last=notes.at(-1);
-  if(last){const m=last.match(/^- (\d{4}-\d\d-\d\d): (.*)$/),text=(m?m[2]:last.replace(/^- /,"")).replace(/^\d\d-\d\d\s+/,"");
-    return{you:/^(brook|he) (said|chose|tapped|asked|replied)|^\[brook\]/i.test(text),text,t:m?m[1].slice(5):""};}
-  if(i.prepared)return{you:false,text:i.prepared,t:""};
+  const w=i.latest;if(!w)return;
+  return{you:/^(brook|he) (said|chose|tapped|asked|replied)/i.test(w.text),text:w.text,t:w.at?ago(w.at):"",by:w.by};
 }
 const cleanSrc=s=>String(s||"For you").replace(/^(Feishu meeting) .*/,"$1").replace(/^(DingTalk|WeChat): /,"");
 function post(i,small){
@@ -129,14 +127,14 @@ function post(i,small){
   <div class="meta"><span class="dot"></span><span class="src">${esc(person(i)||"Pi")}</span><span class="via">via ${viaName(i)}</span>${L?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
   <div class="title">${esc(i.title)}</div>
   ${small?"":`<div class="ctx">${esc(i.why||i.action||"")}</div>`}
-  ${c&&!small?`<div class="comment ${c.you?"you":""}"><span class="who">${c.you?"B":"π"}</span><p>${c.t?`<span class="t">${esc(c.t)} </span>`:""}${esc(c.text)}</p></div>`:""}
+  ${c&&!small?`<div class="comment ${c.you?"you":""}"><span class="who">${c.you?"B":"π"}</span><p>${c.t?`<span class="t">${esc(c.t)} ago · </span>`:""}${esc(c.text)}</p></div>`:""}
   <div class="acts">${acts.join("")}<button class="act ask" data-reply><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 18V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8z"/></svg>Ask…</button></div>
   <div class="reply"><input placeholder="Ask Pi about this"><button>Send</button></div>
   </div></div>__SUB__</article>`;
 }
 let data,line="all";
 function render(){
-  const items=[...(data.pending||[]),...(data.onit||[])].filter(i=>line==="all"||i.line===line);
+  const items=[...(data.pending||[]),...(data.onit||[])].filter(i=>!["done","dismissed","resolved"].includes(i.status)).filter(i=>line==="all"||i.line===line);
   /* Each loop is its own top-level post, like tweets side by side. A line is only a chip/tag; nesting is for a loop's own updates (its comment). */
   const key=i=>i.due||"9999";
   items.sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:Date.parse(b.at)-Date.parse(a.at));
@@ -149,7 +147,9 @@ document.addEventListener("click",e=>{
   const c=e.target.closest(".chip");if(c){line=c.dataset.l;document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x===c));render()}
 });
 if(!token)$("feed").innerHTML='<p class="note">No access token. Open this from the Pix dev server (npm run sim) on the Mac.</p>';
-else fetch("/api/foryou"+(window.PIX_TOKEN?"?dev":""),{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
-  $("chips").innerHTML=`<button class="chip on" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip" data-l="${esc(l.id)}">${esc(l.name)}<i>${l.open}</i></button>`).join("");render()})
- .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`);
+else{load();setInterval(load,30000);addEventListener("focus",load);document.addEventListener("visibilitychange",()=>document.hidden||load())}
+/* Open loops only, re-read from the live inbox: done/dropped vanish, later ones stay hidden until their back date (the hub decides). */
+function load(){fetch("/api/foryou"+(window.PIX_TOKEN?"?dev":""),{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
+  $("chips").innerHTML=`<button class="chip ${line==="all"?"on":""}" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip ${line===l.id?"on":""}" data-l="${esc(l.id)}">${esc(l.name)}<i>${l.open}</i></button>`).join("");render()})
+ .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`)}
 </script></body></html>

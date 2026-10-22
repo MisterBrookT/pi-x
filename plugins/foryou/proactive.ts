@@ -182,7 +182,7 @@ Decide, in this order:
 3. Only then, a truly new loop goes in "alerts" (usually none, never more than 3).
    Not new: the same ask again (a reminder, "再问一次") when a loop for it is open or was recently done/resolved
    (see reactions below). Update or close that loop instead.
-4. The map. Every new or updated loop gets "line": the id of the line it belongs to (omit if none fits).
+4. The map. Every new or updated loop gets "line": the id of the line it belongs to. Omit it when none truly fits: personal and social asks (friends, family, tickets, errands) never go in a work line.
    Loops of the same job (same project or topic, e.g. deploy, docs and landing page of one launch) share one line:
    brook sees one card per line with the loops as its tasks, and decides once per job.
    Progress on a line (a result, a delivery, a decision) moves that line's "state" in "lines", often with no alert at all:

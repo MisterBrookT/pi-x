@@ -163,10 +163,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
 			source: Type.Optional(Type.String({ description: "create: the source name, as in the forwarded message" })),
+			who: Type.Optional(Type.String({ description: "create: the one person who needs brook (as named in the message, e.g. Lowes, 陈老师); omit for Pi's own work" })),
 			sourceKey: Type.Optional(Type.String({ description: "create: the source key, as in the forwarded message" })),
 			howToRead: Type.Optional(Type.String({ description: "create: how to read the original messages" })),
 			refs: Type.Optional(Type.Array(Type.String(), { description: "create: message ids" })),
-			line: Type.Optional(Type.String({ description: "create: the line id it belongs to. Always pick the best existing line (same project or topic); loops of the same job share one line so brook sees one job card. Make a new line only for a new lasting job." })),
+			line: Type.Optional(Type.String({ description: "create: the line id it belongs to: the existing line of the same project or topic. Omit it when none truly fits (personal and social asks from friends or family never go in a work line); loops of the same job share one line so brook sees one job card. Make a new line only for a new lasting job." })),
 			project: Type.Optional(Type.String({ description: "create: project folder" })),
 			due: Type.Optional(Type.String({ description: "create: YYYY-MM-DD" })),
 			into: Type.Optional(Type.String({ description: "handoff: a session id, or \"new\"" })),
@@ -202,7 +203,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");
 			}
 			if (p.action === "create") {
-				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, autonomy: p.autonomy, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text }, deps.dir);
+				const it = createItem({ title: p.title ?? "", why: p.why ?? "", action: p.step, source: p.source ?? "", sourceKey: p.sourceKey, howToRead: p.howToRead, refs: p.refs, autonomy: p.autonomy, line: p.line, project: p.project, due: p.due, choices: p.choices, prepared: p.text, who: p.who }, deps.dir);
 				return done(it ? `Card ${it.id} is on brook's For you (${it.autonomy}: ${it.autonomyWhy}).` : "create needs title, why and source.");
 			}
 			if (!p.id) return done("This action needs id.");

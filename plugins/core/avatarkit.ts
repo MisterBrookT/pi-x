@@ -1,7 +1,7 @@
 /**
  * avatarkit: a person's real photo, cached on this Mac (~/.pix/avatars, never committed).
  *  - WeChat: head image URL from wx-cli's decrypted contact cache (~/.wx-cli/cache/*.db, table `contact`).
- *  - Feishu: lark-cli search-user -> open_id -> get-user avatar_240 (needs contact:user.basic_profile:readonly; else initials).
+ *  - Feishu: lark-cli user search (search/v1/user) avatar_240 (needs a user login with contact scopes; else initials).
  *  - DingTalk, Gmail: no photo; the page falls back to initials.
  * Source app icons (the small badge) come from the installed Mac apps.
  */
@@ -47,12 +47,13 @@ export function wechatHead(w: Who): string | undefined {
 	return /^https?:\/\//.test(row) ? row : undefined;
 }
 
-/** Feishu: name -> open_id -> avatar URL. Empty without the profile scope. */
+/** Feishu: user search (search/v1/user) returns the photo; match the open_id when known, else the first hit by name. */
 export function feishuHead(w: Who): string | undefined {
-	let id = w.id;
-	if (!id) { try { id = JSON.parse(sh("lark-cli", ["contact", "+search-user", "--as", "user", "--query", w.name]) || "{}").data?.users?.[0]?.open_id; } catch {} }
-	if (!id) return undefined;
-	try { const u = JSON.parse(sh("lark-cli", ["contact", "+get-user", "--as", "user", "--user-id", id]) || "{}").data?.user; return u?.avatar?.avatar_240 || u?.avatar?.avatar_72; } catch { return undefined; }
+	try {
+		const users: any[] = JSON.parse(sh("lark-cli", ["api", "GET", "/open-apis/search/v1/user", "--as", "user", "--params", JSON.stringify({ query: w.name })]) || "{}").data?.users ?? [];
+		const u = users.find(x => w.id && x.open_id === w.id) ?? users[0];
+		return u?.avatar?.avatar_240 || u?.avatar?.avatar_72;
+	} catch { return undefined; }
 }
 
 /** Cached photo path for a person, fetching it at most weekly; undefined = use initials. A miss is cached too. */
