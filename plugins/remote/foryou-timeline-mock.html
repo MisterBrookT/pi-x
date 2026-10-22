@@ -5,11 +5,11 @@
 <title>For you</title>
 <style>
 :root{
-  --paper:#f4efe4;--card:#fbf8f1;--ink:#24201a;--soft:#6f675a;--faint:#a89f8f;--rule:#e4dccb;
-  --you:#c8641e;--you-wash:#f6e3d0;--on:#3d7f55;--on-wash:#dcebdf;--accent:#8a5a2b;
-  --serif:"New York","Iowan Old Style","Charter",Georgia,serif;--sans:-apple-system,"SF Pro Text",system-ui,sans-serif;
+  --paper:#faf9f5;--card:#fffefb;--ink:#29261f;--soft:#7b7568;--faint:#a8a194;--rule:#e9e4d8;
+  --you:#c2410c;--you-wash:#f7e4d6;--on:#2f8a52;--on-wash:#dcebdf;
+  --serif:"Iowan Old Style","Charter",Georgia,"Songti SC",serif;--sans:-apple-system,"SF Pro Text",system-ui,sans-serif;
 }
-@media (prefers-color-scheme:dark){:root{--paper:#1b1814;--card:#221e19;--ink:#efe8db;--soft:#b3a994;--faint:#7d7466;--rule:#332d25;--you:#e58a45;--you-wash:#3a2a1c;--on:#79b88c;--on-wash:#1f2e23}}
+@media (prefers-color-scheme:dark){:root{--paper:#1b1814;--card:#221e19;--ink:#efe8db;--soft:#b3a994;--faint:#7d7466;--rule:#332d25;--you:#f0a35e;--you-wash:#3a2a1c;--on:#6cc48a;--on-wash:#1f2e23}}
 *{box-sizing:border-box}
 html{background:var(--paper)}
 body{margin:0;color:var(--ink);font:15.5px/1.45 var(--sans);-webkit-text-size-adjust:100%;min-height:100vh;
@@ -34,9 +34,14 @@ main{padding:6px 12px 40px}
 .post{background:var(--card);border:1px solid var(--rule);border-radius:18px;padding:14px 14px 4px;margin:10px 0;
   box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 6px 18px -12px rgba(80,60,30,.25)}
 .row{display:flex;gap:11px}
-.av{flex:none;width:38px;height:38px;border-radius:10px;overflow:hidden;background:var(--paper);display:grid;place-items:center;
+.av{position:relative;flex:none;width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--paper);display:grid;place-items:center;
   font:600 13px var(--sans);color:var(--soft);box-shadow:0 0 0 1px var(--rule)}
-.av img{width:100%;height:100%;object-fit:cover}
+.av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.av.person{box-shadow:none;color:#fff;font:600 15px var(--sans)}
+.av.pi{background:var(--ink);color:var(--paper);font:italic 600 18px var(--serif)}
+.badge{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:5px;overflow:hidden;box-shadow:0 0 0 2px var(--card)}
+.badge img{border-radius:0}
+.via{color:var(--faint)}
 .body{flex:1;min-width:0}
 .meta{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--faint);white-space:nowrap;overflow:hidden}
 .meta .src{color:var(--soft);font-weight:600;overflow:hidden;text-overflow:ellipsis}
@@ -60,10 +65,10 @@ main{padding:6px 12px 40px}
 .reply{display:none;gap:8px;margin:2px 0 8px}.reply.open{display:flex}
 .reply input{flex:1;min-height:38px;border:1px solid var(--rule);border-radius:19px;padding:0 14px;background:var(--paper);color:var(--ink);font:14px var(--sans)}
 .reply button{border:0;background:var(--ink);color:var(--paper);border-radius:19px;padding:0 14px;font:600 13px var(--sans)}
-.sub{margin:6px 0 0 49px;border-top:1px solid var(--rule)}
+.sub{margin:6px 0 0 51px;border-top:1px solid var(--rule)}
 .sub .post{background:none;border:0;box-shadow:none;border-radius:0;padding:10px 0 0;margin:0;border-bottom:1px solid var(--rule)}
 .sub .post:last-child{border-bottom:0}
-.sub .av{width:26px;height:26px;border-radius:7px}
+.sub .av{display:none}.sub .body{padding-left:0}
 .sub .title{font-size:15.5px}
 .empty,.note{color:var(--faint);text-align:center;font:italic 14px var(--serif);padding:28px 20px}
 </style></head><body>
@@ -93,6 +98,23 @@ function icon(i){
   if(/minara|kairos/i.test(k+" "+(i.line||"")))return"/icons/minara.png";
   return"/icons/otty.png";
 }
+/* The avatar is the person who needs brook, not the app. Known people first, else "Name:" at the start of the title. */
+const PEOPLE=["Lowes","Tony","Olivia","恩浩","欧阳","易健","陈老师","王翼","沈琦"];
+function person(i){
+  const t=String(i.title||""),w=String(i.why||"")+" "+String(i.prepared||"");
+  const head=t.match(/^([^:：\s]{1,12})[:：]/);if(head&&!/^(Website|Kairos|X)$/i.test(head[1]))return head[1];
+  return PEOPLE.find(p=>t.includes(p))||PEOPLE.find(p=>w.includes(p))||"";
+}
+/* Stable soft colour per person: hash -> one of a few warm, muted hues. */
+const HUES=["#b5694a","#8a7a3d","#5f8a6a","#4f7a8f","#8a5f86","#a0605f","#6b6fa3","#9a7b4f"];
+const hue=n=>HUES[[...n].reduce((h,c)=>(h*31+c.codePointAt(0))>>>0,7)%HUES.length];
+const initials=n=>/^[\x00-\x7f]/.test(n)?n.slice(0,1).toUpperCase():n.replace(/老师$/,"").slice(-1);
+function face(i){
+  const who=person(i),badge=`<span class="badge">${avatar(icon(i),"")}</span>`;
+  if(!who)return`<div class="av pi">π${badge}</div>`;
+  return`<div class="av person" style="background:${hue(who)}">${esc(initials(who))}${badge}</div>`;
+}
+const viaName=i=>{const k=(i.kind||"")+" "+(i.source||"");return/gmail|mail/i.test(k)?"Gmail":/feishu|lark/i.test(k)?"Feishu":/wechat/i.test(k)?"WeChat":/dingtalk/i.test(k)?"DingTalk":"Pi"};
 const avatar=(src,alt)=>`<img src="${src}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((alt||'?').slice(0,1))}'))">`;
 /* One latest comment: brook's last action, else Pi's last note or prepared result. */
 function latest(i){
@@ -106,8 +128,8 @@ const cleanSrc=s=>String(s||"For you").replace(/^(Feishu meeting) .*/,"$1").repl
 function post(i,small){
   const L=(data.lines||[]).find(l=>l.id===i.line),c=latest(i),d=dueText(i.due);
   const acts=[];if(i.button)acts.push(`<button class="act main">${esc(i.button)}</button>`);acts.push(`<button class="act">${i.due?"Later":"Done"}</button>`);
-  return `<article class="post ${i.status==="onit"?"onit":"you"}"><div class="row"><div class="av">${avatar(icon(i),i.source)}</div><div class="body">
-  <div class="meta"><span class="dot"></span><span class="src">${esc(cleanSrc(i.source))}</span>${L&&!small?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
+  return `<article class="post ${i.status==="onit"?"onit":"you"}"><div class="row">${face(i)}<div class="body">
+  <div class="meta"><span class="dot"></span><span class="src">${esc(person(i)||"Pi")}</span><span class="via">via ${viaName(i)}</span>${L&&!small?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
   <div class="title">${esc(i.title)}</div>
   ${small?"":`<div class="ctx">${esc(i.why||i.action||"")}</div>`}
   ${c&&!small?`<div class="comment ${c.you?"you":""}"><span class="who">${c.you?"B":"π"}</span><p>${c.t?`<span class="t">${esc(c.t)} </span>`:""}${esc(c.text)}</p></div>`:""}
