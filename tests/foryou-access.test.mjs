@@ -61,4 +61,12 @@ test("Feishu meeting notes: title, people, 总结 and 待办 with who asked, as 
   assert.match(t, /总结：\n- 方案：二十条曲线/);
   assert.match(t, /待办：\n- \[ \] 拉人入群：拉凌子昂入群（来自唐英豪\(Brook\)）\n- \[x\] 发 demo（来自凌子昂）$/);
   assert.doesNotMatch(t, /<|相关链接|whiteboard/);
+  assert.match(meetingNoteText('<h1>待办</h1><checkbox done="false">唐英豪：周五前发 recap（来自凌子昂）</checkbox>'), /- \[ \] ⭐ 唐英豪：周五前发 recap/, "brook's todos are starred");
+});
+
+test("Feishu minutes fallback: summary and todos, brook's starred", async () => {
+  const { minutesText } = await import("../plugins/foryou/proactive-sources.ts");
+  const t = minutesText("Weekly", { minutes: [{ summary: "用户反馈三条", todos: [{ content: "Brook 整理 recap" }, { content: "凌子昂 发群" }] }] });
+  assert.equal(t, "Weekly\n\n总结：\n用户反馈三条\n\n待办：\n- [ ] ⭐ Brook 整理 recap\n- [ ] 凌子昂 发群");
+  assert.equal(minutesText("x", {}), "");
 });

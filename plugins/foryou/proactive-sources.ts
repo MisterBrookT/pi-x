@@ -235,8 +235,18 @@ export function meetingNoteText(content: string): string {
 	const title = content.match(/<title>([^<]*)<\/title>/)?.[1] ?? "";
 	const people = content.match(/参会人：([\s\S]*?)<\/p>/)?.[1] ?? "";
 	const sec = (h: string) => content.match(new RegExp(`<h1>${h}</h1>([\\s\\S]*?)(?=<h1>|$)`))?.[1] ?? "";
-	const todos = [...sec("待办").matchAll(/<checkbox done="(\w+)">([\s\S]*?)<\/checkbox>/g)].map(m => `- [${m[1] === "true" ? "x" : " "}] ${strip(m[2])}`);
+	// Todos that name brook get a ⭐ so For you sees at once what is his.
+	const todos = [...sec("待办").matchAll(/<checkbox done="(\w+)">([\s\S]*?)<\/checkbox>/g)].map(m => `- [${m[1] === "true" ? "x" : " "}] ${mine(m[2]) ? "⭐ " : ""}${strip(m[2])}`);
 	return [title, people && `参会人：${strip(people)}`, sec("总结") && `总结：\n${strip(sec("总结"))}`, todos.length ? `待办：\n${todos.join("\n")}` : ""].filter(Boolean).join("\n\n");
+}
+/** A todo is brook's when it names him outside the "（来自 …）" credit. */
+const mine = (t: string) => /唐英豪|brook/i.test(t.replace(/（来自[^）]*）/g, ""));
+/** Summary and todos from `minutes +detail --summary --todo` (shape varies by version: read loosely). */
+export function minutesText(topic: string | undefined, data: any): string {
+	const m = data?.minutes?.[0] ?? data?.items?.[0] ?? data ?? {};
+	const summary = String(m.summary?.content ?? m.summary ?? "").trim();
+	const todos = (m.todos ?? m.todo ?? []).map((t: any) => String(t.content ?? t.text ?? t)).filter(Boolean).map((t: string) => `- [ ] ${mine(t) ? "⭐ " : ""}${t}`);
+	return summary || todos.length ? [topic, summary && `总结：\n${summary}`, todos.length ? `待办：\n${todos.join("\n")}` : ""].filter(Boolean).join("\n\n") : "";
 }
 /**
  * Feishu meetings brook attended: one message per meeting that has AI notes (id = meeting_id, so the daemon's
@@ -252,12 +262,16 @@ const feishuMeetings: Adapter = {
 		const meetings = (await lark(["vc", "+detail", "--meeting-ids", found.map((m: any) => m.id).join(",")])).data?.meetings ?? [];
 		const out: Msg[] = [];
 		for (const m of meetings) {
-			if (!m.note_id) continue;
+			if (!m.note_id && !m.minute_token) continue;
 			try {
-				const note = (await lark(["note", "+detail", "--note-id", m.note_id])).data?.note, token = note?.note_doc_token;
-				if (!token) continue;
-				const text = meetingNoteText((await lark(["docs", "+fetch", "--doc", token])).data?.document?.content ?? "");
-				if (text) out.push({ id: String(m.meeting_id), time: String(note.create_time || m.end_time || ""), sender: "Feishu meeting notes", text: text.slice(0, 6000) });
+				const note = m.note_id ? (await lark(["note", "+detail", "--note-id", m.note_id])).data?.note : undefined, token = note?.note_doc_token;
+				let text = token ? meetingNoteText((await lark(["docs", "+fetch", "--doc", token])).data?.document?.content ?? "") : "";
+				// No AI notes doc: fall back to the minutes' own summary and todos (minute_token).
+				if (!text && m.minute_token) text = minutesText(m.topic, (await lark(["minutes", "+detail", "--minute-tokens", m.minute_token, "--summary", "--todo"])).data);
+				if (!text) continue;
+				const link = token ? `https://byterum.feishu.cn/docx/${token}` : m.minute_token ? `https://byterum.feishu.cn/minutes/${m.minute_token}` : "";
+				const when = m.start_time ? `${m.start_time}–${String(m.end_time ?? "").slice(11)}` : "";
+				out.push({ id: String(m.meeting_id), time: String(note?.create_time || m.end_time || ""), sender: "Feishu meeting notes", text: [when, text, link && `文档：${link}`].filter(Boolean).join("\n\n").slice(0, 6000) });
 			} catch { /* note not ready yet: next round */ }
 		}
 		return out.sort((a, b) => a.time.localeCompare(b.time));
