@@ -14,10 +14,9 @@ Calm paper, not a dashboard. Few words, no filler, no emoji faces, no red badges
 | soft | `#7b7568` | `#b3a994` | context, secondary actions |
 | faint | `#a8a194` | `#7d7466` | time, "via", hints |
 | rule | `#e9e4d8` | `#332d25` | borders, dividers |
-| you | `#c2410c` | `#f0a35e` | **needs brook only**: dot, due chip, the one main action |
-| on | `#2f8a52` | `#6cc48a` | **Pi is on it only**: dot, Pi's comment mark |
+| you | `#c2410c` | `#f0a35e` | rare: overdue only |
 
-Orange and green are signals, never decoration. Everything else is ink on paper.
+Calm first: no status dots, no coloured chips. Being in the feed already means it needs brook. The main action is ink, semibold; due dates are soft text ("due tomorrow"). Colour is reserved for something truly late.
 
 ## Texture
 Paper grain: a fractal-noise SVG at ~9% opacity (5% in dark) over the paper colour, plus a faint warm glow at the top. Cards have a 1px rule border and a soft warm shadow (`0 6px 18px -12px rgba(80,60,30,.25)`).
@@ -44,6 +43,6 @@ Page padding 12–20px. Card radius 18px, padding 14px. 10px between cards. Touc
 Line SVG, 1.8 stroke, round caps, `currentColor`, 16–20px. App icons only as source badges.
 
 ## Posts, comments, actions
-- **Post**: meta row (status dot · person · via app · line · age · due chip), serif headline, 2 lines of context.
-- **Comment**: only the latest one, on a paper-coloured inset (radius 12), with a 20px mark: green π for Pi, orange B for brook; clamped to 2 lines.
-- **Actions**: plain text, not boxed buttons, separated by faint "·". At most one main action in `you` orange, one secondary (Done/Later) in soft, and "Ask…" with a speech-bubble icon at the right in faint. Ask opens an inline reply field.
+- **Post**: meta row (person · via app · line · age · due chip), serif headline, 2 lines of context.
+- **Comment**: only the latest one, on a paper-coloured inset (radius 12), with a 20px mark: π for Pi, B for brook, both on a soft rule-coloured square; clamped to 2 lines.
+- **Actions**: plain text, not boxed buttons, separated by faint "·". At most one main action in ink, semibold, one secondary (Done/Later) in soft, and "Ask Pi" with a speech-bubble icon at the right in faint. It opens an inline reply field.
