@@ -137,5 +137,5 @@ test("phone: the question card shows its context above the question", async () =
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const askCard = new Function("esc", src + "return askCard")(esc);
   assert.match(askCard({ id: "q", question: "Ship?", context: "**Two** builds\n- new passes", options: [{ label: "a" }] }), /<div class="ask-ctx">Two builds\n• new passes<\/div><span class="ask-kicker">Question/);
-  assert.match(askCard({ id: "q", question: "x", options: [], questions: [{ header: "A", question: "a?", context: "Why A", options: [] }, { header: "B", question: "b?", options: [] }] }), /· A<\/span><div class="ask-ctx">Why A<\/div><p>a\?/);
+  assert.match(askCard({ id: "q", question: "x", options: [], questions: [{ header: "A", question: "a?", context: "Why A", options: [] }, { header: "B", question: "b?", options: [] }] }), /· A<\/span><span class="mq-chosen"><\/span><\/button><div class="mq-body"><div class="ask-ctx">Why A<\/div><p>a\?/);
 });

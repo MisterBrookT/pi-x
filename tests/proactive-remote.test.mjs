@@ -15,7 +15,7 @@ const token = "foryou-token-1234567890";
 const item = (id, extra = {}) => ({ id, at: new Date().toISOString(), source: "Group", sourceKey: "feishu:c", title: `Title ${id}`, why: `Why ${id}`, action: "Draft a reply", refs: [], howToRead: "lark-cli ...", status: "pending", ...extra });
 
 // The timeline is rows; tap one to open its post (with buttons). Waits for the post page.
-const openPost = async (scope, id) => { const row = scope.locator(`.tl-post[data-fy="${id}"] .tl-title`); await row.waitFor({ timeout: 12000 }); await row.click(); const post = scope.locator(`.fd .fp[data-fy="${id}"]`).filter({ visible: true }).first(); await post.waitFor({ timeout: 8000 }); return post; };
+const openPost = async (scope, id) => { const row = scope.locator(`.tl-post[data-fy="${id}"] .tl-title`); await row.waitFor({ timeout: 12000 }); await row.click(); const post = scope.locator(`.fd .tl-post[data-fy="${id}"]`).filter({ visible: true }).first(); await post.waitFor({ timeout: 8000 }); return post; };
 async function folder(t) {
   const dir = await mkdtemp(join(tmpdir(), "pix-foryou-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -141,40 +141,36 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.match(await page.locator('.tl-post[data-fy="c"] .tl-act.main').textContent(), /Start test/, "the loop's own choice is the post's main action");
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
   await page.waitForTimeout(1500);
-  assert.match(await (await openPost(page, "a")).locator(".fp-prep").textContent(), /Draft: Hi, here is the list/);
+  await openPost(page, "a");
+  assert.match(await page.locator(".fd .tl-thread .tl-c-prepared").textContent(), /Pi[\s\S]*Draft: Hi, here is the list[\s\S]*▸ show/, "the draft is a Pi comment, folded");
+  assert.equal(await page.locator(".fd .fp-prep").count(), 0, "no Prepared box");
   await page.locator("[data-fy-back]").click();
-  // Nested: an action first shows the task, then asks where (here / new session / discuss), like question cards.
+  // The post page is the feed post, whole, with its own small actions.
   await openPost(page, "c");
-  await page.locator('[data-fy="c"] [data-fy-pick="0"]').click();
-  assert.deepEqual(await page.locator('[data-fy="c"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "Discuss with For you first"]);
-  assert.match(await page.locator('[data-fy="c"] [data-fy-pick="0"]').textContent(), /Start test[\s\S]*Run the Databento test/);
-  assert.equal(await page.locator('[data-fy="c"] .fy-src').getAttribute("aria-label"), "Feishu", "source avatar is the app's icon");
-  assert.equal(await page.locator('[data-fy="c"] .fy-src svg').count(), 1);
-  await page.locator('[data-fy="c"] [data-fy-act="later"]').click();
-  await page.locator('.fp[data-fy="c"]').waitFor({ state: "detached" });
+  assert.match(await page.locator('.fd .tl-post[data-fy="c"] .tl-act.main').textContent(), /Start test/);
+  await page.locator('.fd [data-fy="c"] [data-fy-act="later"]').click();
+  await page.locator('.tl-post[data-fy="c"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"c","status":"later","wakeAt":"2099-01-19/);
 
   await openPost(page, "b");
-  await page.locator('[data-fy="b"] [data-fy-act="dismiss"]').click();
-  await page.locator('.fp[data-fy="b"]').waitFor({ state: "detached" });
+  await page.locator('.fd [data-fy="b"] [data-fy-act="dismiss"]').click();
+  await page.locator('.tl-post[data-fy="b"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
   await openPost(page, "a");
-  await page.locator('[data-fy="a"] [data-fy-pick="0"]').click();
-  await page.locator('[data-fy="a"] .fp-where button', { hasText: "Here, in For you" }).click();
-  await page.locator('.fp[data-fy="a"]').waitFor({ state: "detached" });
+  await page.locator('.fd [data-fy="a"] [data-fy-choice="0"]').click();
+  await page.locator('.fd .tl-post[data-fy="a"]').waitFor({ state: "detached" });
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");
-  await page.locator('#forYou .fp[data-fy="a"]').waitFor({ state: "detached" });
   assert.equal(await page.locator("#forYou").getByText("All clear").count(), 0, "no big empty state");
   assert.equal(await page.locator(".fp:not(.fw)", { hasText: "Title c" }).count(), 0, "parked loops leave the feed");
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
   await openPost(page, "d");
-  await page.locator('.fp[data-fy="d"] [data-fy-act="done"]').click();
-  await page.locator('.fp[data-fy="d"]').waitFor({ state: "detached" });
+  await page.locator('.fd .tl-post[data-fy="d"] [data-fy-act="done"]').click();
+  await page.locator('.tl-post[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
   assert.equal(await page.locator('.tl-post[data-fy="d"]').count(), 0, "closed loops leave the timeline");
   assert.deepEqual(errors, []);
@@ -252,8 +248,9 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
   assert.equal(await page.locator("#messages .job-card, #messages .feed-head, #messages .ln-box").count(), 0, "no second card UI");
   assert.doesNotMatch(await page.locator("#messages").textContent(), /Morning\. Two things today\./, "the feed shows posts, not the chat");
   assert.equal(await page.locator("#input").isVisible(), false, "no composer on the feed");
-  assert.match(await post.locator(".fp-prep").textContent(), /Prepared[\s\S]*Found tracks.json/);
-  assert.match(await post.locator(".fp-go").textContent(), /Ask Minara[\s\S]*In minara · Package the newest data/);
+  assert.equal(await page.locator("#messages .fd .fp-prep").count(), 0, "no Prepared box");
+  assert.match(await page.locator("#messages .fd .tl-c-prepared").textContent(), /Found tracks.json/, "the draft is a comment");
+  assert.match(await post.locator(".tl-act.main").textContent(), /Ask Minara/);
   for (const b of await post.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(600); await page.screenshot({ path: process.env.PIX_SHOT }); }
   // The dog opens the chat (the composer talks to For you); "Feed" goes back.
@@ -269,8 +266,7 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
   await page.getByRole("button", { name: "Back to the feed" }).click();
   await post.waitFor();
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
-  await post.locator(".fp-go").click();
-  await post.locator(".fp-where button", { hasText: "In minara" }).click();
+  await post.locator(".tl-act.main").click();
   assert.match((await next).prompts[0], /Package the newest data/);
   const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
   assert.equal(it.status, "onit"); assert.equal(it.session, "s1");
@@ -279,7 +275,7 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
 
 test("posts in the For you chat: Reply sends brook's words; Later parks; while For you works the posts stay and one status line shows", async t => {
   const dir = await folder(t);
-  writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { at: "2026-10-01T00:00:00Z" }), item("k2", { at: "2026-10-02T00:00:00Z", due: "2099-01-20" })].map(x => JSON.stringify(x)).join("\n") + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
@@ -297,14 +293,18 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   assert.equal(await p1.count(), 1, "posts stay put while it works");
   await put(false);
   const q1 = await openPost(page.locator("#messages"), "k1");
-  await q1.locator(".fp-bar [data-fy-else]").click();
-  await q1.locator(".fp-reply textarea").fill("Only draft a reply");
+  // One calm reply box under the comments; it posts like Ask Pi and shows up as a "You" comment.
+  assert.equal(await q1.count(), 1);
+  const reply = page.locator('#messages .fd .tl-reply.tl-bottom');
+  assert.notEqual(await reply.locator("button").evaluate(b => getComputedStyle(b).backgroundColor), "rgb(0, 122, 255)", "no bright blue pill");
+  await reply.locator("textarea").fill("Only draft a reply");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await q1.locator("[data-fy-else-send]").click();
+  await reply.locator("[data-fy-comment]").click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
-  await page.locator('#messages .tl-post[data-fy="k2"]').waitFor({ timeout: 8000 }); // answered: back to the timeline
+  await page.locator('#messages .fd .tl-thread .tl-c-you', { hasText: "Only draft a reply" }).waitFor({ timeout: 8000 });
+  await page.locator("#messages [data-fy-back]").click();
   const q2 = await openPost(page.locator("#messages"), "k2");
-  await q2.locator('.fp-bar [data-fy-act="later"]').click();
+  await q2.locator('[data-fy-act="later"]').click();
   await p2.waitFor({ state: "detached", timeout: 8000 });
   assert.equal(parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8")).find(i => i.id === "k2").status, "later");
 });
@@ -322,12 +322,12 @@ test("bell page: every card has Something else; brook's words go to For you", as
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const card = await openPost(page.locator("#forYou"), "e1");
-  await card.locator("[data-fy-else]").click();
-  const box = card.locator(".fy-else textarea");
-  await box.fill("Ask Minara for the newest data snapshot first");
-  const h = await card.locator("[data-fy-else-send]").boundingBox();
+  assert.equal(await card.count(), 1);
+  const reply = page.locator("#forYou .fd .tl-reply.tl-bottom");
+  await reply.locator("textarea").fill("Ask Minara for the newest data snapshot first");
+  const h = await reply.locator("[data-fy-comment]").boundingBox();
   assert.ok(h.height >= 40, "touch target");
-  await card.locator("[data-fy-else-send]").click();
+  await reply.locator("[data-fy-comment]").click();
   for (let i = 0; i < 40 && !started.length; i++) await new Promise(r => setTimeout(r, 50));
   assert.match(started[0], /own instruction[\s\S]*Ask Minara for the newest data snapshot first/);
 });
@@ -357,10 +357,22 @@ test("related asks in one line of work share one card, and one answer handles th
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  // On the phone each ask is its own post, tagged with its line; the line chip filters to them.
+  // On the phone a line with 2+ open asks is ONE post: newest as the body, the rest as a muted "Also"; no counts.
+  const group = page.locator('#messages .tl-group[data-fy-detail="l:bench"]');
+  await group.waitFor();
+  assert.equal(await page.locator('#messages .tl-post').count(), 1, "one post for the line");
+  assert.match(await group.locator(".tl-meta").textContent(), /News bench/);
+  assert.match(await group.locator(".tl-also").textContent(), /^Also: (Curve for Lowes|Data for 欧阳)$/);
+  assert.doesNotMatch(await group.textContent(), /\b2\b|\+1/, "no counts");
+  // Tap: the line's page, each ask a reply row with its own small actions.
+  await group.locator(".tl-title").click();
+  await page.locator('#messages .fd .tl-sub[data-fy="h1"]').waitFor();
+  assert.equal(await page.locator('#messages .fd .tl-sub').count(), 2);
+  assert.equal(await page.locator('#messages .fd .tl-sub[data-fy="h2"] [data-fy-act="done"]').count(), 1, "inline actions per ask");
+  // The line chip still filters to plain posts.
+  await page.locator("#messages [data-fy-back]").click();
+  await page.locator('#messages [data-tl-line="bench"]').click();
   await page.locator('#messages .tl-post[data-fy="h2"]').waitFor();
-  assert.match(await page.locator('#messages .tl-post[data-fy="h1"] .tl-meta').textContent(), /News bench/);
-  assert.equal(await page.locator('#messages [data-tl-line="bench"]').count(), 1);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
@@ -446,14 +458,21 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await post.locator("[data-fy-comment]").click();
   assert.match((await next).prompts[0], /I'll be there at 18:30/);
-  // Swipe a stale post sideways: it is removed for good.
-  const card = page.locator('#messages .tl-post[data-fy="p2"]'), box = await card.boundingBox();
-  const touch = async (type, x) => card.evaluate((el, [type, x, y]) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y }); el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], changedTouches: [t] })); }, [type, x, box.y + 20]);
-  await touch("touchstart", box.x + 40); for (const dx of [20, 80, 160, 260]) await touch("touchmove", box.x + 40 + dx); await touch("touchend", box.x + 300);
+  // Regression: a sideways swipe no longer removes a post; removing is an explicit tap on its page.
+  const card = page.locator('#messages .tl-post[data-fy="p2"]');
+  await card.waitFor();
+  const touch = async (type, dx) => card.evaluate((el, [type, dx]) => { const r = el.getBoundingClientRect(), t = new Touch({ identifier: 1, target: el, clientX: r.x + 40 + dx, clientY: r.y + 20 }); el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], changedTouches: [t] })); }, [type, dx]);
+  await touch("touchstart", 0); for (const dx of [20, 80, 160, 260]) await touch("touchmove", dx); await touch("touchend", 260);
+  await page.waitForTimeout(800);
+  assert.equal(await card.count(), 1, "swipe does not remove");
+  assert.doesNotMatch(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
+  assert.equal(await page.locator("[data-fy-swipe]").count(), 0);
+  await page.evaluate(() => document.body.classList.remove("open", "files-open"));
+  await openPost(page.locator("#messages"), "p2");
+  await page.locator('#messages .fd [data-fy="p2"] [data-fy-act="dismiss"]').click();
   await page.locator('#messages .tl-post[data-fy="p2"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
-  assert.equal(await page.evaluate(() => document.body.classList.contains("open") || document.body.classList.contains("files-open")), false, "swiping a card does not also open a side drawer");
-  // Lines of work swipe away too (retired, not deleted).
+  // Lines of work can still be retired (not deleted).
   assert.equal((await fetch(`${base}/api/foryou/line/bench/hide`, { method: "POST", headers: auth })).status, 200);
   assert.equal(JSON.parse(readFileSync(join(dir, "lines.json"), "utf8"))[0].hidden, true);
   assert.deepEqual(errors, []);
@@ -475,8 +494,8 @@ test("phone: session buttons use unique board names with a short hint; a card na
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const k1 = await openPost(page.locator("#forYouPage"), "k1");
-  await k1.locator('[data-fy-pick="0"]').click();
-  assert.deepEqual(await page.locator('.fd .fp[data-fy="k1"] .fp-where button').allTextContents(), ["Here, in For you", "New session", "In minara-2 · Three y2 GPU jobs are running…", "Discuss with For you first"]);
+  assert.equal(await k1.locator(".tl-act.main").textContent(), "Fix it", "only the named session's move");
+  assert.equal(await k1.locator("[data-fy-choice]").count(), 1);
 });
 
 test("phone: a card a session handed back shows where it stands now, not the original ask or a past decision", async t => {
@@ -494,9 +513,10 @@ test("phone: a card a session handed back shows where it stands now, not the ori
   // The row already says where it stands; the post page has the open question.
   assert.match(await page.locator('.tl-post[data-fy="h1"] .tl-comment').textContent(), /Static mock built/);
   const post = await openPost(page.locator("#forYouPage"), "h1");
-  assert.match(await post.locator(".fp-now").textContent(), /minara-3\s*Static mock built/, "who did what, latest step");
-  assert.match(await post.locator(".fp-text").textContent(), /Launch how\?/, "the open question");
-  assert.doesNotMatch(await post.textContent(), /Lowes made two tasks|brook chose|Handed to/, "not the original ask, not a past decision");
+  assert.match(await post.textContent(), /Launch how\?/, "the open question");
+  assert.doesNotMatch(await post.textContent(), /brook chose|Handed to/, "the post is not a past decision");
+  const thread = await page.locator("#forYouPage .fd .tl-thread").textContent();
+  assert.match(thread, /Handed to minara[\s\S]*Static mock built/, "history below, oldest first");
 });
 
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
@@ -532,9 +552,10 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.evaluate(() => document.getElementById("forYouOpen").click());
-  await page.locator('#forYouPage .tl-post[data-fy="k3"]').waitFor({ timeout: 12000 });
-  assert.equal(await page.locator("#forYouPage .tl-post").count(), 3, "each loop is one post");
-  assert.match(await page.locator('#forYouPage .tl-post[data-fy="k1"] .tl-meta').textContent(), /Kairos launch/, "tagged with the merged job");
+  const job = page.locator('#forYouPage .tl-group[data-fy-detail="l:kairos-launch"]');
+  await job.waitFor({ timeout: 12000 });
+  assert.equal(await page.locator("#forYouPage .tl-post").count(), 1, "the merged job is one post");
+  assert.match(await job.locator(".tl-meta").textContent(), /Kairos launch/);
 });
 
 test("Mac: the Unfinished list and the card pager show one row per job (a line with 2+ loops), with its tasks inside", async () => {
@@ -586,8 +607,14 @@ test("jobs read like X: each job has its own face For you picks; its page is the
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  // Two open loops in one job: one post; its page lists each loop, and a loop's page has every update oldest first.
+  await page.locator('#messages .tl-group[data-fy-detail="l:kairos"]').waitFor({ timeout: 12000 });
+  await page.locator('#messages [data-tl-line="kairos"]').click();
   const a = page.locator('#messages .tl-post[data-fy="a"]');
   await a.waitFor({ timeout: 12000 });
   assert.match(await a.locator(".tl-comment").textContent(), /Lowes made it a Feishu task/, "the newest update is the post's one comment");
   assert.doesNotMatch(await a.locator(".tl-comment").textContent(), /2026-10-21/, "date prefix stripped");
+  await a.locator(".tl-title").click();
+  const notes = await page.locator("#messages .fd .tl-thread .tl-comment p").allTextContents();
+  assert.ok(notes.findIndex(x => /draft started/.test(x)) < notes.findIndex(x => /Feishu task/.test(x)), "oldest first");
 });

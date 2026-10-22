@@ -166,14 +166,28 @@ test("phone: several questions stack on one card; Submit sends one JSON array on
     });
     assert.equal(await page.locator(".mq").count(), 2);
     assert.match(await page.locator(".mq").first().innerText(), /1\/2 · Scope/);
+    // Folds like Codex: only the current question shows its options; later ones show the header only.
+    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), true);
+    assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), false, "later question folded");
+    assert.match(await page.locator('.mq[data-k="1"]').innerText(), /^2\/2 · Deploy$/);
     const submit = page.locator("[data-mq-submit]");
     await page.locator('[data-mq="0"][data-mv="Full"]').click();
     assert.equal(await submit.isDisabled(), true, "waits for every answer");
+    // A pick advances; the answered one collapses to "Header: answer"; tapping it reopens.
+    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), false);
+    assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), true);
+    assert.match(await page.locator('.mq[data-k="0"] .mq-head').innerText(), /Scope[\s\S]*Full/);
+    await page.locator('[data-mq-head="0"]').click();
+    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), true, "tap reopens");
+    await page.locator('[data-mq-head="1"]').click();
     await page.locator('[data-mq-other="1"]').fill("Friday");
     assert.equal(await submit.isDisabled(), false);
     await submit.click();
+    await submit.click({ force: true }).catch(() => {});
     await page.waitForFunction(() => window.__sent.length);
     assert.deepEqual(await page.evaluate(() => window.__sent[0]), { action: "answer", value: '["Full","Friday"]' });
+    await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => window.__sent.length), 1, "submits once");
   } finally { await browser.close(); server.close(); }
 });
 

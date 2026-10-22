@@ -45,11 +45,46 @@ export function latestWord(i: Item, status: { session: string; name?: string; at
 	return note ?? (i.prepared ? { text: i.prepared, at: "", by: "prepared" } : undefined);
 }
 
+/** One comment on a loop's post page: who said it, when, what. Kinds: source (the original message), prepared (Pi's draft), note, status (owner session's line), you (brook's own move). */
+export interface ThreadEntry { by: string; at: string; text: string; kind: "source" | "prepared" | "note" | "status" | "you" }
+
+/**
+ * A loop's whole history as one comment list, oldest first, built from what the inbox already keeps: the source
+ * message, the draft, each dated note, the owner session's status line, and brook's own answers and closing move.
+ * Shared by the phone post page and the Mac. Capped (30 entries, 600 chars each) to keep the payload small.
+ */
+export function loopThread(i: Item, status: { session: string; name?: string; at: string; line: string }[] = []): ThreadEntry[] {
+	const clip = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 600);
+	const sender = i.who?.name || (/^[^:]+:\s*(.{1,40})$/.exec(i.source ?? "") ?? [])[1] || i.source || "Source";
+	const start = Date.parse(i.at) || 0, iso = (t: number) => new Date(t).toISOString();
+	const out: ThreadEntry[] = [];
+	const source = clip([i.why, i.howToRead && !/^[\w-]+-cli\b|^lark-cli|^Feishu meeting/i.test(i.howToRead) ? i.howToRead : ""].filter(Boolean).join(" "));
+	if (source) out.push({ by: sender, at: i.at, text: source, kind: "source" });
+	if (i.prepared) out.push({ by: "Pi", at: i.at, text: clip(i.prepared), kind: "prepared" });
+	for (const raw of String(i.note ?? "").split("\n")) {
+		const m = raw.match(/^- (\d{4}-\d{2}-\d{2}): (.*)$/), body = (m ? m[2] : raw.replace(/^- /, "")).trim();
+		if (!body || /^Prepared: /.test(body) || /^ongoing$/i.test(body)) continue;
+		const at = iso(Math.max(start, m ? Date.parse(`${m[1]}T00:00:00Z`) : start));
+		const you = body.match(/^brook (?:said|chose|tapped|asked|replied):?\s*(.*)$/i), who = body.match(/^([\w.-]{1,30}): (.+)$/);
+		if (you) out.push({ by: "You", at, text: clip(you[1] || body), kind: "you" });
+		else if (who && !/^(Finished|Reminder|Step done|Same card|Handled with)$/i.test(who[1])) out.push({ by: who[1], at, text: clip(who[2]), kind: "note" });
+		else out.push({ by: "Pi", at, text: clip(body), kind: "note" });
+	}
+	const s = i.session ? status.find(x => x.session === i.session) : undefined;
+	if (s?.line && !out.some(e => e.text === clip(s.line))) out.push({ by: s.name || "Session", at: s.at, text: clip(s.line), kind: "status" });
+	const a = i.suggest?.answer;
+	if (a) out.push({ by: "You", at: i.suggest!.answeredAt || i.suggest!.at, text: clip(a === "else" ? i.suggest!.text || "Replied" : { do: "Do it", discuss: "Discuss", later: "Later", no: "No", notnow: "Not now" }[a]), kind: "you" });
+	const closed = { done: "Done", dismissed: "Removed", later: "Later" }[i.status as string];
+	if (closed && i.at_status) out.push({ by: "You", at: i.at_status, text: closed, kind: "you" });
+	const sorted = out.map((e, n) => [e, n] as const).sort(([x, n], [y, k]) => (Date.parse(x.at) || 0) - (Date.parse(y.at) || 0) || n - k).map(([e]) => e);
+	return sorted.length > 30 ? [sorted[0], ...sorted.slice(-29)] : sorted;
+}
+
 export function forYouView(dir?: string, now = Date.now()) {
 	const P = paths(dir);
 	const all = readAll(dir);
 	const status = readStatus(dir);
-	const publicItem = (i: Item) => { const w = latestWord(i, status); return { ...basePublic(i), ...(w ? { latest: w } : {}) }; };
+	const publicItem = (i: Item) => { const w = latestWord(i, status); return { ...basePublic(i), ...(w ? { latest: w } : {}), thread: loopThread(i, status) }; };
 	const newest = (a: Item, b: Item) => Date.parse(b.at) - Date.parse(a.at);
 	const handled = all.filter(i => !isOpen(i) && now - Date.parse(i.at_status ?? i.at) < 86_400_000).reverse().slice(0, 20);
 	const parked = all.filter(i => isOpen(i) && !needsYou(i, now));
