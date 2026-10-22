@@ -183,6 +183,14 @@ export function memoryView(dir: string) {
 	return { cards: [{ name: "index", text: readIndex(dir) }, ...listCards(dir)].filter(c => c.text.trim()), changes: memoryChanges(dir), seenAt: memorySeenAt(dir), unseen: memoryUnseen(dir) };
 }
 
+/** brook rewrites one line (from the view): remove the old, add the new, both logged. */
+export function editMemoryLine(dir: string, card: string, line: string, text: string, now = new Date()): boolean {
+	if (!text.trim()) return removeMemoryLine(dir, card, line, now);
+	const ch = applyCardEdits(dir, [{ card, add: [text.trim()], remove: [line] }], { source: "brook", now });
+	if (ch.length) logCardChanges(join(dir, "memory.log"), ch, now);
+	return ch.some(c => c.removed.length > 0);
+}
+
 /** brook removes one line (from the view). Logged like any other change. */
 export function removeMemoryLine(dir: string, card: string, line: string, now = new Date()): boolean {
 	const ch = applyCardEdits(dir, [{ card, add: [], remove: [line] }], { now });

@@ -1,10 +1,10 @@
-import { hideLine } from "./proactive-lines.ts";
+import { hideLine, isAutonomy, setLineAutonomy } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
 import { paths as proactivePaths } from "./proactive.ts";
-import { markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
-import { actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
+import { editMemoryLine, markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
+import { contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export interface ForYouHubOptions {
 	/** Proactive list folder; defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
@@ -15,7 +15,7 @@ export interface ForYouHubOptions {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/hide$/.test(path);
+	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context";
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
@@ -55,6 +55,14 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
 			// Memory: what For you learned, readable and removable by brook. Only the memory folder.
 			if (method === "GET" && path === "/api/foryou/memory") return { status: 200, body: memoryView(pdir) };
+			if (method === "POST" && path === "/api/foryou/memory/edit") {
+				const input = await body().catch(() => ({})) as any;
+				const ok = typeof input?.card === "string" && typeof input?.line === "string" && typeof input?.text === "string" && editMemoryLine(pdir, input.card, input.line.slice(0, 2000), input.text.slice(0, 2000));
+				onProactive();
+				return ok ? { status: 200, body: { ok: true } } : { status: 404, body: { error: "line not found" } };
+			}
+			// What For you sees now: each section of its injected prompt and its size.
+			if (method === "GET" && path === "/api/foryou/context") return { status: 200, body: { sections: contextSections(coordinatorContext(dir, live())) } };
 			if (method === "POST" && path === "/api/foryou/memory/seen") { markMemorySeen(pdir); onProactive(); return { status: 200, body: { ok: true } }; }
 			if (method === "POST" && path === "/api/foryou/memory/remove") {
 				const input = await body().catch(() => ({})) as any;
@@ -86,6 +94,8 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 			}
 			// Swipe away a stale line of work: retire it (hidden), like the judge does.
 			const lm = method === "POST" && path.match(/^\/api\/foryou\/line\/([A-Za-z0-9_-]{1,60})\/hide$/);
+			const am = method === "POST" && path.match(/^\/api\/foryou\/line\/([A-Za-z0-9_-]{1,60})\/autonomy$/);
+			if (am) { const want = (await body().catch(() => ({})) as any)?.level; const v = setLineAutonomy(am[1], isAutonomy(want) ? want : undefined, dir); onProactive(); return v ? { status: 200, body: { autonomy: v } } : { status: 404, body: { error: "no such line" } }; }
 			if (lm) { const ok = hideLine(lm[1], dir); onProactive(); return ok ? { status: 200, body: { ok } } : { status: 404, body: { error: "no such line" } }; }
 			const m = path.match(/^\/api\/foryou\/([A-Za-z0-9_-]{1,40})\/(act|dismiss|later|done|now)$/);
 			if (method !== "POST" || !m) return undefined;

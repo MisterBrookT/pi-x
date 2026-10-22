@@ -42,12 +42,12 @@ export function forYouView(dir?: string, now = Date.now()) {
 		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
-		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, avatar }) => {
+		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, avatar, autonomy }) => {
 			const open = all.filter(i => i.line === id && isOpen(i));
 			const waitsOnYou = open.some(i => needsYou(i, now));
 			// What the line is waiting on, in words: its open loops (title + whether brook or a session holds it).
 			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), ...(i.session ? { session: i.session } : {}) }));
-			return { id, name, ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
+			return { id, name, autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
 		}),
 		watching,
 		problems,
@@ -215,7 +215,7 @@ export function choiceTask(it: Item, c: { run: string; prompt?: string }): strin
 }
 export interface Card {
 	/** 1-based position among waiting cards (the Mac picker can step through them). */
-	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string;
+	at?: number; id: string; title: string; why: string; action: string; source: string; kind?: string; autonomy?: string;
 	/** Other waiting asks in the same line of work, decided together on this card. */
 	when?: string;
 	related?: { id: string; title: string; source: string; why: string; kind?: string }[]; line?: string; due?: string; prepared?: string; left: number; choices: CardChoice[];
@@ -275,7 +275,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
 	const it = waiting[at];
 	if (!it) return undefined;
 	const rel = heads[at].related, ln = lineOf(it);
-	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), at: at + 1, when: it.at, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
+	return { ...(rel.length ? { related: rel.map(r => ({ id: r.id, title: r.title, source: r.source, why: r.why, kind: String(r.sourceKey ?? "").split(":")[0] })) } : {}), ...(ln && rel.length ? { line: ln.name } : {}), ...(ln?.autonomy ? { autonomy: ln.autonomy } : {}), at: at + 1, when: it.at, id: it.id, title: it.title, why: it.why, action: it.action, source: it.source, kind: String(it.sourceKey ?? "").split(":")[0], ...(it.due ? { due: it.due } : {}), ...(it.prepared ? { prepared: it.prepared } : {}), left: waiting.length - 1, choices: cardChoices(it, live).map(({ prompt, ...c }) => ({ ...c, task: choiceTask(it, { run: c.run, prompt }) })), sessions: sendTargets(it, live), task: choiceTask(it, { run: "here" }) };
 }
 
 /**
@@ -399,6 +399,12 @@ Decide where this is best done: here, in a session already open or already on th
  * so its own chat can stay short: memory (projects and folders), every open loop with its brief,
  * and the Pi sessions open right now. Work stays in per-loop sessions; this is the map.
  */
+/** The injected prompt split by "##"/"###" heading, with a rough token size (chars/4 Latin, 1/char CJK). */
+export function contextSections(prompt: string): { title: string; tokens: number; text: string }[] {
+	const tok = (s: string) => Math.round((s.match(/[\u3000-\u9fff]/g)?.length ?? 0) + s.replace(/[\u3000-\u9fff]/g, "").length / 4);
+	return prompt.split(/\n(?=#{2,3} )/).map(s => s.trim()).filter(Boolean).map(s => ({ title: s.match(/^#{2,3} (.+)/)?.[1] ?? "(top)", tokens: tok(s), text: s.slice(0, 4000) }));
+}
+
 export function coordinatorContext(dir?: string, live: LiveSession[] = [], now = Date.now()): string {
 	const P = paths(dir);
 	const memory = existsSync(memoryDir(P.dir)) ? withCardList(readIndex(P.dir), listCards(P.dir)).trim() || "(empty)" : existsSync(P.memory) ? readFileSync(P.memory, "utf8").trim() : "(empty)";
@@ -447,6 +453,11 @@ Decisions: when a loop needs brook to choose, do not ask with a blocking questio
 put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
 own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
 Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
+Autonomy (his "preferences"): each line may carry [autonomy: do|prepare|discuss]. do = you or the owner just do it and
+report after; prepare = do the read-only and drafting work, then put it on the card; discuss = bring it to him before any
+work. No tag: use the preference rules in memory (default: money, outbound, credentials, new contacts -> discuss; reply
+drafts -> prepare; internal analysis, replays, Pix/tooling fixes -> do). Outbound always needs his yes, whatever the level.
+When he says e.g. "treat Kairos replays as do", set it with the loops tool "line" (id, autonomy).
 Never interrupt: while you and brook are working on something, do not switch to a newly arrived loop. If a new loop is
 about the same thing, fold it in quietly ("also, Lowes just asked about the same curve"). Otherwise, when you finish the
 current thing, end with one line: "<n> new waiting — next: <the most urgent one>. Show it?" Only something due today, or

@@ -17,7 +17,7 @@ import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { FACE_NAMES } from "../core/job-faces.ts";
-import { applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
+import { AUTONOMY, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
 import { forYouView, mergeJobLines, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
@@ -108,9 +108,9 @@ export const cardLines = (it: { line?: string; related?: unknown[]; title: strin
 export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? ` · ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
-export const cardTitle = (it: { line?: string; related?: { title: string }[]; prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
+export const cardTitle = (it: { autonomy?: string; line?: string; related?: { title: string }[]; prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
 	...(it.line && it.related?.length ? [`${it.line} · ${it.related.length + 1} tasks`, `  • ${it.title}`, ...it.related.map(r => `  • ${r.title}`), ""] : [it.title]),
-	`${it.source}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
+	`${it.source}${it.autonomy ? ` · ${it.autonomy}` : ""}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
 	"",
 	...(it.why ? [it.why, ""] : []),
 	...(it.prepared ? [`Prepared: ${it.prepared}`, ""] : []),
@@ -154,6 +154,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
 			avatar: Type.Optional(Type.String({ description: "line: the job's face on the phone, one of: " + FACE_NAMES.join(", ") + ". Pick what fits the job (rocket = launch, owl = review/eval, hamster or chart = data, cap = study, sprout = training); give every line one; change it when the job changes" })),
+			autonomy: Type.Optional(StringEnum(AUTONOMY, { description: "line: how much may happen without brook: do (just do it, report after), prepare (do read-only/draft work, put it on the card), discuss (ask first). Set when brook states a preference for this job." })),
 			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
@@ -185,7 +186,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(moved ? `Merged ${p.merge.join(", ")} into ${id}; ${moved.length} loop(s) moved. They now show as tasks of one job.` : "Nothing merged (name existing lines in merge, and an id or name for the target).");
 			}
 			if (p.action === "line") {
-				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, avatar: p.avatar }]);
+				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, avatar: p.avatar, autonomy: p.autonomy }]);
 				const r = applyLineEdits(readLines(deps.dir), edits);
 				if (r.changed.length) writeLines(r.lines, deps.dir);
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");

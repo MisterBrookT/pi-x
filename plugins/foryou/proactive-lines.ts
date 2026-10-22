@@ -14,10 +14,15 @@ const PROACTIVE_DIR = process.env.PIX_PROACTIVE_DIR || join(homedir(), ".pix", "
 export interface Line { id: string; name: string; project?: string; state: string; next?: string; updated: string; hidden?: boolean;
 	/** The job's face on the phone: one emoji For you picks and may change as the job evolves. */
 	avatar?: string;
+	/** How much For you and the owner may do alone: do (act, report after), prepare (do read-only/draft work, put it on the card), discuss (talk first). */
+	autonomy?: Autonomy;
 	/** The Pi session working on this line, and what it last said (tracked on every turn end). */
 	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean } }
 /** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
-export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string }
+export interface LineEdit { id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string; autonomy?: Autonomy }
+export type Autonomy = "do" | "prepare" | "discuss";
+export const AUTONOMY: Autonomy[] = ["do", "prepare", "discuss"];
+export const isAutonomy = (x: unknown): x is Autonomy => AUTONOMY.includes(x as Autonomy);
 
 
 const file = (dir = PROACTIVE_DIR) => join(dir, "lines.json");
@@ -44,6 +49,7 @@ export function parseLineEdits(x: unknown): LineEdit[] {
 		const av = typeof e.avatar === "string" ? Array.from(e.avatar.trim()).slice(0, 4).join("") : "";
 		if (av && /\p{Extended_Pictographic}/u.test(av)) out.avatar = av;
 		else if (typeof e.avatar === "string" && FACE_NAMES.includes(e.avatar.trim().toLowerCase())) out.avatar = e.avatar.trim().toLowerCase();
+		if (isAutonomy(e.autonomy)) out.autonomy = e.autonomy;
 		return out;
 	});
 }
@@ -56,10 +62,10 @@ export function applyLineEdits(lines: Line[], edits: LineEdit[], now = new Date(
 		const l = out.find(x => x.id === e.id);
 		if (l) {
 			if (e.retire) l.hidden = true;
-			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; if (e.avatar) l.avatar = e.avatar; l.hidden = false; }
+			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; if (e.avatar) l.avatar = e.avatar; if (e.autonomy) l.autonomy = e.autonomy; l.hidden = false; }
 			l.updated = now; changed.push(e.id);
 		} else if (!e.retire && e.name && e.state) {
-			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), ...(e.avatar ? { avatar: e.avatar } : {}), updated: now });
+			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), ...(e.avatar ? { avatar: e.avatar } : {}), ...(e.autonomy ? { autonomy: e.autonomy } : {}), updated: now });
 			changed.push(e.id);
 		}
 	}
@@ -72,7 +78,7 @@ export function linesForPrompt(lines: Line[], loops: { id: string; title: string
 	if (!live.length) return "(none yet)";
 	return live.map(l => {
 		const mine = loops.filter(i => i.line === l.id);
-		return `- line=${l.id} "${l.name}"${l.project ? ` (${l.project})` : ""}: ${l.state}${l.owner ? `; owner session ${l.owner.name ?? l.owner.id} (${l.owner.id}), last: ${l.owner.status}` : ""}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
+		return `- line=${l.id} "${l.name}"${l.project ? ` (${l.project})` : ""}${l.autonomy ? ` [autonomy: ${l.autonomy}]` : ""}: ${l.state}${l.owner ? `; owner session ${l.owner.name ?? l.owner.id} (${l.owner.id}), last: ${l.owner.status}` : ""}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
 	}).join("\n");
 }
 
@@ -110,3 +116,12 @@ export function mergeLines(from: string[], into: { id: string; name?: string; st
 	return src.flatMap(l => refile(l.id, target!.id));
 }
 
+
+/** Set a line's autonomy, or cycle it (do -> prepare -> discuss -> do) when level is omitted. Returns the new level. */
+export function setLineAutonomy(id: string, level?: Autonomy, dir?: string): Autonomy | undefined {
+	const lines = readLines(dir), l = lines.find(x => x.id === id);
+	if (!l) return undefined;
+	l.autonomy = level ?? AUTONOMY[(AUTONOMY.indexOf(l.autonomy ?? "discuss") + 1) % 3];
+	l.updated = new Date().toISOString(); writeLines(lines, dir);
+	return l.autonomy;
+}
