@@ -13,7 +13,7 @@
  *   6. Full X-Stainless-* header set, x-client-request-id, keep-alive
  */
 
-import { plan, isQuota, coolDown, type Account } from "./accountkit.ts";
+import { plan, choice, isQuota, coolDown, type Account } from "./accountkit.ts";
 import { readClaudeToken } from "./claude-auth.ts";
 import {
 	type AssistantMessage,
@@ -694,7 +694,10 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 
 				if (!response.ok || !response.body) {
 					const errText = await response.text().catch(() => "");
-					throw new Error(`Anthropic API error ${response.status}: ${errText}`);
+					const pinnedQuota = choice() !== "auto" && isQuota(response.status, errText)
+						? ` (Claude account ${choice()} is pinned; use claude-route auto to allow another account on the same model)`
+						: "";
+					throw new Error(`Anthropic API error ${response.status}: ${errText}${pinnedQuota}`);
 				}
 
 				stream.push({ type: "start", partial: output });

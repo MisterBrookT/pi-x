@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJiti } from "jiti";
+import { createPixAnthropicStream } from "../plugins/pix-anthropic/stream.ts";
 const jiti = createJiti(import.meta.url);
 const home = mkdtempSync(join(tmpdir(), "pixh-"));
 process.env.PIX_HOME = home;
@@ -44,6 +45,27 @@ test("band rule: switch only to a strictly higher band; ties stay; resting goes 
 test("pinning tries one account only", () => {
 	k.setChoice("own"); assert.deepEqual(ids(), ["own"]);
 	k.setChoice("minarabench"); assert.deepEqual(ids(), ["minarabench"]);
+	k.setChoice("auto");
+});
+
+test("exhausted pinned account explains auto recovery without retrying another account", async () => {
+	k.setChoice("own");
+	let calls = 0;
+	const stream = createPixAnthropicStream()({
+		id: "claude-opus-4-8", api: "anthropic-messages", provider: "pix-anthropic",
+		baseUrl: "https://example.invalid", maxTokens: 1024, contextWindow: 200000,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	}, { messages: [{ role: "user", content: "hello" }] }, {
+		apiKey: "sk-ant-api01-test", fetch: async () => {
+			calls++;
+			return new Response('{"error":{"type":"rate_limit_error"}}', { status: 429 });
+		},
+	});
+	let last;
+	for await (const event of stream) last = event;
+	assert.equal(calls, 1);
+	assert.equal(last.type, "error");
+	assert.match(last.error.errorMessage, /account own is pinned; use claude-route auto/);
 	k.setChoice("auto");
 });
 
