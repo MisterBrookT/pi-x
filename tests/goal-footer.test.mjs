@@ -76,14 +76,14 @@ test("Pix's custom footer renders the goal status from Pi's public status API", 
 	await h.emit("agent_start");
 	assert.doesNotMatch(h.render()[0], /waiting/, "native completion clears the waiting label when work resumes");
 	await h.command("pause");
-	assert.doesNotMatch(h.render().join("\n"), /goal/);
+	assert.match(h.render()[0], /goal paused/, "a paused goal stays visible so a stall is not silent");
 	await h.command("resume");
 	assert.match(h.render()[0], /goal on/);
 	await h.finish("completed");
 	assert.doesNotMatch(h.render().join("\n"), /goal/);
 	await h.command("A second goal.");
 	await h.finish("blocked");
-	assert.doesNotMatch(h.render().join("\n"), /goal/);
+	assert.match(h.render()[0], /goal blocked/);
 	await h.command("clear");
 	assert.doesNotMatch(h.render().join("\n"), /goal|blocked|completed|paused/);
 	assert.equal(h.data.getExtensionStatuses().has("pix-goal"), false);
@@ -100,7 +100,7 @@ test("a recoverable model error and supplementary input do not make the goal ind
 	assert.match(h.render()[0], /goal on · 1\/10/);
 	await h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
 	await h.emit("agent_settled");
-	assert.doesNotMatch(h.render().join("\n"), /goal/, "an unrecovered failure still pauses safely");
+	assert.match(h.render()[0], /goal paused/, "an unrecovered failure still pauses safely, and says so");
 });
 
 test("reload preserves the active goal footer and continuation count", async (t) => {
@@ -115,7 +115,8 @@ test("reload preserves the active goal footer and continuation count", async (t)
 	await h.command("pause");
 	await h.emit("session_shutdown", { reason: "reload" });
 	await h.emit("session_start", { reason: "reload" });
-	assert.doesNotMatch(h.render().join("\n"), /goal/);
+	assert.match(h.render()[0], /goal paused/);
+	assert.doesNotMatch(h.render()[0], /goal on/);
 });
 
 test("footer shows remote control only while this Pi session is exposed", async (t) => {

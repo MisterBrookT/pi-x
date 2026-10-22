@@ -28,8 +28,10 @@ export default function goalExtension(pi: ExtensionAPI) {
 
 	const show = (ctx: ExtensionContext, waiting = false) => {
 		pi.events.emit(GOAL_TOOL_STATE, { active: goal?.status === "active" });
+		// A paused or blocked goal stays visible: a silent pause is how overnight work stalls unnoticed.
 		if (ctx.hasUI) ctx.ui.setStatus("pix-goal", goal?.status === "active"
-			? `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}` : undefined);
+			? `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}`
+			: goal?.status === "paused" || goal?.status === "blocked" ? `goal ${goal.status}` : undefined);
 	};
 	const save = (next: GoalState | null, ctx: ExtensionContext, beforeNextResponse = false) => {
 		goal = next;
