@@ -53,3 +53,13 @@ test("the create tool and the judge prompt keep personal asks out of work lines"
 	assert.match(readFileSync(new URL("../plugins/foryou/index.ts", import.meta.url), "utf8"), /personal and social asks from friends or family never go in a work line/);
 	assert.match(readFileSync(new URL("../plugins/foryou/proactive.ts", import.meta.url), "utf8"), /personal and social asks \(friends, family, tickets, errands\) never go in a work line/);
 });
+
+test("aliases map an ambiguous or photo-less name to a real account", async () => {
+	const { writeFileSync, mkdirSync } = await import("node:fs");
+	process.env.PIX_HOME_OVERRIDE = mkdtempSync(join(tmpdir(), "ak-"));
+	mkdirSync(kit.avatarDir(), { recursive: true });
+	writeFileSync(join(kit.avatarDir(), "aliases.json"), JSON.stringify({ "陈老师": { source: "wechat", id: "wxid_c" } }));
+	assert.deepEqual(kit.resolveWho({ name: "陈老师", source: "gmail" }), { name: "陈老师", source: "wechat", id: "wxid_c" });
+	assert.deepEqual(kit.resolveWho({ name: "Lowes", source: "feishu" }), { name: "Lowes", source: "feishu" });
+	delete process.env.PIX_HOME_OVERRIDE;
+});

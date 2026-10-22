@@ -24,7 +24,7 @@ export function sourceOf(x: { kind?: string; source?: string; sourceKey?: string
 	return /gmail|mail/i.test(k) ? "gmail" : /wechat/i.test(k) ? "wechat" : /dingtalk/i.test(k) ? "dingtalk" : /feishu|lark/i.test(k) ? "feishu" : "pi";
 }
 
-export const avatarKey = (w: Who) => createHash("sha1").update(`${w.source ?? ""}:${w.id || w.name}`).digest("hex").slice(0, 16);
+export const avatarKey = (w0: Who) => { const w = resolveWho(w0); return createHash("sha1").update(`${w.source ?? ""}:${w.id || w.name}`).digest("hex").slice(0, 16); };
 
 function sh(cmd: string, args: string[], timeout = 15_000): string {
 	try { return execFileSync(cmd, args, { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 8 << 20 }); } catch { return ""; }
@@ -42,9 +42,15 @@ function wechatContactDb(): string | undefined {
 /** WeChat: exact wxid, else remark/nickname match (exact first, then prefix). Returns the head image URL. */
 export function wechatHead(w: Who): string | undefined {
 	const db = wechatContactDb(); if (!db) return undefined;
-	const where = w.id ? `username=${sqlQuote(w.id)}` : `remark=${sqlQuote(w.name)} OR nick_name=${sqlQuote(w.name)} OR remark LIKE ${sqlQuote(w.name + "%")}`;
+	const exact = (w as any).exact, where = w.id ? `username=${sqlQuote(w.id)}` : exact ? `remark=${sqlQuote(w.name)} OR nick_name=${sqlQuote(w.name)}` : `remark=${sqlQuote(w.name)} OR nick_name=${sqlQuote(w.name)} OR remark LIKE ${sqlQuote(w.name + "%")}`;
 	const row = sh("sqlite3", [db, `select coalesce(nullif(big_head_url,''),small_head_url) from contact where (${where}) and username not like '%@chatroom' and coalesce(small_head_url,'')<>'' limit 1`], 5000).trim();
 	return /^https?:\/\//.test(row) ? row : undefined;
+}
+
+const wechatExact = (w: Who) => w.id ? wechatHead(w) : wechatHead({ ...w, exact: true } as Who);
+function feishuExact(w: Who): string | undefined {
+	try { const users: any[] = JSON.parse(sh("lark-cli", ["api", "GET", "/open-apis/search/v1/user", "--as", "user", "--params", JSON.stringify({ query: w.name })]) || "{}").data?.users ?? [];
+		const hit = users.filter(u => u.name === w.name); return hit.length === 1 ? hit[0].avatar?.avatar_240 : undefined; } catch { return undefined; }
 }
 
 /** Feishu: user search (search/v1/user) returns the photo; match the open_id when known, else the first hit by name. */
@@ -56,6 +62,16 @@ export function feishuHead(w: Who): string | undefined {
 	} catch { return undefined; }
 }
 
+/**
+ * Aliases: ~/.pix/avatars/aliases.json maps a name as loops say it to a real account, e.g.
+ * {"陈老师": {"source": "wechat", "id": "wxid_..."}}. Needed when the name is ambiguous ("陈老师" = several contacts)
+ * or the source has no photos (Gmail, DingTalk).
+ */
+export function resolveWho(w: Who): Who {
+	try { const a = JSON.parse(readFileSync(join(avatarDir(), "aliases.json"), "utf8"))[w.name]; if (a?.source) return { name: a.name ?? w.name, source: a.source, id: a.id }; } catch {}
+	return w;
+}
+
 /** Cached photo path for a person, fetching it at most weekly; undefined = use initials. A miss is cached too. */
 export function avatarFile(w: Who, o: { fetchUrl?: (url: string) => Buffer | undefined; lookup?: (w: Who) => string | undefined } = {}): string | undefined {
 	if (!w.name && !w.id) return undefined;
@@ -64,7 +80,9 @@ export function avatarFile(w: Who, o: { fetchUrl?: (url: string) => Buffer | und
 	const fresh = (f: string) => existsSync(f) && Date.now() - statSync(f).mtimeMs < WEEK;
 	if (fresh(file)) return file;
 	if (fresh(miss)) return existsSync(file) ? file : undefined;
-	const lookup = o.lookup ?? ((x: Who) => x.source === "wechat" ? wechatHead(x) : x.source === "feishu" ? feishuHead(x) : undefined);
+	// The loop's own app first; then the other app, by exact name only (a guess must not show a stranger's face).
+	const lookup = o.lookup ?? ((x: Who) => { const r = resolveWho(x);
+		return r.source === "wechat" ? wechatHead(r) ?? feishuExact(r) : r.source === "feishu" ? feishuHead(r) ?? wechatExact(r) : wechatExact(r) ?? feishuExact(r); });
 	const url = lookup(w);
 	const data = url ? (o.fetchUrl ?? curl)(url) : undefined;
 	if (data && data.length > 200) { writeFileSync(file, data); return file; }
