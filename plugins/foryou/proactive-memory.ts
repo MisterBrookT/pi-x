@@ -15,10 +15,10 @@ export interface Card { name: string; text: string }
 const norm = (l: string) => l.trim().replace(/^[-*]\s*/, "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "").replace(/\s*\(from [^)]*\)$/, "");
 const GENERATED = "## Cards";
 
-/** A safe card name: "index", "people/<name>" or "projects/<name>". Anything else is not a card. */
+/** A safe card name: "index", "foryou" (For you's own operating rules), "people/<name>" or "projects/<name>". */
 export function cardName(raw: unknown): string | undefined {
 	const s = String(raw ?? "").trim().replace(/\.md$/, "");
-	if (s === "index") return s;
+	if (s === "index" || s === "foryou") return s;
 	const m = s.match(/^(people|projects)\/(.+)$/);
 	if (!m) return undefined;
 	const name = m[2].replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "").replace(/^\.+/, "").trim().slice(0, 60);
@@ -38,6 +38,8 @@ export function listCards(dir: string): Card[] {
 	return out;
 }
 
+/** For you's own operating rules and preferences (how to work with brook), apart from facts about him and others. */
+export const readForYouRules = (dir: string) => { const f = cardFile(dir, "foryou"); return existsSync(f) ? readFileSync(f, "utf8") : ""; };
 export const readIndex = (dir: string) => { const f = cardFile(dir, "index"); return existsSync(f) ? readFileSync(f, "utf8") : ""; };
 
 /** The first fact line of a card: its one-line summary in the index. */
@@ -86,7 +88,7 @@ export function applyCardEdits(dir: string, edits: CardEdit[], o: { source?: str
 		const name = cardName(e.card);
 		if (!name) continue;
 		const file = cardFile(dir, name);
-		const old = existsSync(file) ? readFileSync(file, "utf8") : name === "index" ? "# For you memory\n" : `# ${name.split("/")[1]}\n`;
+		const old = existsSync(file) ? readFileSync(file, "utf8") : name === "index" ? "# For you memory\n" : name === "foryou" ? "# How For you works with brook\n" : `# ${name.split("/")[1]}\n`;
 		const drop = new Set(e.remove.map(norm));
 		const removed: string[] = [];
 		const lines = old.split("\n").filter(l => { if (l.trim() && !l.startsWith("#") && drop.has(norm(l))) { removed.push(l.trim()); return false; } return true; });
@@ -180,7 +182,7 @@ export { markMemorySeen, memorySeenAt, memoryUnseen };
 
 /** The Memory view: every card (index first) and the recent changes. Only this folder; nothing else is readable. */
 export function memoryView(dir: string) {
-	return { cards: [{ name: "index", text: readIndex(dir) }, ...listCards(dir)].filter(c => c.text.trim()), changes: memoryChanges(dir), seenAt: memorySeenAt(dir), unseen: memoryUnseen(dir) };
+	return { cards: [{ name: "foryou", text: readForYouRules(dir) }, { name: "index", text: readIndex(dir) }, ...listCards(dir)].filter(c => c.text.trim()), changes: memoryChanges(dir), seenAt: memorySeenAt(dir), unseen: memoryUnseen(dir) };
 }
 
 /** brook rewrites one line (from the view): remove the old, add the new, both logged. */

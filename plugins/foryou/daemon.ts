@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
-import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
+import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
@@ -261,11 +261,16 @@ async function tick(cfg: Config) {
 	if (!dry) {
 		const old = readJson<{ state?: Record<string, Problem> }>(P.health, {}).state ?? {};
 		const next = trackHealth(old, failed.filter((f, i, a) => a.findIndex(x => x.source === f.source) === i), fine, new Date().toISOString());
-		const problems = healthSummary(next);
+		// Last good read per source kind; a kind silent for 6+ h is a problem even when failures look sporadic.
+		const prev = readJson<{ seen?: Record<string, string> }>(P.health, {}).seen ?? {}, at = new Date().toISOString();
+		const seen = { ...prev }; for (const n of fine) { const k = sourceKind(n); if (k) seen[k] = at; }
+		const kinds = [...new Set(cfg.sources.map(s => sourceKind(s.name)).filter(Boolean))];
+		for (const k of kinds) seen[k] ??= at;  // start the clock for a kind never seen
+		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6))];
 		blockedApps.clear();
 		for (const f of failed) if (/lost Full Disk Access/.test(f.error)) blockedApps.add(f.source.startsWith("WeChat") ? "wechat" : "dingtalk");
 		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);
-		writeFileSync(P.health, JSON.stringify({ state: next, problems }, null, 2));
+		writeFileSync(P.health, JSON.stringify({ state: next, problems, seen }, null, 2));
 	}
 	// "On it" loops untouched for 6 h come back to brook: no loop sits silently in "Pi is on it".
 	if (!dry) for (const it of staleOnit(parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : ""), Date.now())) {

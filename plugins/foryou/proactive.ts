@@ -403,6 +403,16 @@ export function healthSummary(state: Record<string, Problem>, after = 3): { text
 	return [...out, ...[...groups].map(([k, ps]) => ({ text: `${k} (${ps.length === 1 ? ps[0].source.replace(/^(WeChat|DingTalk): /, "") : `${ps.length} chats`})`, since: ps.map(p => p.since).sort()[0] }))];
 }
 
+/**
+ * Silence watch: a source kind (WeChat, Feishu, meetings, Gmail…) whose last good read is older than `hours`
+ * is a problem, even if each failure alone looked sporadic. `seen` maps kind -> last success ISO time.
+ */
+export function silentSources(seen: Record<string, string>, kinds: string[], now = Date.now(), hours = 6): { text: string; since: string }[] {
+	return kinds.filter(k => seen[k] && now - Date.parse(seen[k]) > hours * 3_600_000)
+		.map(k => ({ text: `${k}: no good read for ${Math.round((now - Date.parse(seen[k])) / 3_600_000)} h`, since: seen[k] }));
+}
+export const sourceKind = (name: string) => /^WeChat/.test(name) ? "WeChat" : /^DingTalk/.test(name) ? "DingTalk" : /meeting/i.test(name) ? "Feishu meetings" : /^Gmail/.test(name) ? "Gmail" : /^model$/.test(name) ? "" : "Feishu";
+
 /** Weekly log cleanup: keep JSON lines from the last `days` days (and any line without a readable date). */
 export function pruneLog(text: string, now: number, days = 30): string {
 	const cut = now - days * 86_400_000;

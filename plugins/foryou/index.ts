@@ -148,7 +148,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			action: StringEnum(["remind", "remember", "rule", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
 			at: Type.Optional(Type.String({ description: "remind: ISO time with timezone, when the card comes back" })),
-			card: Type.Optional(Type.String({ description: "remember: the memory card, e.g. index, people/Knight, projects/newsdecision" })),
+			card: Type.Optional(Type.String({ description: "remember: the memory card: foryou (your own operating rules: how to work with brook, approvals, style, autonomy defaults), index (facts about brook), people/Knight, projects/newsdecision" })),
 			add: Type.Optional(Type.Array(Type.String(), { description: "remember: short lasting facts to add" })),
 			remove: Type.Optional(Type.Array(Type.String(), { description: "remember: exact lines no longer true" })),
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),

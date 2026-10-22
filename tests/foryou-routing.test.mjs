@@ -496,8 +496,11 @@ test("regression: WeChat reads even while the Mac is locked, and a failed read r
 	const src = await import("../plugins/foryou/proactive-sources.ts");
 	assert.equal(src.Paused, undefined, "no lock pause: with Full Disk Access a locked Mac reads fine");
 	const calls = [];
-	await assert.rejects(src.wechatRead(["msg", "x"], { exec: async (c, a) => { calls.push([c, ...a]); if (c === "wechat-cli") throw new Error("Command failed"); return { stdout: "" }; } }), /Command failed/);
-	assert.deepEqual(calls.map(c => c.slice(0, 3).join(" ")), ["wechat-cli msg x", "wx daemon stop"], "a failed read stops the daemon so the next check starts fresh");
+	const sleep = async () => {};
+	await assert.rejects(src.wechatRead(["msg", "x"], { sleep, exec: async (c, a) => { calls.push([c, ...a]); if (c === "wechat-cli") throw Object.assign(new Error("Command failed: wechat-cli msg x"), { stderr: "Traceback...\nKeyError: 'data'\n" }); return { stdout: "" }; } }), /Command failed: wechat-cli msg x: KeyError: 'data'/, "the real cause is kept");
+	assert.deepEqual(calls.map(c => c.slice(0, 3).join(" ")), ["wechat-cli msg x", "wechat-cli msg x", "wechat-cli msg x", "wx daemon stop", "wechat-cli msg x"], "retry twice, then restart the daemon and try once more");
+	let n = 0;
+	assert.deepEqual(await src.wechatRead(["a"], { sleep, exec: async () => { if (n++ === 0) throw new Error("flake"); return { stdout: '{"ok":1}' }; } }), { ok: 1 }, "a one-off flake is retried away");
 	assert.deepEqual(await src.wechatRead(["a"], { exec: async () => ({ stdout: '{"code":0}' }) }), { code: 0 });
 });
 
@@ -559,4 +562,12 @@ test("a line with nothing concrete is not a post: forYouView gives each line its
 	assert.deepEqual(phd.loops.map(l => [l.title, l.you]), [["Check the result", true]], "the line knows what it waits on");
 	assert.equal(b.project, "~/w/nd", "project kept so the phone can jump to its session");
 	assert.deepEqual(b.loops, []);
+});
+
+test("silence watch: a source kind with no good read for 6+ h shows as a problem", async () => {
+	const { silentSources, sourceKind } = await import("../plugins/foryou/proactive.ts");
+	assert.deepEqual(["WeChat: 盟军四人帮", "Feishu", "Feishu meetings", "Gmail", "DingTalk: x", "model"].map(sourceKind), ["WeChat", "Feishu", "Feishu meetings", "Gmail", "DingTalk", ""]);
+	const now = Date.parse("2026-10-22T12:00:00Z");
+	const p = silentSources({ WeChat: "2026-10-22T11:50:00Z", Gmail: "2026-10-22T02:00:00Z" }, ["WeChat", "Gmail", "Feishu"], now);
+	assert.deepEqual(p, [{ text: "Gmail: no good read for 10 h", since: "2026-10-22T02:00:00Z" }]);
 });

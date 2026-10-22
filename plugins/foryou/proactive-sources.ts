@@ -125,10 +125,24 @@ export function parseWechat(json: unknown): Msg[] {
  * Read WeChat. When a read fails or hangs, stop the wx daemon so the next check starts a fresh one
  * (a stuck daemon otherwise fails every check). Locked Macs read fine with Full Disk Access.
  */
-export async function wechatRead(args: string[], deps: { exec?: (cmd: string, a: string[], o: object) => Promise<{ stdout: string }> } = {}) {
-	const exec = deps.exec ?? run;
-	try { return JSON.parse((await exec("wechat-cli", args, { maxBuffer: 1 << 24, timeout: 45_000 })).stdout); }
-	catch (e) { await exec("wx", ["daemon", "stop"], { timeout: 10_000 }).catch(() => {}); throw e; }
+/**
+ * One wechat-cli read. Sporadic failures (one chat at a time, about once a day) come from the wx daemon rebuilding its
+ * decrypted message cache mid-read; a second try a moment later works. So: retry twice with backoff, then restart
+ * the daemon and try once more. The thrown error keeps wechat-cli's own stderr, not just "Command failed".
+ */
+export async function wechatRead(args: string[], deps: { exec?: (cmd: string, a: string[], o: object) => Promise<{ stdout: string }>; sleep?: (ms: number) => Promise<void> } = {}) {
+	const exec = deps.exec ?? run, sleep = deps.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
+	const once = async () => JSON.parse((await exec("wechat-cli", args, { maxBuffer: 1 << 24, timeout: 45_000 })).stdout);
+	let last: unknown;
+	for (const wait of [0, 1500, 4000]) {
+		if (wait) await sleep(wait);
+		try { return await once(); } catch (e) { last = e; }
+	}
+	await exec("wx", ["daemon", "stop"], { timeout: 10_000 }).catch(() => {});
+	try { return await once(); } catch (e) { last = e; }
+	const e = last as Error & { stderr?: string };
+	const why = String(e.stderr ?? "").trim().split("\n").filter(Boolean).at(-1);
+	throw new Error(why ? `${e.message.split("\n")[0]}: ${why.slice(0, 200)}` : e.message);
 }
 const wechatCli = (args: string[]) => wechatRead(args);
 

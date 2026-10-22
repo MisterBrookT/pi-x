@@ -67,9 +67,31 @@ test("phone: Memory link shows +N, opens the view with recent changes, Remove wo
   await page.locator("#memoryLink").click();
   await page.locator(".mem-ch.new").waitFor();
   assert.match(await page.locator(".mem-ch").first().textContent(), /Added · .* · index[\s\S]*Dislikes em dashes/);
+  remember(d, "foryou", ["Finish the current thread first"], new Date());
+  await page.evaluate(() => openMemory());
+  await page.locator(".mem-fy .mem-ln").first().waitFor();
+  assert.match(await page.locator(".mem-fy").textContent(), /Finish the current thread first/, "For you's own rules show in their own section, editable");
+  assert.equal(await page.locator(".mem-fy [data-mem-ed]").count(), 1);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(600); await page.screenshot({ path: process.env.PIX_SHOT }); }
-  await page.locator("[data-mem-rm]").first().click();
+  await page.locator("[data-mem-rm=index]").first().click();
   await page.locator(".mem-ch p.gone").first().waitFor();
   assert.doesNotMatch(readFileSync(join(d, "memory", "index.md"), "utf8"), /em dashes/);
   assert.equal(memoryUnseen(d), 0, "opening the view marks it seen");
+});
+
+test("For you card: its own operating rules, first on the Memory page, editable, injected into the prompt apart from facts", async () => {
+  const { coordinatorContext } = await import("../plugins/foryou/proactive-store.ts");
+  const { editMemoryLine } = await import("../plugins/foryou/proactive-memory.ts");
+  const d = tmp(); writeFileSync(join(d, "inbox.jsonl"), "");
+  remember(d, "foryou", ["No long dashes in drafts"], new Date());
+  remember(d, "index", ["brook is a PhD student"], new Date());
+  const v = memoryView(d);
+  assert.deepEqual(v.cards.map(c => c.name).slice(0, 2), ["foryou", "index"]);
+  const ctx = coordinatorContext(d);
+  assert.match(ctx, /### How you work with brook[^\n]*\n[^#]*No long dashes/);
+  assert.match(ctx, /### Memory \(index: facts[^\n]*\n[\s\S]*PhD student/);
+  assert.doesNotMatch(ctx.split("### Memory (index")[1], /long dashes/, "rules are not mixed into facts");
+  const line = v.cards[0].text.split("\n").find(l => l.includes("long dashes"));
+  assert.equal(editMemoryLine(d, "foryou", line, "No long dashes anywhere"), true);
+  assert.match(memoryView(d).cards[0].text, /anywhere/);
 });
