@@ -13,6 +13,9 @@ test("sim dev server: serves the phone page fresh with a reload hook, no service
 		const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
 		assert.match(html, /\/__sim\/reload/);
 		assert.doesNotMatch(html, /navigator\.serviceWorker\.register\(/);
+		const tl = await (await fetch(`http://127.0.0.1:${port}/timeline`)).text();
+		assert.match(tl, /window\.PIX_TOKEN="/, "desktop browsers get the token from the loopback dev server, not the URL hash");
+		assert.match(tl, /No access token/);
 		assert.equal(await (await fetch(`http://127.0.0.1:${port}/api/x?y=1`)).text(), "hub /api/x?y=1");
 	} finally { child.kill(); hub.close(); }
 });

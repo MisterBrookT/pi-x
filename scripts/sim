@@ -2,6 +2,7 @@
 # Phone UI live in the iOS Simulator.
 #   scripts/sim        boot the iPhone, start the dev server (live reload on plugins/remote edits), open Pix in Safari, bring Simulator up
 #   scripts/sim shot [file]   save a screenshot of the booted Simulator (default .shots/sim.png), print the path
+#   scripts/sim app    same, but as the native PixTimeline app (ios-ui-tests, WKWebView on the dev server: live data, live reload)
 #   scripts/sim stop   stop the dev server
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,6 +24,14 @@ fi
 xcrun simctl list devices booted | grep -q "$SIM_ID" || xcrun simctl boot "$SIM_ID"
 open -a Simulator
 xcrun simctl bootstatus "$SIM_ID" -b >/dev/null
+if [ "${1:-}" = app ]; then
+	(cd ios-ui-tests && xcodegen -q && xcodebuild -project PixRemoteUI.xcodeproj -scheme PixTimeline -destination "id=$SIM_ID" -derivedDataPath ../.pix/xcode build -quiet 2>&1 | grep -v IDERunDestination || true)
+	xcrun simctl install "$SIM_ID" .pix/xcode/Build/Products/Debug-iphonesimulator/PixTimeline.app
+	xcrun simctl terminate "$SIM_ID" dev.pix.timeline >/dev/null 2>&1 || true
+	xcrun simctl launch "$SIM_ID" dev.pix.timeline >/dev/null
+	osascript -e 'tell application "Simulator" to activate' >/dev/null
+	echo "For you timeline app in the Simulator · edits under plugins/remote reload it · scripts/sim shot"; exit
+fi
 # Token in the URL hash: never sent over the network, and the page stores it then clears the hash.
 token=$(cat ~/.pi/agent/pix-remote/token)
 xcrun simctl openurl "$SIM_ID" "http://127.0.0.1:$PORT/#token=$token"

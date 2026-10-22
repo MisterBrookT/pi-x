@@ -4,6 +4,16 @@ options:
   deploymentTarget:
     iOS: '17.0'
 targets:
+  PixTimeline:
+    type: application
+    platform: iOS
+    sources: [Timeline]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.pix.timeline
+        INFOPLIST_FILE: Timeline/Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
   PixRemoteTestHost:
     type: application
     platform: iOS

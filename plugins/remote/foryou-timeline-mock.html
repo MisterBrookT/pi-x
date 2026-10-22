@@ -1,92 +1,136 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>For you · timeline (mock)</title>
+<meta name="theme-color" content="#f4efe4">
+<title>For you</title>
 <style>
-:root{--bg:#f8f7f3;--text:#1f1e1b;--muted:#7a776f;--line:#e7e4dc;--pill:#efece5;--you:#d9822b;--on:#3f9a5b}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--text:#ecebe6;--muted:#9a978f;--line:#2b2a26;--pill:#24231f}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,system-ui,sans-serif;-webkit-text-size-adjust:100%}
-header{position:sticky;top:0;z-index:2;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
-header h1{font-size:20px;margin:0}header small{color:var(--muted)}
-.chips{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--line);scrollbar-width:none}
-.chip{flex:none;border:0;background:var(--pill);color:var(--text);border-radius:999px;padding:6px 12px;font-size:13px;min-height:32px}
-.chip.on{background:var(--text);color:var(--bg)}
-.post{display:flex;gap:10px;padding:12px 16px 8px;border-bottom:1px solid var(--line)}
-.av{flex:none;width:36px;height:36px;border-radius:50%;background:var(--pill);display:grid;place-items:center;font-size:13px;color:var(--muted);font-weight:600}
-.post.you .av{box-shadow:0 0 0 2px var(--you)}.post.onit .av{box-shadow:0 0 0 2px var(--on)}
+:root{
+  --paper:#f4efe4;--card:#fbf8f1;--ink:#24201a;--soft:#6f675a;--faint:#a89f8f;--rule:#e4dccb;
+  --you:#c8641e;--you-wash:#f6e3d0;--on:#3d7f55;--on-wash:#dcebdf;--accent:#8a5a2b;
+  --serif:"New York","Iowan Old Style","Charter",Georgia,serif;--sans:-apple-system,"SF Pro Text",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{--paper:#1b1814;--card:#221e19;--ink:#efe8db;--soft:#b3a994;--faint:#7d7466;--rule:#332d25;--you:#e58a45;--you-wash:#3a2a1c;--on:#79b88c;--on-wash:#1f2e23}}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{margin:0;color:var(--ink);font:15.5px/1.45 var(--sans);-webkit-text-size-adjust:100%;min-height:100vh;
+  /* paper: warm base, a soft vignette, and fine grain from an inline noise SVG */
+  background:
+    radial-gradient(120% 80% at 50% 0%,rgba(255,250,238,.7),transparent 60%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .35  0 0 0 0 .28  0 0 0 0 .2  0 0 0 .09 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+    var(--paper)}
+@media (prefers-color-scheme:dark){body{background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 .95  0 0 0 0 .85  0 0 0 .05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),var(--paper)}}
+header{position:sticky;top:0;z-index:3;padding:calc(env(safe-area-inset-top) + 14px) 20px 10px;
+  background:linear-gradient(var(--paper) 75%,transparent);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.mast{display:flex;align-items:baseline;justify-content:space-between}
+h1{font:600 30px/1.1 var(--serif);letter-spacing:-.01em;margin:0}
+.date{font:italic 14px var(--serif);color:var(--soft)}
+.tally{margin-top:4px;color:var(--soft);font-size:13px}.tally b{color:var(--you);font-weight:600}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:10px 20px 4px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--rule);background:transparent;color:var(--soft);border-radius:999px;padding:0 13px;min-height:34px;font:500 13px var(--sans)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.chip i{font-style:normal;color:var(--faint);margin-left:4px}.chip.on i{color:var(--paper);opacity:.6}
+main{padding:6px 12px 40px}
+.post{background:var(--card);border:1px solid var(--rule);border-radius:18px;padding:14px 14px 4px;margin:10px 0;
+  box-shadow:0 1px 0 rgba(255,255,255,.6) inset,0 6px 18px -12px rgba(80,60,30,.25)}
+.row{display:flex;gap:11px}
+.av{flex:none;width:38px;height:38px;border-radius:10px;overflow:hidden;background:var(--paper);display:grid;place-items:center;
+  font:600 13px var(--sans);color:var(--soft);box-shadow:0 0 0 1px var(--rule)}
+.av img{width:100%;height:100%;object-fit:cover}
 .body{flex:1;min-width:0}
-.meta{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.meta b{color:var(--text);font-weight:600}.due{color:var(--you)}
-.title{font-weight:600;margin:2px 0}
-.ctx{color:var(--text);opacity:.85;font-size:14px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.acts{display:flex;gap:6px;margin:8px 0 2px;flex-wrap:wrap}
-.act{border:0;background:none;color:var(--muted);border-radius:999px;padding:0 10px 0 0;min-height:40px;font-size:13px}.act+.act{padding-left:10px;border-left:1px solid var(--line);border-radius:0}
+.meta{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--faint);white-space:nowrap;overflow:hidden}
+.meta .src{color:var(--soft);font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--you)}.onit .dot{background:var(--on)}
+.due{flex:none;color:var(--you);background:var(--you-wash);border-radius:6px;padding:1px 6px;font-weight:600}
+.title{font:600 17.5px/1.3 var(--serif);margin:4px 0 3px;letter-spacing:-.005em}
+.ctx{color:var(--soft);font-size:14.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.comment{display:flex;gap:8px;margin:10px 0 0;padding:9px 10px;border-radius:12px;background:var(--paper);font-size:13.5px;color:var(--soft)}
+.comment .who{flex:none;width:20px;height:20px;border-radius:6px;overflow:hidden;background:var(--on-wash);color:var(--on);display:grid;place-items:center;font:700 10px var(--sans)}
+.comment.you .who{background:var(--you-wash);color:var(--you)}
+.comment .who img{width:100%;height:100%}
+.comment p{margin:0;flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.comment .t{color:var(--faint);font-size:12px}
+.acts{display:flex;align-items:center;margin:4px 0 0 -2px}
+.act{white-space:nowrap;border:0;background:none;color:var(--soft);font:500 13.5px var(--sans);min-height:40px;padding:0 10px 0 2px}
 .act.main{color:var(--you);font-weight:600}
-.act.free{color:var(--muted)}
-.thread{margin:6px 0 2px;border-left:2px solid var(--line);padding-left:10px}
-.c{font-size:13.5px;padding:3px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--muted)}.c .who{color:var(--text)}.c .who{font-weight:600}.c .t{color:var(--muted);font-size:12px}
-.c.agent .who{color:var(--on)}
-.more{color:var(--muted);font-size:13px;background:none;border:0;padding:4px 0;min-height:32px}
-.sub{margin-top:6px;border-top:1px dashed var(--line)}
-.sub .post{padding:10px 0 4px;border:0}
-.sub .av{width:24px;height:24px;font-size:11px}
-.reply{display:none;margin:6px 0;gap:6px}.reply.open{display:flex}
-.reply input{flex:1;min-height:36px;border:1px solid var(--line);border-radius:18px;padding:0 12px;background:none;color:var(--text);font-size:14px}
-.note{color:var(--muted);font-size:12px;text-align:center;padding:16px}
+.act+.act::before{content:"·";color:var(--faint);margin-right:10px}
+.act.ask{margin-left:auto;color:var(--faint);display:flex;align-items:center;gap:5px}
+.act.ask::before{content:none}
+.act.ask svg{width:16px;height:16px}
+.reply{display:none;gap:8px;margin:2px 0 8px}.reply.open{display:flex}
+.reply input{flex:1;min-height:38px;border:1px solid var(--rule);border-radius:19px;padding:0 14px;background:var(--paper);color:var(--ink);font:14px var(--sans)}
+.reply button{border:0;background:var(--ink);color:var(--paper);border-radius:19px;padding:0 14px;font:600 13px var(--sans)}
+.sub{margin:6px 0 0 49px;border-top:1px solid var(--rule)}
+.sub .post{background:none;border:0;box-shadow:none;border-radius:0;padding:10px 0 0;margin:0;border-bottom:1px solid var(--rule)}
+.sub .post:last-child{border-bottom:0}
+.sub .av{width:26px;height:26px;border-radius:7px}
+.sub .title{font-size:15.5px}
+.empty,.note{color:var(--faint);text-align:center;font:italic 14px var(--serif);padding:28px 20px}
 </style></head><body>
-<header><h1>For you</h1><small id="sum"></small></header>
+<header>
+  <div class="mast"><h1>For you</h1><span class="date" id="date"></span></div>
+  <div class="tally" id="tally"></div>
+</header>
 <div class="chips" id="chips"></div>
 <main id="feed"><p class="note">Loading…</p></main>
-<p class="note">Mockup on real data. Buttons are inert.</p>
 <script>
-const token=new URLSearchParams(location.hash.slice(1)).get("token")||localStorage.pixRemoteToken||"";
-if(location.hash.includes("token="))localStorage.pixRemoteToken=token,history.replaceState(null,"",location.pathname);
+const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const hashToken=new URLSearchParams(location.hash.slice(1)).get("token");
+if(hashToken){localStorage.pixRemoteToken=hashToken;history.replaceState(null,"",location.pathname)}
+const token=window.PIX_TOKEN||hashToken||localStorage.pixRemoteToken||"";
 const ago=t=>{const s=(Date.now()-Date.parse(t))/1e3;if(!(s>=0))return"";return s<3600?Math.max(1,s/60|0)+"m":s<86400?(s/3600|0)+"h":(s/86400|0)+"d"};
-const day=d=>d?new Date(d+"T12:00").toLocaleDateString("en",{weekday:"short",month:"short",day:"numeric"}):"";
-let data,line="all";
-/* The post's history: brook's taps and replies, then what an agent did. Built from the loop's notes and handled state. */
-function trail(i){
-  const out=[];
-  for(const l of String(i.note||"").split("\n").filter(Boolean)){
-    const m=l.match(/^- (\d{4}-\d\d-\d\d): (.*)$/);const text=(m?m[2]:l.replace(/^- /,""));
-    const you=/^brook\b|^(he|brook) (said|chose|tapped|asked)|\[brook\]/i.test(text);
-    out.push({who:you?"You":"Pi",agent:!you,text,t:m?m[1].slice(5):""});
-  }
-  if(i.prepared)out.push({who:"Pi",agent:true,text:"Prepared: "+i.prepared,t:""});
-  return out;
+const dueText=d=>{if(!d)return"";const days=Math.round((Date.parse(d+"T23:59")-Date.now())/864e5);return days<0?"overdue":days===0?"today":days===1?"tomorrow":new Date(d+"T12:00").toLocaleDateString("en",{weekday:"short"})};
+$("date").textContent=new Date().toLocaleDateString("en",{weekday:"long",month:"short",day:"numeric"});
+/* Real app icons: source kind -> /icons/<app>.png (served from the installed Mac apps); Gmail is its own mark. */
+const GMAIL=`data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" fill="#fff"/><path fill="#4285f4" d="M8 38h6V24l-9-6.5V35a3 3 0 0 0 3 3z"/><path fill="#34a853" d="M34 38h6a3 3 0 0 0 3-3V17.5L34 24z"/><path fill="#fbbc04" d="M34 13v11l9-6.5V14c0-3.7-4.2-5.8-7.2-3.6z"/><path fill="#ea4335" d="M14 24V13l10 7.5L34 13v11l-10 7.5z"/><path fill="#c5221f" d="M5 14v3.5l9 6.5V13l-1.8-1.4C9.2 9.4 5 11.4 5 14z"/></svg>')}`;
+function icon(i){
+  const k=(i.kind||"")+" "+(i.source||"");
+  if(/gmail|mail/i.test(k))return GMAIL;
+  if(/feishu|lark/i.test(k))return"/icons/feishu.png";
+  if(/wechat/i.test(k))return"/icons/wechat.png";
+  if(/dingtalk/i.test(k))return"/icons/dingtalk.png";
+  if(/minara|kairos/i.test(k+" "+(i.line||"")))return"/icons/minara.png";
+  return"/icons/otty.png";
 }
-function suggestions(i){
-  const a=[];if(i.button)a.push({t:i.button,main:true});
-  if(i.due)a.push({t:"Later"});else a.push({t:"Done"});
-  return a.slice(0,2);
+const avatar=(src,alt)=>`<img src="${src}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((alt||'?').slice(0,1))}'))">`;
+/* One latest comment: brook's last action, else Pi's last note or prepared result. */
+function latest(i){
+  const notes=String(i.note||"").split("\n").filter(Boolean);
+  const last=notes.at(-1);
+  if(last){const m=last.match(/^- (\d{4}-\d\d-\d\d): (.*)$/),text=(m?m[2]:last.replace(/^- /,"")).replace(/^\d\d-\d\d\s+/,"");
+    return{you:/^(brook|he) (said|chose|tapped|asked|replied)|^\[brook\]/i.test(text),text,t:m?m[1].slice(5):""};}
+  if(i.prepared)return{you:false,text:i.prepared,t:""};
 }
+const cleanSrc=s=>String(s||"For you").replace(/^(Feishu meeting) .*/,"$1").replace(/^(DingTalk|WeChat): /,"");
 function post(i,small){
-  const L=(data.lines||[]).find(l=>l.id===i.line),h=trail(i),state=i.status==="onit"?"onit":"you";
-  const ctx=i.why||i.action||"";
-  const shown=h.slice(small?-1:-1),hidden=h.length-shown.length;
-  return `<article class="post ${state}"><div class="av">${esc((i.source||i.kind||"?").replace(/^(DingTalk|WeChat|Feishu|Gmail).*$/,"$1").slice(0,2))}</div><div class="body">
-  <div class="meta"><b>${esc(i.source||"For you")}</b> · ${esc(L?.name||"")} · ${ago(i.at)}${i.due?` · <span class="due">due ${esc(day(i.due))}</span>`:""}</div>
+  const L=(data.lines||[]).find(l=>l.id===i.line),c=latest(i),d=dueText(i.due);
+  const acts=[];if(i.button)acts.push(`<button class="act main">${esc(i.button)}</button>`);acts.push(`<button class="act">${i.due?"Later":"Done"}</button>`);
+  return `<article class="post ${i.status==="onit"?"onit":"you"}"><div class="row"><div class="av">${avatar(icon(i),i.source)}</div><div class="body">
+  <div class="meta"><span class="dot"></span><span class="src">${esc(cleanSrc(i.source))}</span>${L&&!small?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
   <div class="title">${esc(i.title)}</div>
-  ${small?"":`<div class="ctx">${esc(ctx)}</div>`}
-  ${h.length?`<div class="thread">${hidden?`<button class="more">${hidden} earlier</button>`:""}${shown.map(c=>`<div class="c ${c.agent?"agent":""}"><span class="who">${c.who}</span> <span class="t">${esc(c.t)}</span> ${esc(c.text.slice(0,220))}</div>`).join("")}</div>`:""}
-  <div class="acts">${suggestions(i).map(a=>`<button class="act ${a.main?"main":""}">${esc(a.t)}</button>`).join("")}<button class="act free" data-reply>Ask…</button></div>
-  <div class="reply"><input placeholder="Ask or tell Pi about this"><button class="act">Send</button></div>
-  </div></article>`;
+  ${small?"":`<div class="ctx">${esc(i.why||i.action||"")}</div>`}
+  ${c&&!small?`<div class="comment ${c.you?"you":""}"><span class="who">${c.you?"B":"π"}</span><p>${c.t?`<span class="t">${esc(c.t)} </span>`:""}${esc(c.text)}</p></div>`:""}
+  <div class="acts">${acts.join("")}<button class="act ask" data-reply><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 18V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8z"/></svg>Ask…</button></div>
+  <div class="reply"><input placeholder="Ask Pi about this"><button>Send</button></div>
+  </div></div>__SUB__</article>`;
 }
-/* A line with several loops reads as one thread: the newest loop is the post, the others hang under it as replies. */
+let data,line="all";
 function render(){
   const items=[...(data.pending||[]),...(data.onit||[])].filter(i=>line==="all"||i.line===line);
-  const byLine=new Map();for(const i of items){const k=i.line||i.id;(byLine.get(k)||byLine.set(k,[]).get(k)).push(i)}
-  const groups=[...byLine.values()].map(g=>g.sort((a,b)=>(a.due||"9")<(b.due||"9")?-1:1));
-  groups.sort((a,b)=>(a[0].due||"9")<(b[0].due||"9")?-1:1);
-  $("feed").innerHTML=groups.map(g=>{const[head,...rest]=g;return post(head).replace(/<\/div><\/article>$/,`${rest.length?`<div class="sub">${rest.map(i=>post(i,true)).join("")}</div>`:""}</div></article>`)}).join("")||'<p class="note">Nothing needs you.</p>';
-  $("sum").textContent=`${items.length} open · ${groups.length} threads`;
+  const by=new Map();for(const i of items){const k=i.line||i.id;(by.get(k)||by.set(k,[]).get(k)).push(i)}
+  const key=i=>i.due||"9999";
+  const groups=[...by.values()].map(g=>g.sort((a,b)=>key(a)<key(b)?-1:1)).sort((a,b)=>key(a[0])<key(b[0])?-1:1);
+  $("feed").innerHTML=groups.map(([h,...rest])=>post(h).replace("__SUB__",rest.length?`<div class="sub">${rest.map(i=>post(i,true).replace("__SUB__","")).join("")}</div>`:"")).join("")||'<p class="empty">Nothing needs you right now.</p>';
+  const due=items.filter(i=>i.due&&dueText(i.due)!=="").length;
+  $("tally").innerHTML=`<b>${items.length}</b> need you${due?` · ${due} with a date`:""}`;
 }
-function $(id){return document.getElementById(id)}
-document.addEventListener("click",e=>{const b=e.target.closest("[data-reply]");if(b)b.closest(".body").querySelector(".reply").classList.toggle("open");
-  const c=e.target.closest(".chip");if(c){line=c.dataset.l;document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x===c));render()}});
-fetch("/api/foryou",{headers:{authorization:"Bearer "+token}}).then(r=>r.json()).then(d=>{data=d;
-  $("chips").innerHTML=`<button class="chip on" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip" data-l="${esc(l.id)}">${esc(l.name)} ${l.open}</button>`).join("");render()})
+document.addEventListener("click",e=>{
+  const r=e.target.closest("[data-reply]");if(r){const box=r.closest(".body").querySelector(".reply");box.classList.toggle("open");box.querySelector("input").focus()}
+  const c=e.target.closest(".chip");if(c){line=c.dataset.l;document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x===c));render()}
+});
+if(!token)$("feed").innerHTML='<p class="note">No access token. Open this from the Pix dev server (npm run sim) on the Mac.</p>';
+else fetch("/api/foryou",{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
+  $("chips").innerHTML=`<button class="chip on" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip" data-l="${esc(l.id)}">${esc(l.name)}<i>${l.open}</i></button>`).join("");render()})
  .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`);
 </script></body></html>
