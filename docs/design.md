@@ -24,7 +24,7 @@ Paper grain: a fractal-noise SVG at ~9% opacity (5% in dark) over the paper colo
 ## Type
 - Headlines: reading serif (`Iowan Old Style, Charter, Georgia, Songti SC`), 600. Page title 30px, post title 17.5px, follow-up title 15.5px.
 - Body and UI: system sans. Context 14.5px soft, clamped to 2 lines. Meta 12.5px faint. Actions 13.5px.
-- Dates in the masthead: serif italic.
+- Masthead (editorial, like Apple News): date as a small-caps eyebrow (11.5px, tracked), serif title, then one plain serif-italic sentence ("Ten things for you, the next due tomorrow."), not counters.
 
 ## Spacing
 Page padding 12–20px. Card radius 18px, padding 14px. 10px between cards. Touch targets ≥40px. Avatar 40px; text column starts at 51px.
@@ -44,5 +44,5 @@ Line SVG, 1.8 stroke, round caps, `currentColor`, 16–20px. App icons only as s
 
 ## Posts, comments, actions
 - **Post**: meta row (person · via app · line · age · due chip), serif headline, 2 lines of context.
-- **Comment**: only the latest one, on a paper-coloured inset (radius 12), with a 20px mark: π for Pi, B for brook, both on a soft rule-coloured square; clamped to 2 lines.
+- **Comment**: only the latest one, as a reply line: 2px rule on the left, "Pi · 1h ago" (or "You") in faint 12px above, text in soft, clamped to 2 lines. No box, no badge.
 - **Actions**: plain text, not boxed buttons, separated by faint "·". At most one main action in ink, semibold, one secondary (Done/Later) in soft, and "Ask Pi" with a speech-bubble icon at the right in faint. It opens an inline reply field.
