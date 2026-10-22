@@ -24,7 +24,6 @@ header{position:sticky;top:0;z-index:3;padding:calc(env(safe-area-inset-top) + 1
 .eyebrow{font:600 11.5px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
 h1{font:600 30px/1.1 var(--serif);letter-spacing:-.01em;margin:0}
 .date{font:italic 14px var(--serif);color:var(--soft)}
-.tally{margin-top:6px;color:var(--soft);font:italic 16px/1.35 var(--serif)}
 .chips{display:flex;gap:6px;overflow-x:auto;padding:10px 20px 4px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;border:1px solid var(--rule);background:transparent;color:var(--soft);border-radius:999px;padding:0 13px;min-height:34px;font:500 13px var(--sans)}
@@ -74,8 +73,7 @@ main{padding:6px 12px 40px}
 .empty,.note{color:var(--faint);text-align:center;font:italic 14px var(--serif);padding:28px 20px}
 </style></head><body>
 <header>
-  <div class="eyebrow" id="date"></div><h1>For you</h1>
-  <div class="tally" id="tally"></div>
+  <h1>For you</h1>
 </header>
 <div class="chips" id="chips"></div>
 <main id="feed"><p class="note">Loading…</p></main>
@@ -87,7 +85,7 @@ if(hashToken){localStorage.pixRemoteToken=hashToken;history.replaceState(null,""
 const token=window.PIX_TOKEN||hashToken||localStorage.pixRemoteToken||"";
 const ago=t=>{const s=(Date.now()-Date.parse(t))/1e3;if(!(s>=0))return"";return s<3600?Math.max(1,s/60|0)+"m":s<86400?(s/3600|0)+"h":(s/86400|0)+"d"};
 const dueText=d=>{if(!d)return"";const days=Math.round((Date.parse(d+"T23:59")-Date.now())/864e5);return days<0?"overdue":days===0?"today":days===1?"tomorrow":new Date(d+"T12:00").toLocaleDateString("en",{weekday:"short"})};
-$("date").textContent=new Date().toLocaleDateString("en",{weekday:"long",month:"short",day:"numeric"});
+
 /* Real app icons: source kind -> /icons/<app>.png (served from the installed Mac apps); Gmail is its own mark. */
 const GMAIL=`data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" fill="#fff"/><path fill="#4285f4" d="M8 38h6V24l-9-6.5V35a3 3 0 0 0 3 3z"/><path fill="#34a853" d="M34 38h6a3 3 0 0 0 3-3V17.5L34 24z"/><path fill="#fbbc04" d="M34 13v11l9-6.5V14c0-3.7-4.2-5.8-7.2-3.6z"/><path fill="#ea4335" d="M14 24V13l10 7.5L34 13v11l-10 7.5z"/><path fill="#c5221f" d="M5 14v3.5l9 6.5V13l-1.8-1.4C9.2 9.4 5 11.4 5 14z"/></svg>')}`;
 function icon(i){
@@ -140,9 +138,6 @@ function render(){
   items.sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:Date.parse(b.at)-Date.parse(a.at));
   $("feed").innerHTML=items.map(i=>post(i).replace("__SUB__","")).join("")||'<p class="empty">Nothing needs you right now.</p>';
   const due=items.filter(i=>i.due&&dueText(i.due)!=="").length;
-  const W=["Nothing","One thing","Two things","Three things","Four things","Five things","Six things","Seven things","Eight things","Nine things","Ten things","Eleven things","Twelve things"];
-  const next=items.filter(i=>i.due).sort((a,b)=>a.due<b.due?-1:1)[0];
-  $("tally").textContent=`${W[items.length]??items.length+" things"} for you${next?`, the next due ${dueText(next.due)}`:""}.`;
 }
 document.addEventListener("click",e=>{
   const r=e.target.closest("[data-reply]");if(r){const box=r.closest(".body").querySelector(".reply");box.classList.toggle("open");box.querySelector("input").focus()}
@@ -152,6 +147,6 @@ if(!token)$("feed").innerHTML='<p class="note">No access token. Open this from t
 else{load();setInterval(load,30000);addEventListener("focus",load);document.addEventListener("visibilitychange",()=>document.hidden||load())}
 /* Open loops only, re-read from the live inbox: done/dropped vanish, later ones stay hidden until their back date (the hub decides). */
 function load(){fetch("/api/foryou"+(window.PIX_TOKEN?"?dev":""),{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
-  $("chips").innerHTML=`<button class="chip ${line==="all"?"on":""}" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip ${line===l.id?"on":""}" data-l="${esc(l.id)}">${esc(l.name)}<i>${l.open}</i></button>`).join("");render()})
+  $("chips").innerHTML=`<button class="chip ${line==="all"?"on":""}" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip ${line===l.id?"on":""}" data-l="${esc(l.id)}">${esc(l.name)}</button>`).join("");render()})
  .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`)}
 </script></body></html>

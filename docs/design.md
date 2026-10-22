@@ -24,7 +24,7 @@ Paper grain: a fractal-noise SVG at ~9% opacity (5% in dark) over the paper colo
 ## Type
 - Headlines: reading serif (`Iowan Old Style, Charter, Georgia, Songti SC`), 600. Page title 30px, post title 17.5px, follow-up title 15.5px.
 - Body and UI: system sans. Context 14.5px soft, clamped to 2 lines. Meta 12.5px faint. Actions 13.5px.
-- Masthead (editorial, like Apple News): date as a small-caps eyebrow (11.5px, tracked), serif title, then one plain serif-italic sentence ("Ten things for you, the next due tomorrow."), not counters.
+- Masthead: just the serif title. No date, no counts: due dates sit on their own posts, and counts add no meaning.
 
 ## Spacing
 Page padding 12–20px. Card radius 18px, padding 14px. 10px between cards. Touch targets ≥40px. Avatar 40px; text column starts at 51px.
