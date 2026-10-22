@@ -13,7 +13,8 @@
  *   6. Full X-Stainless-* header set, x-client-request-id, keep-alive
  */
 
-import { isQuota, proxyBody, markExhausted, mayFailOver, proxyHeaders, proxyKey, proxyUrl, useProxyFirst } from "./failover.ts";
+import { proxyBody, proxyHeaders } from "./failover.ts";
+import { plan, isQuota, coolDown, key as acctKey, type Account } from "./accountkit.ts";
 import {
 	type AssistantMessage,
 	type AssistantMessageEventStream,
@@ -645,27 +646,23 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					? wrapFetchForCch((options?.fetch as typeof fetch) ?? fetch)
 					: ((options?.fetch as typeof fetch) ?? fetch);
 
-				// Second account (cliproxy on dgx): first when routed there or the own login is out of quota,
-				// else retried once when the own login answers with quota / 429.
-				const viaProxy = async () => {
-					const key = proxyKey();
-					if (!key) throw new Error("pix-anthropic: no cliproxy key at ~/.pix/cliproxy-key");
-					return fetch(`${proxyUrl()}/v1/messages`, { method: "POST", headers: proxyHeaders(headers, key), body: proxyBody(serialized), signal: options?.signal });
+				// accountkit: try accounts best first (plan); move on when one answers with quota / 429.
+				const send = (acc: Account) => {
+					if (acc.kind === "direct") return doFetch(url, { method: "POST", headers, body: serialized, signal: options?.signal });
+					const k = acctKey(acc);
+					return ((options?.fetch as typeof fetch) ?? fetch)(`${acc.url}/v1/messages`, { method: "POST", headers: proxyHeaders(headers, k ?? ""), body: proxyBody(serialized), signal: options?.signal });
 				};
-				let response = useProxyFirst() ? await viaProxy() : await doFetch(url, {
-					method: "POST",
-					headers,
-					body: serialized,
-					signal: options?.signal,
-				});
-				if (!response.ok && !useProxyFirst() && mayFailOver() && !options?.signal?.aborted) {
+				const order = plan();
+				if (!order.length) throw new Error("pix-anthropic: no Claude account ready (see claude-route)");
+				let response!: Response;
+				for (let n = 0; n < order.length; n++) {
+					response = await send(order[n]!);
+					if (response.ok || options?.signal?.aborted || n === order.length - 1) break;
 					const t = await response.clone().text().catch(() => "");
-					if (isQuota(response.status, t)) {
-						markExhausted(response.headers);
-						if (config.debug) process.stderr.write(`[pix-anthropic] own login ${response.status}; failing over to cliproxy\n`);
-						await response.body?.cancel().catch(() => undefined);
-						response = await viaProxy();
-					}
+					if (!isQuota(response.status, t)) break;
+					coolDown(order[n]!.id, response.headers);
+					if (config.debug) process.stderr.write(`[pix-anthropic] ${order[n]!.id} ${response.status}; trying ${order[n + 1]!.id}\n`);
+					await response.body?.cancel().catch(() => undefined);
 				}
 				await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
 

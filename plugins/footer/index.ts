@@ -110,6 +110,8 @@ export default function (pi: ExtensionAPI) {
         if (options.thinking && model?.reasoning) right += ` ${ctx.thinkingLevel ?? "off"}`;
         if (fastModeActiveFor(model)) right += " fast";
         const statuses = footerData.getExtensionStatuses();
+        const account = model?.provider === "pix-anthropic" ? statuses.get("pix-account") : undefined;
+        if (account) right = `${account} · ${right}`;
         const work = statuses.get("pix-background");
         animate(Boolean(work));
         const frame = SUBAGENT_SPINNER_FRAMES[Math.floor(Date.now() / SUBAGENT_SPINNER_INTERVAL_MS) % SUBAGENT_SPINNER_FRAMES.length];

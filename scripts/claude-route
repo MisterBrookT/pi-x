@@ -1,9 +1,24 @@
-#!/bin/sh
-# Which Claude account pi uses: auto (own login, cliproxy on quota/429), proxy (always cliproxy), own (never).
-# Read on every request; no /reload needed.
-f="${PIX_HOME:-$HOME/.pix}/claude-route"
-case "$1" in
-  auto|proxy|own) mkdir -p "$(dirname "$f")"; echo "$1" > "$f"; echo "claude route: $1";;
-  "") echo "claude route: $(cat "$f" 2>/dev/null || echo auto)";;
-  *) echo "usage: claude-route [auto|proxy|own]" >&2; exit 2;;
-esac
+#!/usr/bin/env node
+// Which Claude account pi uses (accountkit). No /reload needed; read on every request.
+//   claude-route            list accounts, % left, active
+//   claude-route minara|own pin one account
+//   claude-route auto       best account by % left (threshold knob: ~/.pix/accounts.json "threshold", default 20)
+import { createJiti } from "jiti";
+import { fileURLToPath } from "node:url";
+const jiti = createJiti(fileURLToPath(import.meta.url));
+const k = await jiti.import(new URL("../plugins/pix-anthropic/accountkit.ts", import.meta.url).pathname);
+const arg = process.argv[2];
+const ids = k.accounts().map(a => a.id);
+if (arg) {
+  const v = arg === "proxy" ? "minara" : arg;
+  if (v !== "auto" && !ids.includes(v)) { console.error(`usage: claude-route [auto|${ids.join("|")}]`); process.exit(2); }
+  k.setChoice(v);
+}
+const u = k.usage(), active = k.plan()[0]?.id, now = Date.now();
+console.log(`mode: ${k.choice()}  (switch below ${k.threshold()}% left)`);
+for (const a of k.accounts()) {
+  const x = u[a.id] ?? {};
+  const left = x.left === undefined ? "% left unknown" : `${Math.round(x.left)}% left`;
+  const cool = x.coolUntil && now < x.coolUntil ? `, resting until ${new Date(x.coolUntil).toLocaleTimeString()}` : "";
+  console.log(`${a.id === active ? "▸" : " "} ${a.id.padEnd(7)} ${a.label.padEnd(12)} ${a.kind.padEnd(6)} ${left}${cool}`);
+}
