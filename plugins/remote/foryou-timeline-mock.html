@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>For you · timeline (mock)</title>
+<style>
+:root{--bg:#f8f7f3;--text:#1f1e1b;--muted:#7a776f;--line:#e7e4dc;--pill:#efece5;--you:#d9822b;--on:#3f9a5b}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--text:#ecebe6;--muted:#9a978f;--line:#2b2a26;--pill:#24231f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:2;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:10px}
+header h1{font-size:20px;margin:0}header small{color:var(--muted)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--line);scrollbar-width:none}
+.chip{flex:none;border:0;background:var(--pill);color:var(--text);border-radius:999px;padding:6px 12px;font-size:13px;min-height:32px}
+.chip.on{background:var(--text);color:var(--bg)}
+.post{display:flex;gap:10px;padding:12px 16px 8px;border-bottom:1px solid var(--line)}
+.av{flex:none;width:36px;height:36px;border-radius:50%;background:var(--pill);display:grid;place-items:center;font-size:13px;color:var(--muted);font-weight:600}
+.post.you .av{box-shadow:0 0 0 2px var(--you)}.post.onit .av{box-shadow:0 0 0 2px var(--on)}
+.body{flex:1;min-width:0}
+.meta{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta b{color:var(--text);font-weight:600}.due{color:var(--you)}
+.title{font-weight:600;margin:2px 0}
+.ctx{color:var(--text);opacity:.85;font-size:14px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.acts{display:flex;gap:6px;margin:8px 0 2px;flex-wrap:wrap}
+.act{border:0;background:none;color:var(--muted);border-radius:999px;padding:0 10px 0 0;min-height:40px;font-size:13px}.act+.act{padding-left:10px;border-left:1px solid var(--line);border-radius:0}
+.act.main{color:var(--you);font-weight:600}
+.act.free{color:var(--muted)}
+.thread{margin:6px 0 2px;border-left:2px solid var(--line);padding-left:10px}
+.c{font-size:13.5px;padding:3px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--muted)}.c .who{color:var(--text)}.c .who{font-weight:600}.c .t{color:var(--muted);font-size:12px}
+.c.agent .who{color:var(--on)}
+.more{color:var(--muted);font-size:13px;background:none;border:0;padding:4px 0;min-height:32px}
+.sub{margin-top:6px;border-top:1px dashed var(--line)}
+.sub .post{padding:10px 0 4px;border:0}
+.sub .av{width:24px;height:24px;font-size:11px}
+.reply{display:none;margin:6px 0;gap:6px}.reply.open{display:flex}
+.reply input{flex:1;min-height:36px;border:1px solid var(--line);border-radius:18px;padding:0 12px;background:none;color:var(--text);font-size:14px}
+.note{color:var(--muted);font-size:12px;text-align:center;padding:16px}
+</style></head><body>
+<header><h1>For you</h1><small id="sum"></small></header>
+<div class="chips" id="chips"></div>
+<main id="feed"><p class="note">Loading…</p></main>
+<p class="note">Mockup on real data. Buttons are inert.</p>
+<script>
+const token=new URLSearchParams(location.hash.slice(1)).get("token")||localStorage.pixRemoteToken||"";
+if(location.hash.includes("token="))localStorage.pixRemoteToken=token,history.replaceState(null,"",location.pathname);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ago=t=>{const s=(Date.now()-Date.parse(t))/1e3;if(!(s>=0))return"";return s<3600?Math.max(1,s/60|0)+"m":s<86400?(s/3600|0)+"h":(s/86400|0)+"d"};
+const day=d=>d?new Date(d+"T12:00").toLocaleDateString("en",{weekday:"short",month:"short",day:"numeric"}):"";
+let data,line="all";
+/* The post's history: brook's taps and replies, then what an agent did. Built from the loop's notes and handled state. */
+function trail(i){
+  const out=[];
+  for(const l of String(i.note||"").split("\n").filter(Boolean)){
+    const m=l.match(/^- (\d{4}-\d\d-\d\d): (.*)$/);const text=(m?m[2]:l.replace(/^- /,""));
+    const you=/^brook\b|^(he|brook) (said|chose|tapped|asked)|\[brook\]/i.test(text);
+    out.push({who:you?"You":"Pi",agent:!you,text,t:m?m[1].slice(5):""});
+  }
+  if(i.prepared)out.push({who:"Pi",agent:true,text:"Prepared: "+i.prepared,t:""});
+  return out;
+}
+function suggestions(i){
+  const a=[];if(i.button)a.push({t:i.button,main:true});
+  if(i.due)a.push({t:"Later"});else a.push({t:"Done"});
+  return a.slice(0,2);
+}
+function post(i,small){
+  const L=(data.lines||[]).find(l=>l.id===i.line),h=trail(i),state=i.status==="onit"?"onit":"you";
+  const ctx=i.why||i.action||"";
+  const shown=h.slice(small?-1:-1),hidden=h.length-shown.length;
+  return `<article class="post ${state}"><div class="av">${esc((i.source||i.kind||"?").replace(/^(DingTalk|WeChat|Feishu|Gmail).*$/,"$1").slice(0,2))}</div><div class="body">
+  <div class="meta"><b>${esc(i.source||"For you")}</b> · ${esc(L?.name||"")} · ${ago(i.at)}${i.due?` · <span class="due">due ${esc(day(i.due))}</span>`:""}</div>
+  <div class="title">${esc(i.title)}</div>
+  ${small?"":`<div class="ctx">${esc(ctx)}</div>`}
+  ${h.length?`<div class="thread">${hidden?`<button class="more">${hidden} earlier</button>`:""}${shown.map(c=>`<div class="c ${c.agent?"agent":""}"><span class="who">${c.who}</span> <span class="t">${esc(c.t)}</span> ${esc(c.text.slice(0,220))}</div>`).join("")}</div>`:""}
+  <div class="acts">${suggestions(i).map(a=>`<button class="act ${a.main?"main":""}">${esc(a.t)}</button>`).join("")}<button class="act free" data-reply>Ask…</button></div>
+  <div class="reply"><input placeholder="Ask or tell Pi about this"><button class="act">Send</button></div>
+  </div></article>`;
+}
+/* A line with several loops reads as one thread: the newest loop is the post, the others hang under it as replies. */
+function render(){
+  const items=[...(data.pending||[]),...(data.onit||[])].filter(i=>line==="all"||i.line===line);
+  const byLine=new Map();for(const i of items){const k=i.line||i.id;(byLine.get(k)||byLine.set(k,[]).get(k)).push(i)}
+  const groups=[...byLine.values()].map(g=>g.sort((a,b)=>(a.due||"9")<(b.due||"9")?-1:1));
+  groups.sort((a,b)=>(a[0].due||"9")<(b[0].due||"9")?-1:1);
+  $("feed").innerHTML=groups.map(g=>{const[head,...rest]=g;return post(head).replace(/<\/div><\/article>$/,`${rest.length?`<div class="sub">${rest.map(i=>post(i,true)).join("")}</div>`:""}</div></article>`)}).join("")||'<p class="note">Nothing needs you.</p>';
+  $("sum").textContent=`${items.length} open · ${groups.length} threads`;
+}
+function $(id){return document.getElementById(id)}
+document.addEventListener("click",e=>{const b=e.target.closest("[data-reply]");if(b)b.closest(".body").querySelector(".reply").classList.toggle("open");
+  const c=e.target.closest(".chip");if(c){line=c.dataset.l;document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x===c));render()}});
+fetch("/api/foryou",{headers:{authorization:"Bearer "+token}}).then(r=>r.json()).then(d=>{data=d;
+  $("chips").innerHTML=`<button class="chip on" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip" data-l="${esc(l.id)}">${esc(l.name)} ${l.open}</button>`).join("");render()})
+ .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`);
+</script></body></html>
