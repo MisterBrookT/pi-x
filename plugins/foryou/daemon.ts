@@ -28,6 +28,7 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, dingNewest, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
+import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
 import { whoFor } from "./who.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
@@ -38,6 +39,8 @@ const pixAnthropic = join(dirname(fileURLToPath(import.meta.url)), "..", "pix-an
 /** A repeating error is logged when it starts and when it changes, not every round. */
 const lastErr = new Map<string, string>();
 /** Apps whose data was blocked last round (lost Full Disk Access); rechecked every 30 s until readable. */
+// Gmail login: refreshed at most hourly (also keeps the token warm); a failure is one stable health entry.
+let gmail = { at: 0, state: "ok" as Awaited<ReturnType<typeof checkGmailAuth>>, since: "" };
 const blockedApps = new Set<"wechat" | "dingtalk">();
 const accessBack = async () => { for (const a of blockedApps) if (await probeApp(a) !== "ok") return false; return true; };
 const logOnce = (s: string) => { const k = s.split(":")[0]; if (lastErr.get(k) === s) return false; lastErr.set(k, s); return true; };
@@ -273,7 +276,8 @@ async function tick(cfg: Config) {
 		// Quiet nights are normal, so this uses 24 h, not the silence window.
 		const dingStale = dingNewest.at && Date.now() - Date.parse(dingNewest.at) > 24 * 3_600_000 ? [{ text: `DingTalk: newest message is ${Math.round((Date.now() - Date.parse(dingNewest.at)) / 3_600_000)} h old (app closed or not syncing?)`, since: dingNewest.at }] : [];
 		if (dingNewest.launched) { log("DingTalk was not running: started it (open -ga DingTalk)"); dingNewest.launched = false; }
-		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6)), ...dingStale];
+		if (Date.now() - gmail.at > 3_600_000) { const st = await checkGmailAuth(); gmail = { at: Date.now(), state: st === "unknown" ? gmail.state : st, since: st === "ok" ? "" : gmail.since || at }; }
+		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6)), ...dingStale, ...gmailProblem(gmail.state, gmail.since)];
 		blockedApps.clear();
 		for (const f of failed) if (/lost Full Disk Access/.test(f.error)) blockedApps.add(f.source.startsWith("WeChat") ? "wechat" : "dingtalk");
 		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);
