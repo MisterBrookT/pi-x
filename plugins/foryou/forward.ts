@@ -8,12 +8,27 @@ import type { Msg, Source } from "./proactive.ts";
 export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urgent?: boolean }
 
 /** The cheap model's only question: does any of this involve brook? */
+/**
+ * Senders/subjects that always reach For you, whatever the cheap model thinks: his advisor and lab, his school's
+ * offices, and his reviewer/PC duties. brook missed a PacificVis reviewer discussion and an advisor funding notice
+ * because the filter read "not addressed to him by name" as noise. Extra patterns: config "passList" (regex strings).
+ */
+export const DEFAULT_PASS = ["chenvis", "zju\\.edu\\.cn", "浙江大学", "PacificVis", "\\bPCS\\b", "precisionconference", "\\[submission \\d+\\]", "reviewer", "审稿", "研究生院|yjsy", "财务|cwc@", "基金|funding", "deadline|截止|前反馈", "invitation to chair|invit(e|ation) to (review|serve|speak)"];
+export function mustPass(m: Msg, extra: string[] = []): boolean {
+	const hay = [m.sender, m.text.split("\n")[0].replace(/^Subject: /, "")];
+	return [...DEFAULT_PASS, ...extra].some(p => { try { const re = new RegExp(p, "i"); return hay.some(h => re.test(h)); } catch { return false; } });
+}
+
 export function filterPrompt(o: { me: string; source: Source; context: Msg[]; fresh: Msg[]; memory: string; lines: string }): string {
 	const fmt = (m: Msg) => `[${m.id}] ${m.time} ${m.sender}: ${m.text.replace(/\s+/g, " ").slice(0, 600)}`;
 	return `You filter messages for ${o.me}'s assistant. Pass a batch only if at least one new message needs or changes something for ${o.me}:
 asks or @mentions him, replies to him, waits on him, delivers something he asked for, sets a deadline or decision in his projects,
 or moves one of his lines of work (below). Drop chit-chat, FYI that changes nothing, and questions clearly addressed to someone else
 (an @mention of another person makes that question theirs). When unsure, pass: the assistant decides.
+Mail is rarely addressed to him by name; that is not noise. Always pass: reviewer/PC duties (review discussions, assignments,
+"[submission N]" threads, chair or review invitations), his advisor and lab, his school's offices (finance, graduate school, funding
+calls), deadlines, and invitations that need prep or a reply. Drop newsletters, receipts, login alerts, marketing, and automatic
+"received your submission" confirmations.
 
 About ${o.me}: ${o.memory.slice(0, 1500) || "(no memory)"}
 His lines of work:

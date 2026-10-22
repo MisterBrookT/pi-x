@@ -571,3 +571,19 @@ test("silence watch: a source kind with no good read for 6+ h shows as a problem
 	const p = silentSources({ WeChat: "2026-10-22T11:50:00Z", Gmail: "2026-10-22T02:00:00Z" }, ["WeChat", "Gmail", "Feishu"], now);
 	assert.deepEqual(p, [{ text: "Gmail: no good read for 10 h", since: "2026-10-22T02:00:00Z" }]);
 });
+
+test("regression: Gmail IMAP retries through the proxy, then direct; mail that names no one but is a reviewer/advisor/school duty always passes", async () => {
+	const { gmailImapRetry } = await import("../plugins/foryou/proactive-sources.ts");
+	const { mustPass } = await import("../plugins/foryou/forward.ts");
+	const seen = [];
+	assert.equal(await gmailImapRetry(async o => { seen.push(o.proxy ?? "direct"); if (seen.length < 3) throw new Error("Client network socket disconnected"); return "ok"; }, "http://p:1", async () => {}), "ok");
+	assert.deepEqual(seen, ["http://p:1", "http://p:1", "direct"]);
+	await assert.rejects(gmailImapRetry(async () => { throw new Error("imap timeout"); }, "http://p:1", async () => {}), /imap timeout/);
+	const m = (sender, subject) => ({ id: "1", time: "", sender, text: `Subject: ${subject}\nbody` });
+	assert.ok(mustPass(m("PacificVis 2027 Papers (Journal Track)", "[submission 3549] new discussion comment")));
+	assert.ok(mustPass(m("chenvis", "Fw: 转发: 【重要】2027年度省自然科学基金“新苗项目”附件-10.23前反馈")));
+	assert.ok(mustPass(m("Microsoft CMT", "WISE26 : Invitation to chair sessions")));
+	assert.ok(!mustPass(m("NLP Newsletter", "Top AI Papers of the Week")));
+	assert.ok(!mustPass(m("X", "Your receipt from X")));
+	assert.ok(mustPass(m("Someone", "hello"), ["^Someone$"]), "config passList adds patterns");
+});

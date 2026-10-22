@@ -201,6 +201,21 @@ async function keychainPassword(account: string): Promise<string | undefined> {
 	try { return (await run("security", ["find-generic-password", "-s", "pix-gmail", "-a", account, "-w"], { timeout: 10_000 })).stdout.trim(); } catch { return undefined; }
 }
 
+/**
+ * IMAP through Clash drops often (TLS disconnect, closed, timeout; about 15 times in 4 days). Try the proxy twice with
+ * backoff, then a direct connection. On final failure the cursor does not move (the daemon only marks after a good read),
+ * so mail from a failed window is read on the next tick, never skipped.
+ */
+export async function gmailImapRetry<T>(read: (o: { proxy?: string; timeoutMs: number }) => Promise<T>, proxy: string | undefined, sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))): Promise<T> {
+	const tries: (string | undefined)[] = proxy ? [proxy, proxy, undefined] : [undefined, undefined];
+	let last: unknown;
+	for (const [i, p] of tries.entries()) {
+		if (i) await sleep(2000 * i);
+		try { return await read({ proxy: p, timeoutMs: 40_000 }); } catch (e) { last = e; }
+	}
+	throw last;
+}
+
 /** Gmail inbox, read-only. Prefers IMAP + app password (Keychain); falls back to the Gmail MCP OAuth token.
  * Options: account (Gmail address), query (Gmail search; default: recent inbox, no promotions/social). */
 const gmail: Adapter = {
@@ -208,7 +223,7 @@ const gmail: Adapter = {
 		const q = String(src.query ?? "in:inbox newer_than:3d -category:promotions -category:social");
 		const account = String(src.account ?? "yinghaotang2001@gmail.com");
 		const pass = await keychainPassword(account);
-		if (pass) return fetchGmailImap({ user: account, pass, query: q, max: 20, proxy: proxy || undefined });
+		if (pass) return gmailImapRetry(o => fetchGmailImap({ user: account, pass, query: q, max: 20, ...o }), proxy || undefined);
 		const token = await gmailToken();
 		const auth = ["-H", `Authorization: Bearer ${token}`];
 		const base = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
