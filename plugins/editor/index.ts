@@ -14,10 +14,6 @@ import {
 	shouldCompactPaste,
 } from "./smart-editor.ts";
 import { WordCompletion } from "./word-completion.ts";
-import registerAiCompletion, { type CompletionService } from "./ai-completion-ui.ts";
-import registerHistoryCompletion from "./history-completion.ts";
-
-const MAX_GHOST_LINES = 3;
 
 /** Wrap ghost text by words: the first line has `firstWidth` columns, later lines `width`; ends with … when cut. */
 export function wrapGhost(text: string, firstWidth: number, width: number, maxLines: number): string[] {
@@ -49,21 +45,14 @@ const isNewline = (data: string): boolean =>
 	data === "\n" ||
 	data === "\x1b[13;2~";
 
-export function completionSuggestion(
-	text: string,
-	historySuggestion: (prefix: string) => string | undefined,
-	wordCompletion: Pick<WordCompletion, "suffix">,
-	ai?: Pick<CompletionService, "completion" | "isEnabled">,
-): string | undefined {
-	if (text.trimStart().startsWith("/")) return undefined;
-	if (ai?.isEnabled()) return ai.completion.suffix(text);
-	if (!text) return undefined;
-	return historySuggestion(text) ?? wordCompletion.suffix(text);
+/** Inline completion is word-level only: the rest of the current word, never a phrase or sentence. */
+export function completionSuggestion(text: string, wordCompletion: Pick<WordCompletion, "suffix">): string | undefined {
+	if (!text || text.trimStart().startsWith("/")) return undefined;
+	const suffix = wordCompletion.suffix(text);
+	return suffix && !/\s/.test(suffix) ? suffix : undefined;
 }
 
 export default function smartEditor(pi: ExtensionAPI) {
-	const historySuggestion = registerHistoryCompletion(pi);
-	const ai = registerAiCompletion(pi);
 	const images = new Map<number, ImageReference>();
 	const pastes = new Map<number, PasteReference>();
 	let nextImageId = 1;
@@ -80,7 +69,6 @@ export default function smartEditor(pi: ExtensionAPI) {
 				constructor() {
 					super(tui, editorTheme, keybindings);
 					this.wordCompletion.onUpdate = () => tui.requestRender();
-					ai.completion.onUpdate = () => tui.requestRender();
 				}
 
 				private inlineSuggestion(): string | undefined {
@@ -88,7 +76,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 					const cursor = this.getCursor();
 					if (cursor.line !== lines.length - 1 || cursor.col !== (lines.at(-1)?.length ?? 0)) return undefined;
 					const text = this.getText();
-					return completionSuggestion(text, historySuggestion, this.wordCompletion, ai);
+					return completionSuggestion(text, this.wordCompletion);
 				}
 
 				override render(width: number): string[] {
@@ -99,12 +87,9 @@ export default function smartEditor(pi: ExtensionAPI) {
 
 					const beforeCursor = lines[cursorAt].slice(0, lines[cursorAt].indexOf(CURSOR_MARKER));
 					const available = Math.max(0, width - visibleWidth(beforeCursor));
-					const [first = "", ...rest] = wrapGhost(suggestion, available, Math.max(1, width), MAX_GHOST_LINES);
+					const [first = ""] = wrapGhost(suggestion, available, Math.max(1, width), 1);
 					const ghost = (text: string, room: number) => `${editorTheme.selectList.description(text)}${" ".repeat(Math.max(0, room - visibleWidth(text)))}`;
-					const out = lines.map((line, index) => (index === cursorAt ? `${beforeCursor}${CURSOR_MARKER}${ghost(first, available)}` : truncateToWidth(line, width, "")));
-					// Longer predictions continue on the lines right below the cursor.
-					out.splice(cursorAt + 1, 0, ...rest.map((text) => ghost(text, width)));
-					return out;
+					return lines.map((line, index) => (index === cursorAt ? `${beforeCursor}${CURSOR_MARKER}${ghost(first, available)}` : truncateToWidth(line, width, "")));
 				}
 
 				private insertPastedValue(text: string): void {

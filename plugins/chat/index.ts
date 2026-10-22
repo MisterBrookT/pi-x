@@ -11,7 +11,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { basename, resolve } from "node:path";
 import { Type } from "typebox";
 import { board, chatRoot, claimName, nameBase, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
-import { CHAT_WAITING } from "../core/chat-waiting.ts";
+import { CHAT_WAITING, CHAT_WAITS_QUERY, type ChatWaitsState } from "../core/chat-waiting.ts";
 import { checkFor, closeWaits, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
 const WAIT_STATUS = "pix-chat";
@@ -57,6 +57,13 @@ export default function (pi: ExtensionAPI) {
     ui?.setStatus?.(WAITS_STATUS, waitingLines(w));
     if (text !== shown) { shown = text; pi.events?.emit?.(CHAT_WAITING, { text }); }
   };
+  // The goal asks how many replies this session still waits for, so "waiting" can be told from "idle".
+  pi.events?.on?.(CHAT_WAITS_QUERY, (data: unknown) => {
+    const f = waitFile(); if (!f || !data || typeof data !== "object") return;
+    const w = loadWaiting(f).waits, q = data as ChatWaitsState;
+    q.waits += w.length;
+    for (const x of w) if (x.check && (q.nextCheck === undefined || x.check.next < q.nextCheck)) q.nextCheck = x.check.next;
+  });
   const check = () => {
     if (ui && me) (ui as { setTitle?: (t: string) => void }).setTitle?.(me.name);
     let wakes: string[] = [];

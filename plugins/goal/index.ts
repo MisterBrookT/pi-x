@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../core/background-state.ts";
 import { GOAL_ENTRY, GOAL_MAX_CONTINUATIONS, GOAL_MAX_EVIDENCE, GOAL_MAX_OBJECTIVE, goalInstructions, parseGoal, type GoalState } from "./goal-state.ts";
-import { hasPendingGoalWork } from "./goal-work.ts";
+import { goalDependencies, hasPendingGoalWork } from "./goal-work.ts";
 import { createStateReminder } from "../core/state-reminder.ts";
 import { GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION, withSpecialistExposure } from "../core/tool-discovery.ts";
 
@@ -14,6 +14,9 @@ const commands = ["status", "pause", "stop", "resume", "clear"];
 export default function goalExtension(pi: ExtensionAPI) {
 	let goal: GoalState | null = null;
 	let closed = false;
+	// Set by goal status=waiting: independent work is done, only owners/jobs remain. Cleared when any turn starts,
+	// so a reply, job end or health check wakes the goal normally and it must choose to wait again.
+	let waitingOn: string | undefined;
 	let checking = false;
 	let modelFailed = false;
 	let hasGoalHistory = false;
@@ -29,8 +32,10 @@ export default function goalExtension(pi: ExtensionAPI) {
 	const show = (ctx: ExtensionContext, waiting = false) => {
 		pi.events.emit(GOAL_TOOL_STATE, { active: goal?.status === "active" });
 		// A paused or blocked goal stays visible: a silent pause is how overnight work stalls unnoticed.
+		const next = waitingOn !== undefined ? goalDependencies(pi).next : undefined;
+		const hhmm = next ? ` · check ${new Date(next).toTimeString().slice(0, 5)}` : "";
 		if (ctx.hasUI) ctx.ui.setStatus("pix-goal", goal?.status === "active"
-			? `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}`
+			? waitingOn !== undefined ? `goal waiting${hhmm}` : `goal on${waiting ? " (waiting)" : ""} · ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}`
 			: goal?.status === "paused" || goal?.status === "blocked" ? `goal ${goal.status}` : undefined);
 	};
 	const save = (next: GoalState | null, ctx: ExtensionContext, beforeNextResponse = false) => {
@@ -86,7 +91,7 @@ export default function goalExtension(pi: ExtensionAPI) {
 		// Reload replaces extensions, not the user's goal or continuation budget.
 		if (event.reason !== "reload") pause("Session closed; use /goal resume after reopening.", ctx);
 	});
-	pi.on("agent_start", (_event, ctx) => show(ctx));
+	pi.on("agent_start", (_event, ctx) => { waitingOn = undefined; show(ctx); });
 	pi.on("agent_end", (event, ctx) => {
 		const last = [...event.messages].reverse().find((message) => message.role === "assistant");
 		// Pi retries errors and recovers context overflow after agent_end.
@@ -119,6 +124,11 @@ export default function goalExtension(pi: ExtensionAPI) {
 				pause("The goal tool is disabled; use /tool goal on before resuming.", ctx);
 			} else if (pending) {
 				show(ctx, true);
+			} else if (waitingOn !== undefined) {
+				// Waiting on owners: no continuation, no budget used. Replies, job ends and health checks wake it.
+				const d = goalDependencies(pi);
+				if (d.jobs + d.waits > 0) show(ctx);
+				else { waitingOn = undefined; save({ ...goal, continuations: goal.continuations + 1 }, ctx); wake(`Goal continuation ${goal.continuations}/${GOAL_MAX_CONTINUATIONS}. Everything you were waiting on has finished or closed. Read the results, then continue toward the goal or report completion/blocker.`); }
 			} else if (goal.continuations >= GOAL_MAX_CONTINUATIONS) {
 				pause(`Reached ${GOAL_MAX_CONTINUATIONS} automatic continuations; review progress before /goal resume.`, ctx);
 			} else {
@@ -203,9 +213,9 @@ export default function goalExtension(pi: ExtensionAPI) {
 
 	pi.registerTool(withSpecialistExposure({
 		name: "goal", label: "Goal",
-		description: "Manage the session goal. status=active with an objective starts a goal for substantial verifiable multi-step work (not quick answers or discussion), or replaces the current one when scope changes; status=active without an objective resumes a paused or blocked goal. completed/blocked need the exact id and evidence (checks run, or what is missing). Decide these yourself.",
+		description: "Manage the session goal. status=active with an objective starts a goal for substantial verifiable multi-step work (not quick answers or discussion), or replaces it when scope changes; without an objective it resumes a paused or blocked goal. waiting: only replies or jobs remain (evidence = what); no auto-continuing until one wakes you. completed/blocked need the exact id and evidence (checks run, or what is missing). Decide these yourself.",
 		parameters: Type.Object({
-			status: StringEnum(["active", "completed", "blocked"] as const),
+			status: StringEnum(["active", "waiting", "completed", "blocked"] as const),
 			objective: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_OBJECTIVE, pattern: "\\S", description: "Full scope and acceptance criteria" })),
 			id: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
 			evidence: Type.Optional(Type.String({ minLength: 1, maxLength: GOAL_MAX_EVIDENCE, pattern: "\\S" })),
@@ -232,6 +242,14 @@ export default function goalExtension(pi: ExtensionAPI) {
 			if (closed || !current || current.status !== "active" || current.id !== params.id) throw new Error("No matching active goal.");
 			const evidence = params.evidence?.trim();
 			if (!evidence) throw new Error("Concrete evidence or a blocker is required.");
+			if (params.status === "waiting") {
+				const d = goalDependencies(pi);
+				if (d.jobs + d.waits === 0 && !(await hasPendingGoalWork(pi))) throw new Error("Nothing is pending (no open chat waits, jobs or subagents). Continue the work, or report completed/blocked.");
+				waitingOn = evidence;
+				show(ctx);
+				const when = d.next ? ` Next scheduled check ${new Date(d.next).toTimeString().slice(0, 5)}.` : "";
+				return { content: [{ type: "text", text: `Goal waiting on: ${evidence}. No automatic continuations until a reply, job end or health check wakes you.${when} End your turn now.` }], details: { goal: { ...current }, waiting: evidence } };
+			}
 			if (params.status === "completed" && await hasPendingGoalWork(pi)) throw new Error("Background work is still running. Read its results before completing the goal.");
 			signal?.throwIfAborted();
 			if (closed || goal !== current) throw new Error("Goal changed while checking completion.");

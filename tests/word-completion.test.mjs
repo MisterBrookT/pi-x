@@ -18,3 +18,13 @@ test("word completion caches an asynchronous suffix and requests repaint", async
   assert.equal(completion.suffix("comp"), "letion");
   assert.equal(updates, 1);
 });
+
+test("inline completion is word-level only: no phrases, no commands, nothing stale after the word ends", async () => {
+  const { completionSuggestion } = await import("../plugins/editor/index.ts");
+  const words = { suffix: (text) => (/comp$/.test(text) ? "letion" : /hel$/.test(text) ? "lo there friend" : undefined) };
+  assert.equal(completionSuggestion("auto comp", words), "letion");
+  assert.equal(completionSuggestion("hel", words), undefined, "multi-word ghost text is never offered");
+  assert.equal(completionSuggestion("/comp", words), undefined, "slash commands keep Pi's own completion");
+  assert.equal(completionSuggestion("auto comp ", words), undefined, "typing past the word drops the stale suggestion");
+  assert.equal(completionSuggestion("", words), undefined);
+});

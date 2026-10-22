@@ -16,7 +16,7 @@ Detailed usage, configuration, and design boundaries.
 - `background` for long shell commands: start, inspect, or stop a job; completion or failure automatically wakes the agent
 - opt-in `/goal` mode to continue unfinished work, with explicit completion/blockers and a continuation limit
 - `todo` plus the `/todo` terminal view
-- inline local-history and macOS word completion, optional AI completion via `/complete`, plus a restrained smart editor that continues lists and compacts pasted images
+- inline word completion (macOS dictionary, Tab accepts the rest of the word; never phrases), plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`
@@ -45,7 +45,6 @@ For Claude Pro/Max plan usage, sign in with Claude Code and select a model under
 
 | Command | Purpose |
 | --- | --- |
-| `/complete [on\|off\|model\|status]` | Toggle AI inline completion or pick its model; persists across sessions |
 | `/fast [on\|off\|status]` | Toggle priority processing and remember the preference |
 | `/footer` | Choose footer metrics; choices persist across sessions |
 | `/goal [objective]` | Open goal configuration, or start with an objective; also `status`, `pause` (`stop`), `resume`, and `clear` |

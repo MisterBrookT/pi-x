@@ -49,10 +49,7 @@ test("slash commands stay minimal", async () => {
   assert.match(todo, /parentId/);
   assert.match(todo, /prepareArguments/);
   assert.match(todo, /getArgumentCompletions/);
-  const historyCompletion = await readFile(new URL("plugins/editor/history-completion.ts", root), "utf8");
-  assert.match(historyCompletion, /historySuggestion/);
-  assert.doesNotMatch(historyCompletion, /addAutocompleteProvider/);
-  assert.match(smartEditor, /registerHistoryCompletion\(pi\)/);
+  assert.doesNotMatch(smartEditor, /registerHistoryCompletion|registerAiCompletion/, "inline completion is word-level only");
   assert.match(smartEditor, /CURSOR_MARKER/);
   assert.match(smartEditor, /editorTheme\.selectList\.description/);
   assert.doesNotMatch(smartEditor, /uiTheme\.fg/);
@@ -65,9 +62,8 @@ test("slash commands stay minimal", async () => {
  * an implementation detail. Verbs live under a parent command instead of
  * claiming another top-level name.
  */
-test("Pix keeps nine top-level slash commands", async () => {
-  // ai-completion is loaded by smart-editor rather than by the manifest, so the
-  // whole extension tree is scanned instead of the declared entry points.
+test("Pix keeps at most nine top-level slash commands", async () => {
+  // The whole extension tree is scanned instead of the declared entry points.
   const names = [];
   for (const entry of await readdir(new URL("plugins/", root), { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
@@ -75,7 +71,6 @@ test("Pix keeps nine top-level slash commands", async () => {
     for (const match of source.matchAll(/pi\.registerCommand\("([^"]+)"/g)) names.push(match[1]);
   }
   assert.deepEqual(names.sort(), [
-    "complete",
     "context",
     "fast",
     "footer",

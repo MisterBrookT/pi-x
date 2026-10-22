@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { backgroundState } from "../core/background-state.ts";
+import { CHAT_WAITS_QUERY, type ChatWaitsState } from "../core/chat-waiting.ts";
 
 /** One status query at the idle boundary, never a polling loop. */
 export async function hasPendingGoalWork(pi: Pick<ExtensionAPI, "events" | "getAllTools">): Promise<boolean> {
@@ -26,4 +27,13 @@ export async function hasPendingGoalWork(pi: Pick<ExtensionAPI, "events" | "getA
 		});
 		pi.events.emit("subagents:rpc:v1:request", { version: 1, requestId, method: "status", params: {} });
 	});
+}
+
+/** What a waiting goal waits on: running jobs, open chat waits, and the earliest scheduled health check. */
+export function goalDependencies(pi: Pick<ExtensionAPI, "events">): { jobs: number; waits: number; next?: number } {
+	const bg = backgroundState(pi);
+	const chat: ChatWaitsState = { waits: 0 };
+	pi.events.emit(CHAT_WAITS_QUERY, chat);
+	const times = [bg.nextLook, chat.nextCheck].filter((t): t is number => typeof t === "number");
+	return { jobs: bg.running, waits: chat.waits, ...(times.length ? { next: Math.min(...times) } : {}) };
 }
