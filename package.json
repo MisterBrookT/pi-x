@@ -34,7 +34,8 @@
     "test:relay-workflow": "node --test scripts/verify-relay-workflow.mjs",
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs",
-    "postinstall": "node scripts/apply-pi-subagents-patch.mjs"
+    "postinstall": "node scripts/apply-pi-subagents-patch.mjs",
+    "sim": "scripts/sim"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

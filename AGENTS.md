@@ -14,3 +14,8 @@
 - Every user-visible change must reach the iPhone too. When a feature changes what brook sees or can do on the Mac (cards, buttons, lists, states), make the phone page show and do the same, allow the route through the relay (`relayAllowed`), and test it in the phone browser test. A change is not delivered until it works on the phone through https://rc.brooktang.fun.
 
 - The phone page is served by the relay Worker (`relay/`), not the Mac, so the Mac's autoreload never updates it. A post-commit hook (`scripts/git-hooks/post-commit`, enabled by `npm install` via `core.hooksPath`) deploys the relay whenever a commit touches `relay/` or `src/remote-{web,relay-web,sw}.ts`. Deploy by hand with `npm run deploy:relay`; skip once with `PIX_SKIP_RELAY_DEPLOY=1`.
+
+## Phone UI dev loop
+
+- `npm run sim` (or `scripts/sim`) opens the phone page in the iPhone 17 Pro Simulator against the live Mac hub; edits under `plugins/remote/` reload it on their own. `scripts/sim stop` ends the dev server.
+- Verify phone UI changes yourself before showing brook: `scripts/sim shot [file]` saves a Simulator screenshot (default `.shots/sim.png`); read it.

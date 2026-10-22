@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Phone UI live in the iOS Simulator.
+#   scripts/sim        boot the iPhone, start the dev server (live reload on plugins/remote edits), open Pix in Safari, bring Simulator up
+#   scripts/sim shot [file]   save a screenshot of the booted Simulator (default .shots/sim.png), print the path
+#   scripts/sim stop   stop the dev server
+set -euo pipefail
+cd "$(dirname "$0")/.."
+SIM_ID="${PIX_SIM_ID:-22FCA4D5-31CF-4E17-80B3-CD717D9C0D1D}"   # iPhone 17 Pro
+PORT="${PIX_SIM_PORT:-8790}"
+PID=.pix/sim-dev.pid; LOG=.pix/sim-dev.log
+case "${1:-open}" in
+shot)
+	out="${2:-.shots/sim.png}"; mkdir -p "$(dirname "$out")"
+	xcrun simctl io "$SIM_ID" screenshot "$out" >/dev/null 2>&1; case "$out" in /*) echo "$out" ;; *) echo "$PWD/$out" ;; esac; exit ;;
+stop)
+	[ -f "$PID" ] && kill "$(cat "$PID")" 2>/dev/null; rm -f "$PID"; echo stopped; exit ;;
+esac
+mkdir -p .pix
+if ! { [ -f "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; }; then
+	nohup node scripts/sim-dev.mjs > "$LOG" 2>&1 & echo $! > "$PID"
+	for _ in $(seq 30); do curl -fsS -o /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null && break; sleep 0.2; done
+fi
+xcrun simctl list devices booted | grep -q "$SIM_ID" || xcrun simctl boot "$SIM_ID"
+open -a Simulator
+xcrun simctl bootstatus "$SIM_ID" -b >/dev/null
+# Token in the URL hash: never sent over the network, and the page stores it then clears the hash.
+token=$(cat ~/.pi/agent/pix-remote/token)
+xcrun simctl openurl "$SIM_ID" "http://127.0.0.1:$PORT/#token=$token"
+osascript -e 'tell application "Simulator" to activate' >/dev/null
+echo "Pix phone UI in the Simulator · edits under plugins/remote reload it · scripts/sim shot for a screenshot · log $LOG"
