@@ -30,7 +30,7 @@ import { createPixAnthropicStream } from "./stream.ts";
 import { claudeAuth } from "./claude-auth.ts";
 
 const PROVIDER_ID = "pix-anthropic";
-const BASE_URL = "https://api.anthropic.com";
+const BASE_URL = process.env.PIX_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
 
 type ModelSpec = {
 	id: string;

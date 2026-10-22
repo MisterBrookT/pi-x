@@ -1,0 +1,9 @@
+#!/bin/sh
+# Which Claude account pi uses: auto (own login, cliproxy on quota/429), proxy (always cliproxy), own (never).
+# Read on every request; no /reload needed.
+f="${PIX_HOME:-$HOME/.pix}/claude-route"
+case "$1" in
+  auto|proxy|own) mkdir -p "$(dirname "$f")"; echo "$1" > "$f"; echo "claude route: $1";;
+  "") echo "claude route: $(cat "$f" 2>/dev/null || echo auto)";;
+  *) echo "usage: claude-route [auto|proxy|own]" >&2; exit 2;;
+esac
