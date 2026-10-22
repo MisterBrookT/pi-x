@@ -13,8 +13,8 @@
  *   6. Full X-Stainless-* header set, x-client-request-id, keep-alive
  */
 
-import { proxyBody, proxyHeaders } from "./failover.ts";
-import { plan, isQuota, coolDown, key as acctKey, type Account } from "./accountkit.ts";
+import { plan, isQuota, coolDown, type Account } from "./accountkit.ts";
+import { readClaudeToken } from "./claude-auth.ts";
 import {
 	type AssistantMessage,
 	type AssistantMessageEventStream,
@@ -647,10 +647,11 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					: ((options?.fetch as typeof fetch) ?? fetch);
 
 				// accountkit: try accounts best first (plan); move on when one answers with quota / 429.
-				const send = (acc: Account) => {
-					if (acc.kind === "direct") return doFetch(url, { method: "POST", headers, body: serialized, signal: options?.signal });
-					const k = acctKey(acc);
-					return ((options?.fetch as typeof fetch) ?? fetch)(`${acc.url}/v1/messages`, { method: "POST", headers: proxyHeaders(headers, k ?? ""), body: proxyBody(serialized), signal: options?.signal });
+				// Each profile is its own Claude Code login; swap only the bearer token.
+				const send = async (acc: Account) => {
+					const h = { ...headers };
+					if (acc.configDir && oauth) h.Authorization = `Bearer ${await readClaudeToken(acc.configDir)}`;
+					return doFetch(url, { method: "POST", headers: h, body: serialized, signal: options?.signal });
 				};
 				const order = plan();
 				if (!order.length) throw new Error("pix-anthropic: no Claude account ready (see claude-route)");

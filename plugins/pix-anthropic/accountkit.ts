@@ -1,17 +1,17 @@
 /**
  * accountkit: several Claude accounts, one active per request.
  *
- * Accounts: "own" (brook's direct login) and "minara" (minarabench via cliproxy on dgx), more in
- * ~/.pix/accounts.json later. Choice (~/.pix/claude-route): an account id pins it; "auto" picks the
+ * Accounts are Claude Code logins on this Mac, one config dir each (like cc-switch profiles):
+ * "minarabench" (~/.claude-minarabench) and "own" (Claude Code's default). More in ~/.pix/accounts.json. Choice (~/.pix/claude-route): an account id pins it; "auto" picks the
  * first account in order whose % left is at or above the threshold (default 20) and that is not
  * cooling down after a quota/429; unknown % counts as usable. Usage is cached in ~/.pix/accounts-usage.json
  * so every session and the footer read the same numbers.
  */
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export interface Account { id: string; label: string; kind: "direct" | "proxy"; url?: string; keyFile?: string }
+export interface Account { id: string; label: string; configDir?: string }
 export interface Usage { left?: number; resetsAt?: string; coolUntil?: number; checkedAt?: number }
 
 const dir = () => process.env.PIX_HOME ?? join(homedir(), ".pix");
@@ -19,15 +19,14 @@ const read = <T>(f: string, d: T): T => { try { return JSON.parse(readFileSync(j
 const write = (f: string, v: unknown) => { mkdirSync(dir(), { recursive: true }); const p = join(dir(), f); writeFileSync(p + ".tmp", JSON.stringify(v, null, 2)); renameSync(p + ".tmp", p); };
 
 const DEFAULTS: Account[] = [
-	{ id: "minara", label: "minarabench", kind: "proxy", url: "http://127.0.0.1:18317", keyFile: "cliproxy-key" },
-	{ id: "own", label: "brook", kind: "direct" },
+	{ id: "minarabench", label: "minarabench", configDir: join(homedir(), ".claude-minarabench") },
+	{ id: "own", label: "brook" },
 ];
 export const accounts = (): Account[] => read<{ accounts?: Account[] }>("accounts.json", {}).accounts ?? DEFAULTS;
 export const threshold = (): number => Number(process.env.PIX_ACCOUNT_THRESHOLD ?? read<{ threshold?: number }>("accounts.json", {}).threshold ?? 20);
 
 export function choice(): string {
 	const v = (process.env.PIX_CLAUDE_ROUTE ?? (() => { try { return readFileSync(join(dir(), "claude-route"), "utf8"); } catch { return ""; } })()).trim();
-	if (v === "proxy") return "minara"; // b910368 name
 	return accounts().some(a => a.id === v) ? v : "auto";
 }
 export function setChoice(v: string): void { mkdirSync(dir(), { recursive: true }); writeFileSync(join(dir(), "claude-route"), v + "\n"); }
@@ -35,11 +34,10 @@ export function setChoice(v: string): void { mkdirSync(dir(), { recursive: true 
 export const usage = (): Record<string, Usage> => read("accounts-usage.json", {});
 export function recordUsage(id: string, u: Usage): void { const all = usage(); all[id] = { ...all[id], ...u, checkedAt: Date.now() }; write("accounts-usage.json", all); }
 
-export function key(a: Account): string | undefined {
-	if (!a.keyFile) return undefined;
-	try { return readFileSync(join(dir(), a.keyFile), "utf8").trim() || undefined; } catch { return undefined; }
+/** A profile is ready once its Claude Code login exists (own always is). */
+export function ready(a: Account): boolean {
+	return !a.configDir || existsSync(join(a.configDir, ".claude.json")) || existsSync(join(a.configDir, ".credentials.json"));
 }
-const ready = (a: Account) => a.kind === "direct" || !!key(a);
 
 /** Usable now: not cooling down after quota, and % left (if known) at or above the threshold. */
 export function healthy(a: Account, now = Date.now()): boolean {

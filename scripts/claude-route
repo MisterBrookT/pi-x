@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Which Claude account pi uses (accountkit). No /reload needed; read on every request.
 //   claude-route            list accounts, % left, active
-//   claude-route minara|own pin one account
+//   claude-route <name>     pin one account (minarabench, own, ...)
+//   new profile login:      CLAUDE_CONFIG_DIR=~/.claude-<name> claude /login
 //   claude-route auto       best account by % left (threshold knob: ~/.pix/accounts.json "threshold", default 20)
 import { createJiti } from "jiti";
 import { fileURLToPath } from "node:url";
@@ -10,7 +11,7 @@ const k = await jiti.import(new URL("../plugins/pix-anthropic/accountkit.ts", im
 const arg = process.argv[2];
 const ids = k.accounts().map(a => a.id);
 if (arg) {
-  const v = arg === "proxy" ? "minara" : arg;
+  const v = arg;
   if (v !== "auto" && !ids.includes(v)) { console.error(`usage: claude-route [auto|${ids.join("|")}]`); process.exit(2); }
   k.setChoice(v);
 }
@@ -20,5 +21,5 @@ for (const a of k.accounts()) {
   const x = u[a.id] ?? {};
   const left = x.left === undefined ? "% left unknown" : `${Math.round(x.left)}% left`;
   const cool = x.coolUntil && now < x.coolUntil ? `, resting until ${new Date(x.coolUntil).toLocaleTimeString()}` : "";
-  console.log(`${a.id === active ? "▸" : " "} ${a.id.padEnd(7)} ${a.label.padEnd(12)} ${a.kind.padEnd(6)} ${left}${cool}`);
+  console.log(`${a.id === active ? "▸" : " "} ${a.id.padEnd(12)} ${k.ready(a) ? left : "not logged in: CLAUDE_CONFIG_DIR=" + a.configDir + " claude /login"}${cool}`);
 }

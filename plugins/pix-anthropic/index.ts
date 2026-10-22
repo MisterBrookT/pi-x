@@ -27,8 +27,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPixAnthropicStream } from "./stream.ts";
-import { claudeAuth } from "./claude-auth.ts";
-import { footerLabel, leftFromUsage, recordUsage, usage } from "./accountkit.ts";
+import { claudeAuth, readClaudeToken } from "./claude-auth.ts";
+import { accounts, footerLabel, leftFromUsage, ready, recordUsage, usage } from "./accountkit.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = process.env.PIX_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
@@ -189,11 +189,14 @@ export default async function (pi: ExtensionAPI) {
 	// accountkit: % left of brook's own login (5-hour / weekly window), shared via ~/.pix/accounts-usage.json.
 	// One poll per 5 min across sessions (skip when another session checked recently).
 	const poll = async () => {
-		if (Date.now() - (usage().own?.checkedAt ?? 0) < 4 * 60_000) return;
-		try {
-			const r = await fetch("https://api.anthropic.com/api/oauth/usage", { headers: { Authorization: `Bearer ${(await claudeAuth.resolve({ signal: AbortSignal.timeout(20_000) }) as { auth: { apiKey: string } }).auth.apiKey}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(15_000) });
-			if (r.ok) recordUsage("own", leftFromUsage(await r.json()));
-		} catch { /* offline: keep the last numbers */ }
+		for (const a of accounts().filter(ready)) {
+			if (Date.now() - (usage()[a.id]?.checkedAt ?? 0) < 4 * 60_000) continue;
+			try {
+				const token = a.configDir ? await readClaudeToken(a.configDir) : (await claudeAuth.resolve({ signal: AbortSignal.timeout(20_000) }) as { auth: { apiKey: string } }).auth.apiKey;
+				const r = await fetch("https://api.anthropic.com/api/oauth/usage", { headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(15_000) });
+				if (r.ok) recordUsage(a.id, leftFromUsage(await r.json()));
+			} catch { /* offline or not logged in: keep the last numbers */ }
+		}
 	};
 	let timer: ReturnType<typeof setInterval> | undefined;
 	if (typeof pi.on === "function") pi.on("session_start", (_e, ctx) => {
