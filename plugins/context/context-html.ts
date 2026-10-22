@@ -28,6 +28,8 @@ export interface HtmlEntryLike {
 export interface ContextHtmlInput {
 	report: ContextReport;
 	systemPrompt?: string;
+	/** Blocks plugins add per request (e.g. For you memory); not in Pi's own prompt or export. */
+	injected?: { name: string; text: string }[];
 	tools: HtmlToolLike[];
 	entries: HtmlEntryLike[];
 	title?: string;
@@ -134,6 +136,7 @@ export const renderContextHtml = (input: ContextHtmlInput): string => {
 			`${compact(systemTokens)} tok · ${input.tools.filter((tool) => tool.active).length} tools`,
 			block(input.systemPrompt ?? "(unavailable)") + input.tools.map(toolBlock).join(""),
 		),
+		...(input.injected ?? []).map(s => turn(s.name, `${compact(estimateTokens(s.text.length))} tok · added each turn`, block(s.text))),
 		...input.entries.map((entry) => {
 			const text = entryText(entry);
 			return turn(

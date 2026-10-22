@@ -1,3 +1,4 @@
+import { setInjected } from "../core/injected-context.ts";
 import { boardNameFor } from "../core/chat-board.ts";
 /**
  * The For you coordinator: one Pi session (id "pix-foryou") that looks after brook's open loops.
@@ -374,6 +375,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
 	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
+	// /context html shows this block as "For you memory"; Pi's own /export cannot see it.
+	setInjected("For you memory", async (ctx: any) => isCoordinator(ctx) ? coordinatorContext(deps.dir, await sessions()) : undefined);
 	pi.on("before_agent_start", async (event, ctx) => {
 		apply(ctx);
 		if (!isCoordinator(ctx)) return undefined;

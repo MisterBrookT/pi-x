@@ -200,3 +200,15 @@ test("a failed html export is reported instead of thrown", async () => {
 	assert.equal(h.notices.at(-1).level, "error");
 	assert.match(h.notices.at(-1).message, /Could not export the context:/);
 });
+
+test("regression: /context html includes blocks plugins inject per request (For you memory), which Pi's /export misses", async () => {
+	const { setInjected } = await import("../plugins/core/injected-context.ts");
+	setInjected("For you memory", ctx => ctx?.cwd?.includes("pix-inj-") ? "### How you work with brook\n- No em dashes" : undefined);
+	const cwd = await mkdtemp(join(tmpdir(), "pix-inj-"));
+	const h = harness({ cwd });
+	await h.run("html");
+	const html = await readFile(join(cwd, ".pix", "context.html"), "utf8");
+	assert.match(html, /class="label">For you memory</);
+	assert.match(html, /How you work with brook[\s\S]*No em dashes/);
+	setInjected("For you memory", () => undefined);
+});

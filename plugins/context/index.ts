@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { renderContextHtml } from "./context-html.ts";
 import { buildReport, renderReport, sizeOf } from "./context-usage.ts";
 import { originOf, toolChars } from "../core/tool-inventory.ts";
+import { injectedSections } from "../core/injected-context.ts";
 
 /** Active tool schemas, which ride along on every request. */
 const schemaChars = (pi: ExtensionAPI): { chars: number; count: number } => {
@@ -74,6 +75,7 @@ export const exportHtml = async (pi: ExtensionAPI, ctx: ExtensionContext): Promi
 	const html = renderContextHtml({
 		report: report(pi, ctx),
 		systemPrompt: ctx.getSystemPrompt?.(),
+		injected: await injectedSections(ctx),
 		tools: pi.getAllTools().map((tool) => ({
 			name: tool.name,
 			description: tool.description,
