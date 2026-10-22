@@ -176,3 +176,24 @@ test("phone: several questions stack on one card; Submit sends one JSON array on
     assert.deepEqual(await page.evaluate(() => window.__sent[0]), { action: "answer", value: '["Full","Friday"]' });
   } finally { await browser.close(); server.close(); }
 });
+
+test("phone For you is the timeline: person, via app, latest word, the loop's own choices as actions, Ask Pi", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const html = await page.evaluate(() => {
+      forYou = { pending: [{ id: "a1", title: "Knight chart", why: "Knight asked for curves", source: "Feishu: Knight", kind: "feishu", at: new Date().toISOString(), line: "k", who: { name: "Knight", source: "feishu" }, latest: { text: "Chart ready, Kairos +74%", at: new Date().toISOString() } },
+        { id: "a2", title: "Closed", status: "done", at: new Date().toISOString() }], onit: [], lines: [{ id: "k", name: "Kairos launch" }],
+        cards: [{ id: "a1", choices: [{ label: "Index method then send", run: "here" }, { label: "Send as is", run: "here" }, { label: "Later", run: "later" }] }] };
+      return fyFeedHtml(true);
+    });
+    assert.match(html, /<b>Knight<\/b><span class="tl-via">via Feishu<\/span><span>· Kairos launch<\/span>/);
+    assert.match(html, /Chart ready, Kairos \+74%/);
+    assert.match(html, /class="tl-act main" data-fy-choice="0">Index method then send/);
+    assert.match(html, /data-fy-choice="1">Send as is/);
+    assert.doesNotMatch(html, /data-fy-choice="2"/, "Later is the quiet action, not a choice button");
+    assert.match(html, /data-tl-ask/);
+    assert.doesNotMatch(html, /Closed/, "closed loops never show");
+  } finally { await browser.close(); server.close(); }
+});

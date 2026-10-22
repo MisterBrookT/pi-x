@@ -15,7 +15,7 @@ const token = "foryou-token-1234567890";
 const item = (id, extra = {}) => ({ id, at: new Date().toISOString(), source: "Group", sourceKey: "feishu:c", title: `Title ${id}`, why: `Why ${id}`, action: "Draft a reply", refs: [], howToRead: "lark-cli ...", status: "pending", ...extra });
 
 // The timeline is rows; tap one to open its post (with buttons). Waits for the post page.
-const openPost = async (scope, id) => { const row = scope.locator(`.fp.fr[data-fy="${id}"]`); await row.waitFor({ timeout: 12000 }); await row.click(); const post = scope.locator(`.fd .fp[data-fy="${id}"]`).filter({ visible: true }).first(); await post.waitFor({ timeout: 8000 }); return post; };
+const openPost = async (scope, id) => { const row = scope.locator(`.tl-post[data-fy="${id}"] .tl-title`); await row.waitFor({ timeout: 12000 }); await row.click(); const post = scope.locator(`.fd .fp[data-fy="${id}"]`).filter({ visible: true }).first(); await post.waitFor({ timeout: 8000 }); return post; };
 async function folder(t) {
   const dir = await mkdtemp(join(tmpdir(), "pix-foryou-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -136,9 +136,9 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.equal(await page.locator('[data-fy-tab]').count(), 0, "one feed, no tabs");
   // Transparency: an open row says where it came from, and each button says where it runs and what it does.
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("c", { button: "Start test", due: "2099-01-20", project: "~/w/nd", choices: [{ label: "Start test", run: "new", prompt: "Run the Databento test" }] })) + "\n");
-  await page.locator('.fp.fr[data-fy="c"]').waitFor({ timeout: 8000 });
-  assert.match(await page.locator('.fp[data-fy="c"] .fp-meta').textContent(), /Group· now\s*Due/);
-  assert.equal(await page.locator('.fp.fr[data-fy="c"] button').count(), 0, "the timeline row has no buttons");
+  await page.locator('.tl-post[data-fy="c"]').waitFor({ timeout: 8000 });
+  assert.match(await page.locator('.tl-post[data-fy="c"] .tl-meta').textContent(), /via Feishu[\s\S]*(now|\dm)[\s\S]*due/);
+  assert.match(await page.locator('.tl-post[data-fy="c"] .tl-act.main').textContent(), /Start test/, "the loop's own choice is the post's main action");
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a", prepared: "Draft: Hi, here is the list" }) + "\n");
   await page.waitForTimeout(1500);
   assert.match(await (await openPost(page, "a")).locator(".fp-prep").textContent(), /Draft: Hi, here is the list/);
@@ -169,10 +169,6 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('#forYou .fp[data-fy="a"]').waitFor({ state: "detached" });
   assert.equal(await page.locator("#forYou").getByText("All clear").count(), 0, "no big empty state");
   assert.equal(await page.locator(".fp:not(.fw)", { hasText: "Title c" }).count(), 0, "parked loops leave the feed");
-  // Parked loops fold into "Later · N" at the bottom of the same feed.
-  await page.locator('#forYou [data-fy-filter="later"]').click();
-  await page.locator('#forYou .fp.later', { hasText: "Title c" }).waitFor();
-  await page.locator('#forYou [data-fy-filter="all"]').click();
 
   // ✓ Done on a card closes it as "done" (he handled it), not "dismissed".
   appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("d")) + "\n");
@@ -180,9 +176,7 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   await page.locator('.fp[data-fy="d"] [data-fy-act="done"]').click();
   await page.locator('.fp[data-fy="d"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"d","status":"done"/);
-
-  // Finished work shows as one calm line, so brook sees it is done and not coming back.
-  await page.getByText("✓ 1 done today").waitFor({ timeout: 8000 });
+  assert.equal(await page.locator('.tl-post[data-fy="d"]').count(), 0, "closed loops leave the timeline");
   assert.deepEqual(errors, []);
 });
 
@@ -252,7 +246,7 @@ test("For you is a feed of posts; the chat sits behind the Shiba button; the mai
   assert.equal(await page.locator("#forYouCount").textContent(), "1");
   assert.equal(await page.locator('#sessions .row[data-id="pix-foryou"]').count(), 0, "not mixed with sessions");
   await page.locator("#forYouRow").click();
-  await page.locator('#messages .fp.fr[data-fy="j1"]').waitFor();
+  await page.locator('#messages .tl-post[data-fy="j1"]').waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the For you chat itself");
   const post = await openPost(page.locator("#messages"), "j1");
   assert.equal(await page.locator("#messages .job-card, #messages .feed-head, #messages .ln-box").count(), 0, "no second card UI");
@@ -295,7 +289,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  const p1 = page.locator('#messages .fp[data-fy="k1"]'), p2 = page.locator('#messages .fp[data-fy="k2"]');
+  const p1 = page.locator('#messages .tl-post[data-fy="k1"]'), p2 = page.locator('#messages .tl-post[data-fy="k2"]');
   await p1.waitFor(); await p2.waitFor();
   await put(true);
   await page.locator("#messages .fy-status").waitFor({ timeout: 8000 });
@@ -308,7 +302,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
   await q1.locator("[data-fy-else-send]").click();
   assert.match((await next).prompts[0], /own instruction[\s\S]*Only draft a reply/);
-  await page.locator('#messages .fp.fr[data-fy="k2"]').waitFor({ timeout: 8000 }); // answered: back to the timeline
+  await page.locator('#messages .tl-post[data-fy="k2"]').waitFor({ timeout: 8000 }); // answered: back to the timeline
   const q2 = await openPost(page.locator("#messages"), "k2");
   await q2.locator('.fp-bar [data-fy-act="later"]').click();
   await p2.waitFor({ state: "detached", timeout: 8000 });
@@ -363,13 +357,10 @@ test("related asks in one line of work share one card, and one answer handles th
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
-  // On the phone the two asks are one job row; its page holds both.
-  const job = page.locator('#messages [data-fy-job="bench"]');
-  await job.waitFor();
-  assert.match(await job.textContent(), /News bench[\s\S]*Curve for Lowes[\s\S]*\+1[\s\S]*2 need you/);
-  await job.click();
-  await page.locator('#messages .fd .fp[data-fy="h1"]').first().waitFor();
-  assert.match(await page.locator("#messages .fd").first().textContent(), /Curve for Lowes[\s\S]*Data for 欧阳/);
+  // On the phone each ask is its own post, tagged with its line; the line chip filters to them.
+  await page.locator('#messages .tl-post[data-fy="h2"]').waitFor();
+  assert.match(await page.locator('#messages .tl-post[data-fy="h1"] .tl-meta').textContent(), /News bench/);
+  assert.equal(await page.locator('#messages [data-tl-line="bench"]').count(), 1);
   if (process.env.PIX_SHOT) { await page.waitForTimeout(500); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
@@ -394,8 +385,9 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
-  await page.locator("#messages .fy-feed .fw").first().waitFor();
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /All 5 fixes are done[\s\S]*News bench[\s\S]*1 in progress/);
+  const w = page.locator('#messages .tl-post[data-fy="w1"]');
+  await w.waitFor();
+  assert.match(await w.textContent(), /News bench[\s\S]*All 5 fixes are done/);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
 });
 
@@ -441,55 +433,26 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
-  const post = page.locator('#messages .fp[data-fy="p1"]');
+  const post = page.locator('#messages .tl-post[data-fy="p1"]');
   await post.waitFor();
   assert.equal(await page.locator("#forYouPage").isHidden(), true, "one page: the bell opens the For you chat");
-  assert.match(await post.locator(".fp-meta").textContent(), /WeChat: 千羽· now/);
-  assert.equal(await page.locator("#messages .fp:not(.fw):not(.fj)").count(), 2, "one post per thing that needs brook (jobs are their own posts)");
+  assert.match(await post.locator(".tl-meta").textContent(), /千羽[\s\S]*via WeChat[\s\S]*(now|\dm)/);
+  assert.equal(await page.locator("#messages .tl-post").count(), 3, "one post per open loop, in progress included");
+  assert.match(await page.locator('#messages .tl-post[data-fy="p3"]').textContent(), /Backtest fixes[\s\S]*3 of 5 fixed/, "in-progress posts show the latest note");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
-  // Reply = a comment, on the post's page: it goes to For you as brook's instruction.
-  const full = await openPost(page.locator("#messages"), "p1");
-  for (const b of await full.locator(".fp-bar button").all()) assert.ok((await b.boundingBox()).height >= 40);
-  await full.locator(".fp-bar [data-fy-else]").click();
-  await full.locator(".fp-reply textarea").fill("Say OK, I'll be there at 18:30");
+  // Ask Pi = a comment under the post: it goes to For you as brook's instruction.
+  await post.locator("[data-tl-ask]").click();
+  await post.locator(".tl-reply textarea").fill("Say OK, I'll be there at 18:30");
   const next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
-  await full.locator("[data-fy-else-send]").click();
+  await post.locator("[data-fy-comment]").click();
   assert.match((await next).prompts[0], /I'll be there at 18:30/);
-  await page.locator('#messages .fp.fr[data-fy="p2"]').waitFor({ timeout: 8000 });
-  // In progress, below the posts in the same feed: what's being worked on, with the latest note.
-  assert.match(await page.locator("#messages .fy-feed").textContent(), /Doing[\s\S]*Backtest fixes[\s\S]*3 of 5 fixed[\s\S]*News bench/);
-  assert.equal(await page.locator("#messages .fw-trail li.now").count() > 0, true, "the newest note is highlighted");
-  if (process.env.PIX_SHOT) { await page.locator(".fw").first().scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-work.png") }); }
-  assert.equal(await page.locator(".fp-compose:visible").count(), 0, "no pen: the composer below is the chat");
-  // One list: no Ready/Doing section headers; filter chips instead, default All.
-  assert.equal(await page.locator("#messages .fw-h").count(), 0);
-  assert.equal(await page.locator('#messages [data-fy-filter="all"]').getAttribute("aria-selected"), "true");
-  await page.locator('#messages [data-fy-filter="doing"]').click();
-  assert.equal(await page.locator('#messages .fp[data-fy="p2"]').count(), 0, "Doing hides what waits on brook");
-  await page.locator('#messages [data-fy-filter="all"]').click();
-  // Tap a post: its own page with the full progress, a comment box, and a jump to the session.
-  await page.locator('#messages .fw[data-fy-detail="i:p3"] .fw-t').click();
-  await page.locator("#messages .fd .fd-thread .fd-rp.now", { hasText: "3 of 5 fixed" }).waitFor();
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-detail.png") });
-  assert.equal(await page.locator("#messages .fd .fd-reply textarea").count(), 1);
-  await page.locator("#messages [data-fy-back]").click();
-  await page.locator('#messages .fp[data-fy="p2"]').waitFor();
   // Swipe a stale post sideways: it is removed for good.
-  const card = page.locator('#messages .fp[data-fy="p2"]'), box = await card.boundingBox();
+  const card = page.locator('#messages .tl-post[data-fy="p2"]'), box = await card.boundingBox();
   const touch = async (type, x) => card.evaluate((el, [type, x, y]) => { const t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y }); el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === "touchend" ? [] : [t], changedTouches: [t] })); }, [type, x, box.y + 20]);
   await touch("touchstart", box.x + 40); for (const dx of [20, 80, 160, 260]) await touch("touchmove", box.x + 40 + dx); await touch("touchend", box.x + 300);
-  await page.locator('#messages .fp[data-fy="p2"]').waitFor({ state: "detached" });
+  await page.locator('#messages .tl-post[data-fy="p2"]').waitFor({ state: "detached" });
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"p2","status":"dismissed"/);
-  // A line says what it waits on; its page shows its open loops in place (two levels at most, no third page).
-  assert.match(await page.locator('#messages .fj[data-fy-detail="l:bench"]').textContent(), /News bench[\s\S]*1 in progress/);
   assert.equal(await page.evaluate(() => document.body.classList.contains("open") || document.body.classList.contains("files-open")), false, "swiping a card does not also open a side drawer");
-  await page.waitForTimeout(500); // the click right after a swipe is swallowed on purpose
-  await page.locator('#messages .fj[data-fy-detail="l:bench"]').click();
-  assert.match(await page.locator('#messages .fd .fd-loop', { hasText: "Backtest fixes" }).textContent(), /Backtest fixes/);
-  // Its updates read like replies under the post, newest first.
-  assert.match(await page.locator('#messages .fd .fj-replies .fj-rp').first().textContent(), /3 of 5 fixed/);
-  assert.equal(await page.locator('#messages .fd [data-fy-detail]').count(), 0, "nothing on a detail page opens another page");
-  await page.locator("#messages [data-fy-back]").click();
   // Lines of work swipe away too (retired, not deleted).
   assert.equal((await fetch(`${base}/api/foryou/line/bench/hide`, { method: "POST", headers: auth })).status, 200);
   assert.equal(JSON.parse(readFileSync(join(dir, "lines.json"), "utf8"))[0].hidden, true);
@@ -529,7 +492,7 @@ test("phone: a card a session handed back shows where it stands now, not the ori
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   // The row already says where it stands; the post page has the open question.
-  assert.match(await page.locator('.fp.fr[data-fy="h1"] .fr-s').textContent(), /minara-3\s*Static mock built/);
+  assert.match(await page.locator('.tl-post[data-fy="h1"] .tl-comment').textContent(), /Static mock built/);
   const post = await openPost(page.locator("#forYouPage"), "h1");
   assert.match(await post.locator(".fp-now").textContent(), /minara-3\s*Static mock built/, "who did what, latest step");
   assert.match(await post.locator(".fp-text").textContent(), /Launch how\?/, "the open question");
@@ -569,24 +532,9 @@ test("job: a line of work with several loops is ONE card with its loops as tasks
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
   await page.goto(`${base}/#token=${token}`);
   await page.evaluate(() => document.getElementById("forYouOpen").click());
-  const job = page.locator('#forYouPage [data-fy-job="kairos-launch"]');
-  await job.waitFor({ timeout: 12000 });
-  assert.equal(await page.locator("#forYouPage [data-fy-job]").count(), 1, "one row for the job");
-  assert.match(await job.textContent(), /Kairos launch[\s\S]*1 needs you[\s\S]*2 in progress/);
-  // Like a post: the job's face, where it stands, the one thing waiting on brook, and a bar (updates · needs you · in progress).
-  assert.equal(await job.locator(".fj-q .you").textContent(), "Review Kairos doc");
-  assert.match(await job.locator(".fj-bar").textContent(), /^\d+1 needs you2 in progress$/);
-  const [you, doing] = await job.locator(".fj-bar .you, .fj-bar .doing").evaluateAll(L => L.map(e => getComputedStyle(e).color));
-  assert.notEqual(you, doing, "needs-you and in-progress read as different colors");
-  assert.equal(await job.locator("button").count(), 0, "the timeline has no buttons; tap opens the post");
-  assert.equal(await page.locator('#forYouPage .fp[data-fy="k2"]').count(), 0, "its tasks are inside the job, not in the list");
-  if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT.replace(".png", "-list.png") });
-  await job.click();
-  const k2 = page.locator('#forYouPage .fd .fp[data-fy="k2"]');
-  await k2.waitFor();
-  assert.ok(await k2.locator(".fp-go").count(), "the task that needs brook has its buttons on the job page");
-  assert.match(await page.locator("#forYouPage .fd").textContent(), /Deploy Kairos[\s\S]*Bench running/);
-  if (process.env.PIX_SHOT) { await page.waitForTimeout(300); await page.screenshot({ path: process.env.PIX_SHOT }); }
+  await page.locator('#forYouPage .tl-post[data-fy="k3"]').waitFor({ timeout: 12000 });
+  assert.equal(await page.locator("#forYouPage .tl-post").count(), 3, "each loop is one post");
+  assert.match(await page.locator('#forYouPage .tl-post[data-fy="k1"] .tl-meta').textContent(), /Kairos launch/, "tagged with the merged job");
 });
 
 test("Mac: the Unfinished list and the card pager show one row per job (a line with 2+ loops), with its tasks inside", async () => {
@@ -613,9 +561,9 @@ test("a line with one ask that waits on brook is one row (no second 'Waiting on 
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   await page.evaluate(() => document.getElementById("forYouOpen").click());
-  await page.locator('#forYouPage [data-fy-job="phd"]').waitFor({ timeout: 12000 });
-  assert.equal(await page.locator("#forYouPage .fp").count(), 1, "one row");
-  assert.match(await page.locator('#forYouPage [data-fy-job="phd"]').textContent(), /PhD \/ ZJU[\s\S]*回复陈老师[\s\S]*1 needs you/);
+  await page.locator('#forYouPage .tl-post[data-fy="c1"]').waitFor({ timeout: 12000 });
+  assert.equal(await page.locator("#forYouPage .tl-post").count(), 1, "one row");
+  assert.match(await page.locator('#forYouPage .tl-post[data-fy="c1"]').textContent(), /PhD \/ ZJU[\s\S]*回复陈老师/);
   assert.doesNotMatch(await page.locator("#forYouPage").textContent(), /Waiting on you/);
 });
 
@@ -638,19 +586,8 @@ test("jobs read like X: each job has its own face For you picks; its page is the
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
-  const job = page.locator('#messages [data-fy-job="kairos"]');
-  await job.waitFor({ timeout: 12000 });
-  assert.match(await job.locator(".fj-av img").getAttribute("src"), /^data:image\/webp;base64,/);
-  assert.match(await job.locator(".fj-say").textContent(), /Arena live; site next/);
-  assert.equal(await job.locator("button").count(), 0, "a post in the timeline has no buttons");
-  await job.click();
-  const replies = page.locator("#messages .fd .fj-replies .fj-rp");
-  await replies.first().waitFor();
-  const texts = await replies.locator(".fj-rt").allTextContents();
-  assert.equal(texts[0], "Lowes made it a Feishu task", "newest first, date prefix stripped");
-  assert.ok(texts.includes("draft started") && texts.includes("weights downloading"));
-  assert.match(await page.locator("#messages .fd .fj-main").textContent(), /Kairos launch[\s\S]*Arena live; site next/);
-  const big = await page.locator("#messages .fd .fj-main .fj-big").boundingBox(), main = await page.locator("#messages .fd .fj-main").boundingBox();
-  assert.ok(big.width > main.width * 0.9, "the post text spans the page, not a squeezed column");
-  assert.ok(await page.locator('#messages .fd .fp[data-fy="a"] .fp-go').count(), "what needs brook keeps its buttons on the post page");
+  const a = page.locator('#messages .tl-post[data-fy="a"]');
+  await a.waitFor({ timeout: 12000 });
+  assert.match(await a.locator(".tl-comment").textContent(), /Lowes made it a Feishu task/, "the newest update is the post's one comment");
+  assert.doesNotMatch(await a.locator(".tl-comment").textContent(), /2026-10-21/, "date prefix stripped");
 });

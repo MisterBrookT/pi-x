@@ -50,6 +50,14 @@ createServer(async (req, res) => {
 		const store = await createJiti(import.meta.url, { moduleCache: false }).import(new URL("../plugins/foryou/proactive-store.ts", import.meta.url).pathname);
 		res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(store.forYouView())); return;
 	}
+	// The real page's For you list and photos, also from current code until the hub reloads.
+	if (req.method === "GET" && (path === "/api/foryou" || path.startsWith("/api/foryou/avatar/"))) {
+		const j = createJiti(import.meta.url, { moduleCache: false });
+		const body = path === "/api/foryou" ? await (async () => { const st = await j.import(new URL("../plugins/foryou/proactive-store.ts", import.meta.url).pathname); const live = await fetch(`http://127.0.0.1:${hub}/api/foryou`, { headers: { authorization: req.headers.authorization || "" } }).then(r => r.json()).catch(() => ({})); return { ...live, ...st.forYouView() }; })()
+			: (await j.import(new URL("../plugins/foryou/hub.ts", import.meta.url).pathname)).avatarRoute(path);
+		const status = body?.status ?? 200, out = body?.status ? body.body : body;
+		res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(out)); return;
+	}
 	if (req.method === "GET" && path.startsWith("/icons/")) {
 		const f = join(icons, basename(path));
 		if (!existsSync(f)) { res.writeHead(404); res.end(); return; }

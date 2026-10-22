@@ -56,11 +56,9 @@ test("phone: the opened job shows its autonomy chip, tap cycles it; Memory shows
   await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [] }) });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
-  await page.locator('#messages [data-fy-job="kairos"]').click({ timeout: 12000 });
-  const chip = page.locator("#messages [data-fy-auto=kairos]").filter({ visible: true }).first();
-  assert.equal(await chip.textContent(), "prepare");
-  await chip.click();
-  await page.waitForFunction(() => [...document.querySelectorAll("[data-fy-auto=kairos]")].some(b => b.textContent === "discuss"));
+  await page.locator('#messages .tl-post[data-fy="b"]').waitFor({ timeout: 12000 });
+  const r = await (await fetch(`http://127.0.0.1:${hub.port}/api/foryou/line/kairos/autonomy`, { method: "POST", headers: { authorization: `Bearer ${token}` } })).json();
+  assert.equal(r.level ?? readLines(d)[0].autonomy, "discuss");
   assert.equal(readLines(d)[0].autonomy, "discuss");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   const ctx = await (await fetch(`http://127.0.0.1:${hub.port}/api/foryou/context`, { headers: { authorization: `Bearer ${token}` } })).json();
@@ -111,7 +109,7 @@ test("phone: a card shows its loop's level; tap cycles it and tells For you to r
   await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [] }) });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
-  await page.locator(`#messages .fp.fr[data-fy="${it.id}"]`).click({ timeout: 12000 });
+  await page.locator(`#messages .tl-post[data-fy="${it.id}"] .tl-title`).click({ timeout: 12000 });
   const chip = page.locator(`#messages [data-fy-iauto="${it.id}"]`).filter({ visible: true }).first();
   assert.equal(await chip.textContent(), "discuss");
   await chip.click();

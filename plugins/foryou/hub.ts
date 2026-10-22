@@ -2,6 +2,7 @@ import { hideLine, isAutonomy, setLineAutonomy } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
+import { avatarFile, readFileOrUndefined, sourceIconFile } from "../core/avatarkit.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { editMemoryLine, markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
 import { setItemAutonomy, contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
@@ -13,9 +14,17 @@ export interface ForYouHubOptions {
 	act?: (id: string, focus?: boolean, into?: string, cwd?: string) => Promise<unknown>;
 }
 
+export function avatarRoute(path: string): { status: number; body: unknown } {
+	const enc = path.slice("/api/foryou/avatar/".length); let q: URLSearchParams; try { q = new URLSearchParams(Buffer.from(enc, "base64url").toString("utf8")); } catch { q = new URLSearchParams(); }
+	const badge = q.get("badge");
+	const f = badge ? sourceIconFile(badge) : q.get("name") ? avatarFile({ name: q.get("name")!.slice(0, 80), source: (q.get("source") || undefined) as any, id: q.get("id")?.slice(0, 80) || undefined }) : undefined;
+	const b = readFileOrUndefined(f);
+	return b && b.length < 900_000 ? { status: 200, body: { mimeType: f!.endsWith(".png") ? "image/png" : "image/jpeg", data: b.toString("base64") } } : { status: 404, body: { error: "no picture" } };
+}
+
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
-	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory") || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/autonomy$/.test(path);
+	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory" || /^\/api\/foryou\/avatar\/[A-Za-z0-9_-]{1,400}$/.test(path)) || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/autonomy$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const dir = options.dir;
@@ -53,6 +62,8 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); unwatchFile(memLog, onProactive); clearInterval(wake); },
 		async route(method, path, body) {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
+			// A post's person photo or app badge, as JSON so it passes the relay. 404 = initials / no badge.
+			if (method === "GET" && /^\/api\/foryou\/avatar\/[A-Za-z0-9_-]{1,400}$/.test(path)) return avatarRoute(path);
 			// Memory: what For you learned, readable and removable by brook. Only the memory folder.
 			if (method === "GET" && path === "/api/foryou/memory") return { status: 200, body: memoryView(pdir) };
 			if (method === "POST" && path === "/api/foryou/memory/edit") {

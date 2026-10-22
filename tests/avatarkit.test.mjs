@@ -63,3 +63,13 @@ test("aliases map an ambiguous or photo-less name to a real account", async () =
 	assert.deepEqual(kit.resolveWho({ name: "Lowes", source: "feishu" }), { name: "Lowes", source: "feishu" });
 	delete process.env.PIX_HOME_OVERRIDE;
 });
+
+test("phone: post photos come through the relay as JSON; the route is allow-listed and bounded", async () => {
+  const { avatarRoute, forYouRelayAllowed } = await jiti.import("../plugins/foryou/hub.ts");
+  const key = q => "/api/foryou/avatar/" + Buffer.from(q).toString("base64url");
+  assert.ok(forYouRelayAllowed(key("name=Lowes&source=feishu"), "GET"));
+  assert.ok(!forYouRelayAllowed("/api/foryou/avatar/../../x", "GET"));
+  assert.ok(!forYouRelayAllowed(key("name=x"), "POST"));
+  process.env.PIX_HOME_OVERRIDE = mkdtempSync(join(tmpdir(), "ak-"));
+  try { assert.equal(avatarRoute(key("badge=nope")).status, 404); } finally { delete process.env.PIX_HOME_OVERRIDE; }
+});
