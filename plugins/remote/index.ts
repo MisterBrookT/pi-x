@@ -85,8 +85,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   // Who drives this session right now: the Mac terminal or the phone. The hub pushes only for the phone side.
   let origin: "mac" | "phone" = "mac";
   pi.on("input", event => { if (event.source === "interactive") origin = "mac"; });
-  let pendingQuestion: { id: string; question: string; options: { label: string; description?: string }[]; questions?: { header: string; question: string; options: { label: string; description?: string }[] }[] } | undefined;
-  pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })), ...multiQuestions(data.questions) }; schedulePush(); } });
+  let pendingQuestion: { id: string; question: string; context?: string; options: { label: string; description?: string }[]; questions?: { header: string; question: string; options: { label: string; description?: string }[] }[] } | undefined;
+  pi.events.on(QUESTION_OPEN, (data: any) => { if (data?.id) { pendingQuestion = { id: String(data.id), question: String(data.question ?? "").slice(0, 4000), ...(data.context ? { context: String(data.context).slice(0, 2000) } : {}), options: (Array.isArray(data.options) ? data.options : []).slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })), ...multiQuestions(data.questions) }; schedulePush(); } });
   pi.events.on(BACKGROUND_CHANGED, () => schedulePush());
   let chatWaiting: string | undefined;
   pi.events.on(CHAT_WAITING, (data: any) => { chatWaiting = typeof data?.text === "string" && data.text ? data.text.slice(0, 120) : undefined; schedulePush(); });

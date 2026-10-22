@@ -64,7 +64,7 @@ export interface RemotePrompt { text: string; images: { mimeType: string; data: 
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
 export interface RemoteAction { action: RemoteActionName | "model" | "thinking" | "answer" | "rewind"; value?: string }
-export interface RemoteQuestion { id: string; question: string; options: { label: string; description?: string }[]; questions?: { header: string; question: string; options: { label: string; description?: string }[] }[] }
+export interface RemoteQuestion { id: string; question: string; context?: string; options: { label: string; description?: string }[]; questions?: { header: string; question: string; context?: string; options: { label: string; description?: string }[] }[] }
 
 interface Registered extends RemoteSnapshot {
   seenAt: number;
@@ -187,14 +187,14 @@ export function readMacIdleMs(): number {
 
 function validQuestion(q: any): RemoteQuestion | undefined {
   if (!q || typeof q.id !== "string" || typeof q.question !== "string" || !Array.isArray(q.options)) return undefined;
-  return { id: q.id.slice(0, 200), question: q.question.slice(0, 4000),
+  return { id: q.id.slice(0, 200), question: q.question.slice(0, 4000), ...(typeof q.context === "string" && q.context.trim() ? { context: q.context.slice(0, 2000) } : {}),
     options: q.options.slice(0, 12).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })), ...multiQuestions(q.questions) };
 }
 
 /** Several questions in one card (2-4), trimmed like the single form. */
 export function multiQuestions(qs: any): { questions?: RemoteQuestion["questions"] } {
   if (!Array.isArray(qs) || qs.length < 2) return {};
-  return { questions: qs.slice(0, 4).map((q: any) => ({ header: String(q?.header ?? "").slice(0, 40), question: String(q?.question ?? "").slice(0, 2000), options: (Array.isArray(q?.options) ? q.options : []).slice(0, 6).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) })) };
+  return { questions: qs.slice(0, 4).map((q: any) => ({ header: String(q?.header ?? "").slice(0, 40), question: String(q?.question ?? "").slice(0, 2000), ...(q?.context ? { context: String(q.context).slice(0, 2000) } : {}), options: (Array.isArray(q?.options) ? q.options : []).slice(0, 6).map((o: any) => ({ label: String(o?.label ?? "").slice(0, 200), description: o?.description ? String(o.description).slice(0, 400) : undefined })) })) };
 }
 
 export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteHub> {

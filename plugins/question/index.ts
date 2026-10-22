@@ -43,20 +43,23 @@ const OptionSchema = Type.Object({
 const OneQuestion = Type.Object({
 	header: Type.String({ description: "Short tab label, 1-2 words (e.g. Scope)" }),
 	question: Type.String({ description: "The question" }),
+	context: Type.Optional(Type.String({ description: "A few lines of markdown shown above the question: what you found and what each choice means, so brook can decide without scrolling up" })),
 	options: Type.Array(OptionSchema, { description: "2-4 options, recommended first" }),
 });
 
 const QuestionParams = Type.Object({
 	question: Type.Optional(Type.String({ description: "The question to ask the user (single-question form)" })),
+	context: Type.Optional(Type.String({ description: "A few lines of markdown shown above the question: what you found and what each choice means, so brook can decide without scrolling up" })),
 	options: Type.Optional(Type.Array(OptionSchema, { description: "Options for the user to choose from (single-question form)" })),
 	questions: Type.Optional(Type.Array(OneQuestion, { minItems: 1, maxItems: 4, description: "Ask 2-4 related questions at once instead of question/options; brook answers them all, then submits once" })),
 });
 
-export type Asked = { header: string; question: string; options: OptionWithDesc[] };
+export type Asked = { header: string; question: string; context?: string; options: OptionWithDesc[] };
 /** Both call forms as one list. */
-export function askedList(p: { question?: string; options?: OptionWithDesc[]; questions?: Asked[] }): Asked[] {
-	if (p.questions?.length) return p.questions.slice(0, 4).map((q, i) => ({ header: q.header || `Q${i + 1}`, question: q.question, options: q.options ?? [] }));
-	return [{ header: "", question: p.question ?? "", options: p.options ?? [] }];
+export function askedList(p: { question?: string; context?: string; options?: OptionWithDesc[]; questions?: Asked[] }): Asked[] {
+	const ctx = (c?: string) => c?.trim() ? { context: c.trim().slice(0, 2000) } : {};
+	if (p.questions?.length) return p.questions.slice(0, 4).map((q, i) => ({ header: q.header || `Q${i + 1}`, question: q.question, ...ctx(q.context ?? (i === 0 ? p.context : undefined)), options: q.options ?? [] }));
+	return [{ header: "", question: p.question ?? "", ...ctx(p.context), options: p.options ?? [] }];
 }
 
 /** Several questions: a header strip (✓ for answered, current in accent), the current question, or the review page. */
@@ -65,7 +68,7 @@ export function renderMulti(state: { qs: Asked[]; answers: (string | undefined)[
 	const strip = "  " + tabs.map((t, i) => i === state.tab ? theme.fg("accent", theme.bold(t)) : theme.fg("dim", t)).join(theme.fg("dim", "  ·  "));
 	if (state.tab < n) {
 		const q = state.qs[state.tab];
-		const body = renderQuestion({ question: q.question, options: [...q.options, { label: "Something else", description: "Type your own answer", isOther: true }], selected: state.selected, editMode: state.editMode, editorLines: state.editorLines }, width, theme);
+		const body = renderQuestion({ question: q.question, context: q.context, options: [...q.options, { label: "Something else", description: "Type your own answer", isOther: true }], selected: state.selected, editMode: state.editMode, editorLines: state.editorLines }, width, theme);
 		body[body.length - 2] = "  " + theme.fg("dim", state.editMode ? "enter to save   esc to go back" : `↑↓ to move   1–${q.options.length + 1} or enter to choose   ←→ questions   esc to cancel`);
 		return ["", strip, ...body];
 	}
@@ -91,10 +94,18 @@ type Paint = { fg: (color: any, text: string) => string; bold: (text: string) =>
 
 /** Codex-style picker: quiet header, numbered options with descriptions in an aligned column
  * (or below when narrow), › on the current one, and a one-line key hint. No borders. */
-export function renderQuestion(state: { question: string; options: DisplayOption[]; selected: number; editMode: boolean; editorLines: string[] }, width: number, theme: Paint): string[] {
+export function renderQuestion(state: { question: string; context?: string; options: DisplayOption[]; selected: number; editMode: boolean; editorLines: string[] }, width: number, theme: Paint): string[] {
 	const w = Math.max(20, width), lines: string[] = [];
 	const wrap = (indent: string, text: string, first = indent) => wrapTextWithAnsi(text, Math.max(1, w - visibleWidth(indent))).forEach((l, i) => lines.push((i ? indent : first) + l));
 	lines.push("");
+	if (state.context) {
+		// Light markdown: keep line breaks and bullets, drop ** and ` marks; at most 8 lines so the picker stays short.
+		const ctx = state.context.replace(/\*\*|__|`/g, "").split("\n").map(l => l.replace(/^\s*[-*]\s+/, "• ").replace(/^#+\s*/, ""));
+		const before = lines.length;
+		for (const l of ctx) l.trim() ? wrap(l.startsWith("• ") ? "    " : "  ", theme.fg("muted", l), "  ") : lines.push("");
+		if (lines.length - before > 8) lines.splice(before + 7, lines.length - before - 7, "  " + theme.fg("dim", "…"));
+		lines.push("");
+	}
 	wrap("  ", theme.fg("dim", "Question"));
 	wrap("  ", theme.bold(state.question));
 	lines.push("");
@@ -128,10 +139,10 @@ export default function question(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "question",
 		label: "Question",
-		description: "Ask the user to choose between 2-4 concrete options, or ask 2-4 related questions at once with questions:[{header, question, options}]. Prefer this over asking in prose whenever you need a decision from the user. The user can also type their own answer.",
+		description: "Ask the user to choose between 2-4 concrete options (give context: a few lines on what you found and what the choice changes), or ask 2-4 related questions at once with questions:[{header, question, options}]. Prefer this over asking in prose whenever you need a decision from the user. The user can also type their own answer.",
 		promptSnippet: "Ask the user to pick from options instead of asking in prose",
 		promptGuidelines: [
-			"When you need the user to decide something (which approach, whether to proceed, which of several things), call question with 2-4 short options instead of writing the question in your reply. For several related decisions, pass them together in questions (2-4, each with a 1-2 word header) instead of asking one after another. Put your recommended option first and say why in its description.",
+			"When you need the user to decide something (which approach, whether to proceed, which of several things), call question with 2-4 short options instead of writing the question in your reply. For several related decisions, pass them together in questions (2-4, each with a 1-2 word header) instead of asking one after another. Put your recommended option first and say why in its description. Fill context with the 2-5 lines brook needs to decide (the facts, what each choice changes); the picker covers your earlier text.",
 			"Do not use question for open-ended information only the user can write (names, text, credentials); ask those in prose.",
 		],
 		parameters: QuestionParams,
@@ -140,7 +151,7 @@ export default function question(pi: ExtensionAPI) {
 		async execute(_toolCallId, rawParams, _signal, _onUpdate, ctx) {
 			const qs = askedList(rawParams as any);
 			if (qs.length > 1) return askMany(pi, _toolCallId, qs, ctx);
-			const params = { question: qs[0].question, options: qs[0].options };
+			const params = { question: qs[0].question, context: qs[0].context, options: qs[0].options };
 			if (ctx.mode !== "tui") {
 				return {
 					content: [{ type: "text", text: "Error: UI not available (running in non-interactive mode)" }],
@@ -171,12 +182,14 @@ export default function question(pi: ExtensionAPI) {
 				remoteAnswer = i >= 0 ? { answer: a.answer, wasCustom: false, index: i + 1 } : { answer: a.answer.trim(), wasCustom: true };
 				finish?.(remoteAnswer);
 			});
-			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, options: params.options });
+			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, context: params.context, options: params.options });
 			// Away from the Mac: never leave the session stuck. After the timeout the first option wins.
 			const waitMs = questionTimeoutMs();
 			let timedOut = false;
 			const timer = waitMs ? setTimeout(() => { timedOut = true; remoteAnswer = { answer: params.options[0].label, wasCustom: false, index: 1 }; finish?.(remoteAnswer); }, waitMs) : undefined;
 
+			// The working spinner above the picker animates ~12x/s; once it scrolls above the screen every frame forces a full redraw (flicker). Hide it while asking.
+			const quiet = hideSpinner(ctx);
 			const result = remoteAnswer ?? await ctx.ui.custom<{ answer: string; wasCustom: boolean; index?: number } | null>(
 				(tui, theme, _kb, done) => {
 					finish = done;
@@ -262,7 +275,7 @@ export default function question(pi: ExtensionAPI) {
 						// The terminal can shrink while the dialog is open; lines cached at the old width would overflow.
 						if (cachedLines && cachedWidth === width) return cachedLines;
 						cachedWidth = width;
-						cachedLines = renderQuestion({ question: params.question, options: allOptions, selected: optionIndex, editMode, editorLines: editMode ? editor.render(Math.max(1, width - 6)) : [] }, width, theme);
+						cachedLines = renderQuestion({ question: params.question, context: params.context, options: allOptions, selected: optionIndex, editMode, editorLines: editMode ? editor.render(Math.max(1, width - 6)) : [] }, width, theme);
 						return cachedLines;
 					}
 
@@ -276,6 +289,7 @@ export default function question(pi: ExtensionAPI) {
 				},
 			);
 
+			quiet();
 			if (timer) clearTimeout(timer);
 			offAnswer();
 			pi.events.emit(QUESTION_CLOSE, { id: _toolCallId });
@@ -353,6 +367,12 @@ export default function question(pi: ExtensionAPI) {
 	});
 }
 
+/** Hide the working loader while a picker is open; returns the restore. */
+export function hideSpinner(ctx: any): () => void {
+	try { ctx.ui?.setWorkingVisible?.(false); } catch {}
+	return () => { try { ctx.ui?.setWorkingVisible?.(true); } catch {} };
+}
+
 async function askMany(pi: ExtensionAPI, id: string, qs: Asked[], ctx: any) {
 	const headers = qs.map(q => q.header);
 	if (ctx.mode !== "tui") return { content: [{ type: "text" as const, text: "Error: UI not available (running in non-interactive mode)" }], details: { many: null, headers } };
@@ -365,10 +385,11 @@ async function askMany(pi: ExtensionAPI, id: string, qs: Asked[], ctx: any) {
 		const v = parseMultiAnswer(a.answer, qs.length); if (!v) return;
 		remote = v; finish?.(v);
 	});
-	pi.events.emit(QUESTION_OPEN, { id, question: qs[0].question, options: qs[0].options, questions: qs });
+	pi.events.emit(QUESTION_OPEN, { id, question: qs[0].question, context: qs[0].context, options: qs[0].options, questions: qs });
 	const waitMs = questionTimeoutMs();
 	let timedOut = false;
 	const timer = waitMs ? setTimeout(() => { timedOut = true; remote = qs.map(q => q.options[0].label); finish?.(remote); }, waitMs) : undefined;
+	const quiet = hideSpinner(ctx);
 	const result = remote ?? await ctx.ui.custom((tui: any, theme: any, _kb: any, done: (v: string[] | null) => void) => {
 		finish = done;
 		if (remote) queueMicrotask(() => done(remote!));
@@ -400,6 +421,7 @@ async function askMany(pi: ExtensionAPI, id: string, qs: Asked[], ctx: any) {
 			},
 		};
 	});
+	quiet();
 	if (timer) clearTimeout(timer);
 	off();
 	pi.events.emit(QUESTION_CLOSE, { id });

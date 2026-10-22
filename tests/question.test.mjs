@@ -105,3 +105,37 @@ test("the single-question form still works unchanged", async () => {
   const { askedList } = await import("../plugins/question/index.ts");
   assert.deepEqual(askedList({ question: "Q?", options: [{ label: "x" }] }), [{ header: "", question: "Q?", options: [{ label: "x" }] }]);
 });
+
+test("context: a few markdown lines sit above the question (single and per tab), and reach the phone", async () => {
+  const { askedList, renderMulti } = await import("../plugins/question/index.ts");
+  const ctxText = "Found **two** builds:\n- old one is stale\n- new one passes `check`";
+  const one = renderQuestion({ question: "Ship which?", context: ctxText, options, selected: 0, editMode: false, editorLines: [] }, 80, plain).join("\n");
+  assert.match(one, /^  Found two builds:\n  • old one is stale\n  • new one passes check\n\n  Question\n  Ship which\?/m);
+  const long = renderQuestion({ question: "Q", context: Array.from({ length: 20 }, (_, i) => "line " + i).join("\n"), options, selected: 0, editMode: false, editorLines: [] }, 80, plain).join("\n");
+  assert.match(long, /line 6\n  …/, "long context is capped so the picker stays short");
+  const qs = askedList({ questions: [{ header: "A", question: "a?", context: "Why A", options: [{ label: "x" }] }, { header: "B", question: "b?", context: "Why B", options: [{ label: "y" }] }] });
+  assert.match(renderMulti({ qs, answers: [undefined, undefined], tab: 1, selected: 0, editMode: false, editorLines: [] }, 80, plain).join("\n"), /Why B\n\n  Question\n  b\?/);
+  assert.equal(askedList({ question: "q", context: "  ", options: [] })[0].context, undefined);
+  const { multiQuestions } = await import("../plugins/remote/remote-hub.ts");
+  assert.equal(multiQuestions(qs).questions[1].context, "Why B");
+});
+
+test("no jitter: the working spinner is hidden while the picker is open and comes back after", async () => {
+  const { default: register } = await import("../plugins/question/index.ts");
+  let tool; const seen = [];
+  register({ registerTool: t => { tool = t; }, events: { on: () => () => {}, emit() {} } });
+  const ctx = { mode: "tui", ui: { setWorkingVisible: v => seen.push(v), custom: f => new Promise(res => { f({ requestRender() {} }, plain, {}, res); seen.push("open"); res(null); }) } };
+  await tool.execute("j1", { question: "Q?", options: [{ label: "a" }] }, undefined, undefined, ctx);
+  await tool.execute("j2", { questions: [{ header: "A", question: "?", options: [{ label: "a" }] }, { header: "B", question: "?", options: [{ label: "b" }] }] }, undefined, undefined, ctx);
+  assert.deepEqual(seen, [false, "open", true, false, "open", true]);
+});
+
+test("phone: the question card shows its context above the question", async () => {
+  const { remoteAppHtml } = await import("../plugins/remote/remote-web.ts");
+  const html = typeof remoteAppHtml === "function" ? remoteAppHtml() : remoteAppHtml;
+  const src = html.match(/function askCtx[\s\S]*?\n/)[0] + html.match(/function askMany[\s\S]*?\n/)[0] + html.match(/function askCard[\s\S]*?\n/)[0];
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const askCard = new Function("esc", src + "return askCard")(esc);
+  assert.match(askCard({ id: "q", question: "Ship?", context: "**Two** builds\n- new passes", options: [{ label: "a" }] }), /<div class="ask-ctx">Two builds\n• new passes<\/div><span class="ask-kicker">Question/);
+  assert.match(askCard({ id: "q", question: "x", options: [], questions: [{ header: "A", question: "a?", context: "Why A", options: [] }, { header: "B", question: "b?", options: [] }] }), /· A<\/span><div class="ask-ctx">Why A<\/div><p>a\?/);
+});
