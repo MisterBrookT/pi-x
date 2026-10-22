@@ -24,19 +24,21 @@ writeFileSync(join(home, "accounts.json"), JSON.stringify({ accounts: [{ id: "mi
 test("auto: minarabench first once its login exists; own until then", () => {
 	assert.deepEqual(ids(), ["own"]);
 	mkdirSync(prof); writeFileSync(join(prof, ".claude.json"), "{}");
+	assert.deepEqual(ids(), ["own", "minarabench"], "tie (both unknown): stay on own");
+	k.setActive("minarabench");
 	assert.deepEqual(ids(), ["minarabench", "own"]);
 });
 
-test("auto: an account below the threshold or resting goes last", () => {
-	k.recordUsage("minarabench", { left: 15 });
-	assert.deepEqual(ids(), ["own", "minarabench"], "15% < 20% threshold");
-	process.env.PIX_ACCOUNT_THRESHOLD = "10";
-	assert.deepEqual(ids(), ["minarabench", "own"], "knob lowers the bar");
-	delete process.env.PIX_ACCOUNT_THRESHOLD;
+test("band rule: switch only to a strictly higher band; ties stay; resting goes last", () => {
+	const set = (m, o) => { k.recordUsage("minarabench", { left: m, coolUntil: 0 }); k.recordUsage("own", { left: o, coolUntil: 0 }); };
+	set(60, 70); assert.equal(ids()[0], "minarabench", "same band 50-74: keep current");
+	set(40, 70); assert.equal(ids()[0], "own", "own in a higher band: switch");
+	set(70, 60); assert.equal(ids()[0], "own", "back in the same band: stay on own");
+	set(80, 60); assert.equal(ids()[0], "minarabench", "strictly higher band: switch back");
+	process.env.PIX_ACCOUNT_BAND = "50"; set(30, 80); assert.equal(ids()[0], "own"); set(60, 80); assert.equal(ids()[0], "own", "wider bands: tie stays"); delete process.env.PIX_ACCOUNT_BAND;
 	const now = Date.now();
-	k.coolDown("minarabench", new Headers({ "retry-after": "600" }), now);
-	assert.deepEqual(k.plan(now + 1000).map(a => a.id), ["own", "minarabench"]);
-	assert.deepEqual(k.plan(now + 601_000).map(a => a.id), ["own", "minarabench"], "rest over, still 15% < 20%");
+	k.coolDown("own", new Headers({ "retry-after": "600" }), now);
+	assert.deepEqual(k.plan(now + 1000).map(a => a.id), ["minarabench", "own"]);
 });
 
 test("pinning tries one account only", () => {
@@ -50,6 +52,6 @@ test("% left is the tighter of the 5-hour and weekly windows; footer shows it", 
 	assert.deepEqual(u, { left: 1, resetsAt: "b" });
 	k.recordUsage("minarabench", { left: 80, coolUntil: 0 });
 	assert.equal(k.footerLabel(), "minarabench 80%");
-	k.setChoice("own"); assert.equal(k.footerLabel(), "brook (pinned)"); k.setChoice("auto");
+	k.setChoice("own"); assert.match(k.footerLabel(), /^brook \d+% \(pinned\)$/); k.setChoice("auto");
 });
 

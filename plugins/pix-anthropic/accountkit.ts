@@ -3,7 +3,7 @@
  *
  * Accounts are Claude Code logins on this Mac, one config dir each (like cc-switch profiles):
  * "minarabench" (~/.claude-minarabench) and "own" (Claude Code's default). More in ~/.pix/accounts.json. Choice (~/.pix/claude-route): an account id pins it; "auto" picks the
- * first account in order whose % left is at or above the threshold (default 20) and that is not
+ * account in the highest band of % left (band width knob "band", default 25; unknown % = lowest band) that is not
  * cooling down after a quota/429; unknown % counts as usable. Usage is cached in ~/.pix/accounts-usage.json
  * so every session and the footer read the same numbers.
  */
@@ -23,7 +23,8 @@ const DEFAULTS: Account[] = [
 	{ id: "own", label: "brook" },
 ];
 export const accounts = (): Account[] => read<{ accounts?: Account[] }>("accounts.json", {}).accounts ?? DEFAULTS;
-export const threshold = (): number => Number(process.env.PIX_ACCOUNT_THRESHOLD ?? read<{ threshold?: number }>("accounts.json", {}).threshold ?? 20);
+export const bandWidth = (): number => Number(process.env.PIX_ACCOUNT_BAND ?? read<{ band?: number }>("accounts.json", {}).band ?? 25);
+const band = (left?: number) => left === undefined ? -1 : Math.floor(left / bandWidth());
 
 export function choice(): string {
 	const v = (process.env.PIX_CLAUDE_ROUTE ?? (() => { try { return readFileSync(join(dir(), "claude-route"), "utf8"); } catch { return ""; } })()).trim();
@@ -31,7 +32,7 @@ export function choice(): string {
 }
 export function setChoice(v: string): void { mkdirSync(dir(), { recursive: true }); writeFileSync(join(dir(), "claude-route"), v + "\n"); }
 
-export const usage = (): Record<string, Usage> => read("accounts-usage.json", {});
+export const usage = (): Record<string, Usage> & { _active?: { id: string } } => read("accounts-usage.json", {});
 export function recordUsage(id: string, u: Usage): void { const all = usage(); all[id] = { ...all[id], ...u, checkedAt: Date.now() }; write("accounts-usage.json", all); }
 
 /** A profile is ready once its Claude Code login exists (own always is). */
@@ -39,19 +40,28 @@ export function ready(a: Account): boolean {
 	return !a.configDir || existsSync(join(a.configDir, ".claude.json")) || existsSync(join(a.configDir, ".credentials.json"));
 }
 
-/** Usable now: not cooling down after quota, and % left (if known) at or above the threshold. */
-export function healthy(a: Account, now = Date.now()): boolean {
-	const u = usage()[a.id] ?? {};
-	return ready(a) && !(u.coolUntil && now < u.coolUntil) && (u.left === undefined || u.left >= threshold());
+const resting = (a: Account, now: number) => { const u = usage()[a.id]; return !!(u?.coolUntil && now < u.coolUntil); };
+
+/**
+ * Accounts to try for one request, best first. A pinned account is tried alone.
+ * Band rule (auto): keep the current account unless another ready, not-resting one is in a strictly
+ * higher band of % left; ties stay. Resting (after quota/429) accounts go last.
+ */
+export function plan(now = Date.now()): Account[] {
+	const all = accounts().filter(ready), c = choice();
+	if (c !== "auto") return accounts().filter(a => a.id === c);
+	const u = usage(), b = (a: Account) => band(u[a.id]?.left);
+	const awake = all.filter(a => !resting(a, now)), tired = all.filter(a => resting(a, now));
+	let pick = awake.find(a => a.id === u._active?.id) ?? awake[0];
+	for (const a of awake) if (pick && b(a) > b(pick)) pick = a;
+	if (pick && pick.id !== u._active?.id) recordActive(pick.id);
+	const rest = awake.filter(a => a !== pick).sort((x, y) => b(y) - b(x));
+	return [...(pick ? [pick] : []), ...rest, ...tired];
 }
 
-/** Accounts to try for one request, best first. A pinned account is tried alone. */
-export function plan(now = Date.now()): Account[] {
-	const all = accounts(), c = choice();
-	if (c !== "auto") return all.filter(a => a.id === c);
-	const ok = all.filter(a => healthy(a, now)), rest = all.filter(a => ready(a) && !ok.includes(a));
-	return [...ok, ...rest];
-}
+/** Make an account the current one in auto mode (it stays until another is in a strictly higher band). */
+export function setActive(id: string): void { recordActive(id); }
+function recordActive(id: string): void { const all = usage(); (all as Record<string, unknown>)._active = { id }; write("accounts-usage.json", all); }
 
 /** Quota / rate-limit answers another account can fix. Not overload (529), not fast-mode rejections. */
 export function isQuota(status: number, body: string): boolean {

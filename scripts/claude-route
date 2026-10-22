@@ -3,7 +3,7 @@
 //   claude-route            list accounts, % left, active
 //   claude-route <name>     pin one account (minarabench, own, ...)
 //   new profile login:      CLAUDE_CONFIG_DIR=~/.claude-<name> claude /login
-//   claude-route auto       best account by % left (threshold knob: ~/.pix/accounts.json "threshold", default 20)
+//   claude-route auto       highest band of % left; ties keep the current one (band width: ~/.pix/accounts.json "band", default 25)
 import { createJiti } from "jiti";
 import { fileURLToPath } from "node:url";
 const jiti = createJiti(fileURLToPath(import.meta.url));
@@ -16,7 +16,7 @@ if (arg) {
   k.setChoice(v);
 }
 const u = k.usage(), active = k.plan()[0]?.id, now = Date.now();
-console.log(`mode: ${k.choice()}  (switch below ${k.threshold()}% left)`);
+console.log(`mode: ${k.choice()}  (bands of ${k.bandWidth()}%)`);
 for (const a of k.accounts()) {
   const x = u[a.id] ?? {};
   const left = x.left === undefined ? "% left unknown" : `${Math.round(x.left)}% left`;
