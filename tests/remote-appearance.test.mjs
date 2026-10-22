@@ -132,7 +132,7 @@ test("question card offers an Other option that opens an inline answer box", asy
 });
 
 function askCardHtml() {
-  const src = remoteAppHtml.match(/function askCard\(q\)\{[\s\S]*?\n/)[0];
+  const src = remoteAppHtml.match(/function askCtx\(c\)\{[\s\S]*?\n/)[0] + remoteAppHtml.match(/function askCard\(q\)\{[\s\S]*?\n/)[0];
   const esc = x => String(x);
   return new Function("esc", src + "return askCard;")(esc)({ id: "q", question: "Pick?", options: [{ label: "A" }] });
 }
