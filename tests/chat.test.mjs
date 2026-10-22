@@ -68,7 +68,7 @@ test("title: the terminal tab shows the board name, '<name>' with no prefix, and
   const registerChat = await jiti.import("../plugins/chat/index.ts", { default: true });
   const handlers = {}, titles = [];
   registerChat({ on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "minara" });
-  const ctx = { cwd: "/m", hasUI: true, sessionManager: { getSessionId: () => "S1" }, ui: { setStatus() {}, setTitle: (x) => titles.push(x) } };
+  const ctx = { cwd: "/w/minara", hasUI: true, sessionManager: { getSessionId: () => "S1" }, ui: { setStatus() {}, setTitle: (x) => titles.push(x) } };
   for (const f of handlers.session_start) f({}, ctx);
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
   assert.equal(titles.at(-1), "minara");
@@ -76,4 +76,15 @@ test("title: the terminal tab shows the board name, '<name>' with no prefix, and
   for (const f of handlers.session_info_changed) f({}, ctx);
   await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(titles, ["minara"]);
+});
+
+test("names: folder name only; an old task-title name is replaced; For you stays for-you", () => {
+  const root = mkdtempSync(join(tmpdir(), "chat-names2-"));
+  assert.equal(chat.nameBase("/Users/x/workspace/tools/kaji", "loop-a48c0460"), "kaji");
+  assert.equal(chat.nameBase("/Users/x", "pix-foryou"), "for-you");
+  const old = chat.join_(peer("polish-kaji-multi-account-u", { session: "L1", pid: 0, cwd: "/k/kaji" }), () => {}, root); old.close();
+  assert.equal(chat.claimName("kaji", 5151, root, "L1"), "kaji", "title-slug name is dropped for the folder name");
+  const live = chat.join_(peer("kaji", { session: "L1" }), () => {}, root);
+  assert.equal(chat.claimName("kaji", 5152, root, "L2"), "kaji-2");
+  live.close();
 });

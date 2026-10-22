@@ -54,7 +54,7 @@ test("chat plugin: sending an ask shows 'Waiting for pix', survives reload, clea
     const handlers = {}, tools = {}, status = new Map();
     const pi = { on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "for-you" };
     registerChat(pi);
-    const ctx = { cwd: "/y", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
+    const ctx = { cwd: "/for-you", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
     for (const f of handlers.session_start) f({}, ctx);
     return { tools, status, ctx, stop: () => { for (const f of handlers.session_shutdown) f({}, ctx); } };
   };
@@ -191,7 +191,7 @@ test("chat plugin: a handoff carries a check schedule; when the receiver leaves 
   const handlers = {}, tools = {}, status = new Map(), sent = [];
   const pi = { on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage: (m, o) => sent.push({ m, o }), getSessionName: () => "for-you" };
   registerChat(pi);
-  const ctx = { cwd: "/y", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
+  const ctx = { cwd: "/for-you", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
   for (const f of handlers.session_start) f({}, ctx);
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
   const r = await tools.chat.execute("1", { action: "send", to: "minara-2", kind: "handoff", message: "batch it", label: "vLLM batching", checkMinutes: 10 }, undefined, undefined, ctx);

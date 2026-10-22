@@ -388,6 +388,7 @@ export const forYouFolder = (home = homedir()) => home;
 export interface LiveSession { id: string; name: string; cwd: string; busy?: boolean }
 
 export const expandHome = (p: string, home = homedir()) => resolve(p.replace(/^~(?=\/|$)/, home));
+const folderName = (dir: string) => dir.split("/").filter(Boolean).pop() || "pi";
 const shortName = (it: Item) => (it.title.length > 28 ? `${it.title.slice(0, 27)}…` : it.title);
 
 /**
@@ -399,7 +400,8 @@ export function routeFor(it: Item, live: LiveSession[], into?: string, cwd?: str
 	if (!into || into === forYouSession.id) return here;
 	if (into === "new") {
 		const dir = cwd ?? it.project;
-		return dir ? { session: `loop-${it.id}`, name: shortName(it), cwd: expandHome(dir, home), coordinator: false } : here;
+		// A new session is named after its folder (kaji), never after the task title.
+		return dir ? { session: `loop-${it.id}`, name: folderName(expandHome(dir, home)), cwd: expandHome(dir, home), coordinator: false } : here;
 	}
 	const s = live.find(x => x.id === into);
 	return { session: into, name: s?.name ?? shortName(it), cwd: s?.cwd ?? (cwd ? expandHome(cwd, home) : it.session === into && it.sessionCwd ? it.sessionCwd : it.project ? expandHome(it.project, home) : forYouFolder(home)), coordinator: false };

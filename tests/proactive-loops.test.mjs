@@ -99,7 +99,7 @@ test("routing: the main button goes to the coordinator; the loops tool can send 
 	const it = loop("a", { project: "~/work/nd" });
 	assert.deepEqual(routeFor(it, live, undefined, undefined, home), { session: "pix-foryou", name: "For you", cwd: home, coordinator: true }, "no hard rules: the coordinator decides");
 	assert.deepEqual(routeFor(it, live, "s1", undefined, home), { session: "s1", name: "newsdecision", cwd: "/Users/b/work/nd", coordinator: false });
-	assert.deepEqual(routeFor(it, live, "new", undefined, home), { session: "loop-a", name: "Loop a", cwd: "/Users/b/work/nd", coordinator: false });
+	assert.deepEqual(routeFor(it, live, "new", undefined, home), { session: "loop-a", name: "nd", cwd: "/Users/b/work/nd", coordinator: false }, "a new session is named after its folder, not the task title");
 	assert.equal(routeFor(it, live, "new", "~/other", home).cwd, "/Users/b/other");
 	assert.equal(routeFor(loop("x"), live, "new", undefined, home).coordinator, true, "new with no folder stays with the coordinator");
 	const owned = loop("b", { status: "onit", session: "my-sess", sessionCwd: "/Users/b/x" });

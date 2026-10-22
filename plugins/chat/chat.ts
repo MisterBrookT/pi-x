@@ -42,12 +42,16 @@ function entries(root: string): Array<Peer & { live: boolean }> {
 export const board = (root = chatRoot()): Peer[] =>
   entries(root).filter((p) => p.live).map(({ live: _, ...p }) => p).sort((a, b) => a.name.localeCompare(b.name));
 
+/** The board name base of a session: its folder name; the For you coordinator keeps "for-you". */
+export const nameBase = (cwd: string, sessionId?: string) => sessionId === "pix-foryou" ? "for-you" : (cwd.split("/").filter(Boolean).pop() || "pi");
+
 /** Pick a free name for a new session: base, base-2, ... (a dead holder's name can be taken over, with its mail). */
 export function claimName(base: string, pid: number, root = chatRoot(), session?: string): string {
   const all = entries(root), taken = new Map(all.map((p) => [p.name, p]));
   // The same Pi session gets its old name back (so a rename like minara -> minara-1 sticks across restarts).
+  // Only if it is still in this folder's family: old task-title names (polish-kaji-…) are replaced by the folder name.
   const mine = session && all.find((p) => p.session === session && (!p.live || p.pid === pid));
-  if (mine) return mine.name;
+  if (mine && (mine.name === slug(base) || new RegExp(`^${slug(base).replace(/[.]/g, "\\.")}-\\d+$`).test(mine.name))) return mine.name;
   // Once a family is numbered (minara-1, minara-2), new members are numbered too: no bare "minara".
   const numbered = taken.has(`${slug(base)}-1`);
   for (let i = 1; ; i++) {

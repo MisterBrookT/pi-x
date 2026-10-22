@@ -655,16 +655,20 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				};
 				const order = plan();
 				if (!order.length) throw new Error("pix-anthropic: no Claude account ready (see claude-route)");
-				let response!: Response;
-				for (let n = 0; n < order.length; n++) {
-					response = await send(order[n]!);
-					if (response.ok || options?.signal?.aborted || n === order.length - 1) break;
-					const t = await response.clone().text().catch(() => "");
-					if (!isQuota(response.status, t)) break;
-					coolDown(order[n]!.id, response.headers);
-					if (config.debug) process.stderr.write(`[pix-anthropic] ${order[n]!.id} ${response.status}; trying ${order[n + 1]!.id}\n`);
-					await response.body?.cancel().catch(() => undefined);
-				}
+				const sendAll = async () => {
+					let res!: Response;
+					for (let n = 0; n < order.length; n++) {
+						res = await send(order[n]!);
+						if (res.ok || options?.signal?.aborted || n === order.length - 1) break;
+						const t = await res.clone().text().catch(() => "");
+						if (!isQuota(res.status, t)) break;
+						coolDown(order[n]!.id, res.headers);
+						if (config.debug) process.stderr.write(`[pix-anthropic] ${order[n]!.id} ${res.status}; trying ${order[n + 1]!.id}\n`);
+						await res.body?.cancel().catch(() => undefined);
+					}
+					return res;
+				};
+				let response = await sendAll();
 				await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
 
 				const initialError = !response.ok ? await response.clone().text().catch(() => "") : "";
@@ -682,12 +686,8 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 						.join(",");
 					if (normalBetas) headers["anthropic-beta"] = normalBetas;
 					else delete headers["anthropic-beta"];
-					response = await doFetch(url, {
-						method: "POST",
-						headers,
-						body: serialized,
-						signal: options?.signal,
-					});
+					// Same account order as the first try: the plain headers carry only the default login.
+					response = await sendAll();
 					await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
 					if (response.ok) recordFastModeFallback(model);
 				}

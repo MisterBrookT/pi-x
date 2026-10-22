@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { basename, resolve } from "node:path";
 import { Type } from "typebox";
-import { board, chatRoot, claimName, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
+import { board, chatRoot, claimName, nameBase, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
 import { checkFor, closeWaits, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
@@ -58,6 +58,7 @@ export default function (pi: ExtensionAPI) {
     if (text !== shown) { shown = text; pi.events?.emit?.(CHAT_WAITING, { text }); }
   };
   const check = () => {
+    if (ui && me) (ui as { setTitle?: (t: string) => void }).setTitle?.(me.name);
     let wakes: string[] = [];
     setWaiting(w => { const r = tick(w, new Map(board().map(x => [x.name, x.status ?? ""]))); wakes = r.wakes; return { waits: r.waits, notices: r.notices }; });
     for (const text of wakes) pi.sendMessage({ customType: MSG_CHECK, display: true, details: { text }, content: text }, { triggerTurn: true, deliverAs: "followUp" });
@@ -73,9 +74,13 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", (_e, ctx) => {
     room?.close(); room = undefined; me = undefined;
-    const base = pi.getSessionName() || basename(ctx.cwd) || "pi";
+    // Names are the folder name only (kaji, minara-2), never a task title or a "π - " prefix.
+    const base = nameBase(ctx.cwd, ctx.sessionManager?.getSessionId?.());
     if (OFF.has(slug(base)) || process.env.PIX_CHAT_OFF) return;  // brook's personal session stays out of project chat
     const name = claimName(base, process.pid, undefined, ctx.sessionManager?.getSessionId?.());
+    // Keep Pi's own session name (Remote list, /resume) in step; the id and routing stay the same.
+    const named = pi.getSessionName();
+    if (named && named !== name) (pi as { setSessionName?: (n: string) => void }).setSessionName?.(name);
     me = { name, cwd: ctx.cwd, pid: process.pid, session: ctx.sessionManager?.getSessionId?.(), at: Date.now(), status: "idle", doing: "", claims: [] };
     room = join_(me, receive);
     ui = ctx.hasUI ? ctx.ui : undefined;
