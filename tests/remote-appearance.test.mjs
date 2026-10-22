@@ -149,3 +149,30 @@ test("regression: the + menu opens right above the input box, even when the todo
   assert.ok(menu.y + menu.height <= box.y, "menu sits above the input box");
   assert.ok(box.y - (menu.y + menu.height) <= 16, "and right next to it");
 });
+
+test("phone: several questions stack on one card; Submit sends one JSON array once all are answered", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    await page.evaluate(() => {
+      window.__sent = []; document.getElementById("login").hidden = true; document.getElementById("login").style.display = "none";
+      current = { id: "s1", question: { id: "q2" } };
+      window.fetch = async (url, o) => { window.__sent.push(JSON.parse(o.body)); return new Response("{}"); };
+      document.getElementById("messages").innerHTML = askCard({ id: "q2", question: "How much?", options: [], questions: [
+        { header: "Scope", question: "How much?", options: [{ label: "Small" }, { label: "Full" }] },
+        { header: "Deploy", question: "When?", options: [{ label: "Now" }, { label: "Later" }] },
+      ] });
+    });
+    assert.equal(await page.locator(".mq").count(), 2);
+    assert.match(await page.locator(".mq").first().innerText(), /1\/2 · Scope/);
+    const submit = page.locator("[data-mq-submit]");
+    await page.locator('[data-mq="0"][data-mv="Full"]').click();
+    assert.equal(await submit.isDisabled(), true, "waits for every answer");
+    await page.locator('[data-mq-other="1"]').fill("Friday");
+    assert.equal(await submit.isDisabled(), false);
+    await submit.click();
+    await page.waitForFunction(() => window.__sent.length);
+    assert.deepEqual(await page.evaluate(() => window.__sent[0]), { action: "answer", value: '["Full","Friday"]' });
+  } finally { await browser.close(); server.close(); }
+});

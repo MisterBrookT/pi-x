@@ -60,3 +60,48 @@ test("a question nobody answers takes the first option after the timeout, says s
     assert.ok(emitted.length >= 2, "phone card opens and closes");
   } finally { delete process.env.PIX_QUESTION_TIMEOUT_MIN; }
 });
+
+test("several questions in one call: header strip, ←→, review page, one submit, labelled answers", async () => {
+  const { default: register, renderMulti, askedList } = await import("../plugins/question/index.ts");
+  const qs = askedList({ questions: [
+    { header: "Scope", question: "How much?", options: [{ label: "Small" }, { label: "Full" }] },
+    { header: "Deploy", question: "When?", options: [{ label: "Now" }, { label: "Later" }] },
+  ] });
+  const strip = renderMulti({ qs, answers: ["Small", undefined], tab: 1, selected: 0, editMode: false, editorLines: [] }, 80, plain).join("\n");
+  assert.match(strip, /✓ Scope {2}· {2}Deploy {2}· {2}Submit/);
+  assert.match(strip, /←→ questions/);
+  assert.match(renderMulti({ qs, answers: ["Small", undefined], tab: 2, selected: 0, editMode: false, editorLines: [] }, 80, plain).join("\n"), /Deploy: not answered[\s\S]*1 left/);
+
+  let tool; const opened = [];
+  register({ registerTool: t => { tool = t; }, events: { on: () => () => {}, emit: (n, d) => opened.push(d) } });
+  const keys = ["1", "\x1b[C", "\x1b[D", "2", "\r"]; // Small (moves on), → review, ← back, Later, submit
+  const ctx = { mode: "tui", ui: { custom: f => new Promise(res => { const c = f({ requestRender() {} }, plain, {}, res); for (const k of keys) c.handleInput(k); }) } };
+  const r = await tool.execute("m1", { questions: qs }, undefined, undefined, ctx);
+  assert.equal(r.content[0].text, "User answered:\nScope: Small\nDeploy: Later");
+  assert.equal(opened[0].questions.length, 2, "the phone gets every question");
+  assert.match(tool.renderResult(r, {}, plain, {}).render(80).join(""), /Scope: Small · Deploy: Later/);
+});
+
+test("several questions: a phone JSON-array answer wins; timeout takes each first option", async () => {
+  const { default: register, parseMultiAnswer } = await import("../plugins/question/index.ts");
+  assert.deepEqual(parseMultiAnswer('["a"," b "]', 2), ["a", "b"]);
+  assert.equal(parseMultiAnswer('["a"]', 2), undefined);
+  assert.equal(parseMultiAnswer("a", 2), undefined);
+  const qs = [{ header: "A", question: "?", options: [{ label: "A1" }, { label: "A2" }] }, { header: "B", question: "?", options: [{ label: "B1" }] }];
+  let tool, listener;
+  register({ registerTool: t => { tool = t; }, events: { on: (_n, f) => { listener = f; return () => {}; }, emit() {} } });
+  const ctx = { mode: "tui", ui: { custom: f => new Promise(res => { f({ requestRender() {} }, plain, {}, res); listener({ id: "m2", answer: '["A2","my own"]' }); }) } };
+  const r = await tool.execute("m2", { questions: qs }, undefined, undefined, ctx);
+  assert.equal(r.content[0].text, "User answered:\nA: A2\nB: my own (wrote)");
+  process.env.PIX_QUESTION_TIMEOUT_MIN = String(0.05 / 60);
+  try {
+    const idle = { mode: "tui", ui: { custom: f => new Promise(res => { f({ requestRender() {} }, plain, {}, res); }) } };
+    const t = await tool.execute("m3", { questions: qs }, undefined, undefined, idle);
+    assert.match(t.content[0].text, /defaulted each to its first option:\nA: A1\nB: B1/);
+  } finally { delete process.env.PIX_QUESTION_TIMEOUT_MIN; }
+});
+
+test("the single-question form still works unchanged", async () => {
+  const { askedList } = await import("../plugins/question/index.ts");
+  assert.deepEqual(askedList({ question: "Q?", options: [{ label: "x" }] }), [{ header: "", question: "Q?", options: [{ label: "x" }] }]);
+});
