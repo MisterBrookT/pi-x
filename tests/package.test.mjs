@@ -49,7 +49,7 @@ test("slash commands stay minimal", async () => {
   assert.match(todo, /parentId/);
   assert.match(todo, /prepareArguments/);
   assert.match(todo, /getArgumentCompletions/);
-  assert.doesNotMatch(smartEditor, /registerHistoryCompletion|registerAiCompletion/, "inline completion is word-level only");
+  assert.doesNotMatch(smartEditor, /registerHistoryCompletion|historySuggestion/, "no history-based suggestions");
   assert.match(smartEditor, /CURSOR_MARKER/);
   assert.match(smartEditor, /editorTheme\.selectList\.description/);
   assert.doesNotMatch(smartEditor, /uiTheme\.fg/);
@@ -71,6 +71,7 @@ test("Pix keeps at most nine top-level slash commands", async () => {
     for (const match of source.matchAll(/pi\.registerCommand\("([^"]+)"/g)) names.push(match[1]);
   }
   assert.deepEqual(names.sort(), [
+    "complete",
     "context",
     "fast",
     "footer",

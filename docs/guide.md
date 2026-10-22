@@ -16,7 +16,7 @@ Detailed usage, configuration, and design boundaries.
 - `background` for long shell commands: start, inspect, or stop a job; completion or failure automatically wakes the agent
 - opt-in `/goal` mode to continue unfinished work, with explicit completion/blockers and a continuation limit
 - `todo` plus the `/todo` terminal view
-- inline word completion (macOS dictionary, Tab accepts the rest of the word; never phrases), plus a restrained smart editor that continues lists and compacts pasted images
+- inline completion: the rest of the current word (macOS dictionary) at once, and an optional short AI next phrase via `/complete` (≤8 words, one sentence, async with 300 ms debounce and 1.5 s timeout; never history), Tab accepts; plus a restrained smart editor that continues lists and compacts pasted images
 - `question` for structured user choices, adapted from Pi's official example
 - `computer` for driving desktop apps and browser pages, when `@injaneity/pi-computer-use` is installed
 - `lsp_diagnostics` and `lsp_fix` through configurable `pi-lsp`

@@ -14,6 +14,7 @@ import {
 	shouldCompactPaste,
 } from "./smart-editor.ts";
 import { WordCompletion } from "./word-completion.ts";
+import registerAiCompletion, { type CompletionService } from "./ai-completion-ui.ts";
 
 /** Wrap ghost text by words: the first line has `firstWidth` columns, later lines `width`; ends with … when cut. */
 export function wrapGhost(text: string, firstWidth: number, width: number, maxLines: number): string[] {
@@ -45,14 +46,20 @@ const isNewline = (data: string): boolean =>
 	data === "\n" ||
 	data === "\x1b[13;2~";
 
-/** Inline completion is word-level only: the rest of the current word, never a phrase or sentence. */
-export function completionSuggestion(text: string, wordCompletion: Pick<WordCompletion, "suffix">): string | undefined {
+/**
+ * Inline completion: the rest of the current word shows at once; a short AI next phrase replaces it only
+ * when it has already arrived for exactly this text. Never history, never more than one line.
+ */
+export function completionSuggestion(text: string, wordCompletion: Pick<WordCompletion, "suffix">, ai?: Pick<CompletionService, "completion" | "isEnabled">): string | undefined {
 	if (!text || text.trimStart().startsWith("/")) return undefined;
+	const phrase = ai?.isEnabled() ? ai.completion.suffix(text) : undefined;
+	if (phrase) return phrase;
 	const suffix = wordCompletion.suffix(text);
 	return suffix && !/\s/.test(suffix) ? suffix : undefined;
 }
 
 export default function smartEditor(pi: ExtensionAPI) {
+	const ai = registerAiCompletion(pi);
 	const images = new Map<number, ImageReference>();
 	const pastes = new Map<number, PasteReference>();
 	let nextImageId = 1;
@@ -69,6 +76,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 				constructor() {
 					super(tui, editorTheme, keybindings);
 					this.wordCompletion.onUpdate = () => tui.requestRender();
+					ai.completion.onUpdate = () => tui.requestRender();
 				}
 
 				private inlineSuggestion(): string | undefined {
@@ -76,7 +84,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 					const cursor = this.getCursor();
 					if (cursor.line !== lines.length - 1 || cursor.col !== (lines.at(-1)?.length ?? 0)) return undefined;
 					const text = this.getText();
-					return completionSuggestion(text, this.wordCompletion);
+					return completionSuggestion(text, this.wordCompletion, ai);
 				}
 
 				override render(width: number): string[] {
@@ -119,6 +127,7 @@ export default function smartEditor(pi: ExtensionAPI) {
 				}
 
 				override handleInput(data: string): void {
+					ai.completion.cancel();  // any keypress drops the in-flight phrase request
 					if (matchesKey(data, "tab")) {
 						const suggestion = this.inlineSuggestion();
 						if (suggestion) {
