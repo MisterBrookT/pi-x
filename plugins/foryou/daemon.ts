@@ -28,6 +28,7 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { adapterFor, dingNewest, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
+import { whoFor } from "./who.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
 const P = paths();
@@ -227,7 +228,7 @@ async function tick(cfg: Config) {
 				// Over the hourly limit an alert still enters the list, just without a push (quiet).
 				// A new loop that is already parked (e.g. waiting on someone) is quiet and comes back later.
 				const parked = state === "waiting" || state === "later";
-				const it: Item = { ...a, id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project ?? a.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
+				const it: Item = { ...a, ...(a.who ? { who: whoFor(a.who.name, String(src.name), key) } : {}), id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project ?? a.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
 				listed.push(it);
 				appendFileSync(P.inbox, JSON.stringify(it) + "\n");
 				// The judge thinks a live session is already on this: offer a job card there (brook decides).

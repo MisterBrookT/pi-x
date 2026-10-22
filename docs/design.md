@@ -31,10 +31,14 @@ Paper grain: a fractal-noise SVG at ~9% opacity (5% in dark) over the paper colo
 Page padding 12–20px. Card radius 18px, padding 14px. 10px between cards. Touch targets ≥40px. Avatar 40px; text column starts at 51px.
 
 ## Avatars and sources
-- **The avatar is the person who needs brook** (Lowes, 欧阳, 陈老师…): their Feishu/WeChat photo when we have it, else initials (first Latin letter, or the last Han character of the name) on a soft, stable colour hashed from the name (muted warm set: `#b5694a #8a7a3d #5f8a6a #4f7a8f #8a5f86 #a0605f #6b6fa3 #9a7b4f`).
-- **Pi's own work** uses the π mark: ink circle, serif italic π.
-- **The source app is a 16px badge** on the avatar corner plus "via Feishu" text in faint. Real app icons (Feishu/Lark, WeChat, DingTalk, Gmail, Minara; Otty for Pi), never the main icon.
-- Follow-up posts in the same line skip the avatar.
+- **The avatar is the person who needs brook** (loop field `who`: name, source app, id). Real photo from `plugins/core/avatarkit.ts` (WeChat head image, Feishu profile photo; cached in `~/.pix/avatars`, never committed), else initials (first Latin letter, or the last Han character) on a soft colour hashed from the name: `#b5694a #8a7a3d #5f8a6a #4f7a8f #8a5f86 #a0605f #6b6fa3 #9a7b4f`.
+- **Pi's own work** (no `who`) uses the π mark: ink circle, serif italic π.
+- **The source app appears once**, as a 16px badge on the avatar corner, plus "via Feishu" in faint text. Never the main icon.
+
+## Feed structure
+- **One loop = one top-level post**, side by side like tweets. Loops in the same line are not a conversation: never nest them.
+- A line is a filter chip and a faint tag in the meta row.
+- Only a loop's own history nests under it (its comment thread).
 
 ## Icons
 Line SVG, 1.8 stroke, round caps, `currentColor`, 16–20px. App icons only as source badges.

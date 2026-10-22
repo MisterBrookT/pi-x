@@ -39,7 +39,9 @@ export interface Alert { title: string; why: string; action: string; refs: strin
 	/** The card's main buttons, written by the judge for this loop. */
 	choices?: Choice[];
 	/** The line of work this loop belongs to (proactive-lines.ts id). */
-	line?: string }
+	line?: string;
+	/** The person who needs brook (their avatar on the card); source = the app they wrote in, id = their id there if known. */
+	who?: { name: string; source?: string; id?: string } }
 /**
  * One button on a card. `run` says where the work goes: "here" = the For you session does it,
  * "discuss" = For you talks it through first, a live session id, "new" (a session in the project),
@@ -219,7 +221,7 @@ them: "Not important" (drop it), "Send to a session" (he picks any open session)
 Every alert needs "for" and "evidence": "me" = addressed to him, "project" = changes his project (memory), "promise" = he owes or is owed it.
 If you cannot fill "evidence", it is not his loop: leave it out.
 Reply with JSON only, no prose:
-{"alerts": [{"title": "<=60 chars, the loop", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit", "choices": [{"label": "...", "run": "here|discuss|<session id>|new|later|no", "prompt": "optional"}], "line": "line id or omit"}], "update": [{"id": "open loop id", "line": "line id or omit", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "...", "choices": [...]}], "close": ["open loop id"], "lines": [{"id": "line id", "state": "where it stands now", "next": "optional"}], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
+{"alerts": [{"title": "<=60 chars, the loop", "who": "the one person who needs him (name as they appear, e.g. Lowes, 陈老师); omit for group/system notices", "why": "<=120 chars, why it matters to ${o.me}", "action": "one concrete next step an agent could prepare", "button": "<outcome verb>", "state": "needs", "due": "YYYY-MM-DD", "project": "~/path or omit", "for": "me|project|promise", "evidence": "<=120 chars: the @mention, reply, name, or memory line showing it is his", "refs": ["message ids"], "to": "session id or omit", "choices": [{"label": "...", "run": "here|discuss|<session id>|new|later|no", "prompt": "optional"}], "line": "line id or omit"}], "update": [{"id": "open loop id", "line": "line id or omit", "state": "later", "title": "...", "why": "...", "action": "...", "button": "...", "due": "YYYY-MM-DD", "project": "...", "choices": [...]}], "close": ["open loop id"], "lines": [{"id": "line id", "state": "where it stands now", "next": "optional"}], ${o.cards ? `"cards": [{"card": "people/Knight", "add": ["..."], "remove": ["existing line text"]}]` : `"memory": {"add": ["- ..."], "remove": ["exact existing line"]}`}}`;
 }
 
 export function parseVerdict(raw: string): Verdict | null {
@@ -242,7 +244,7 @@ export function parseVerdict(raw: string): Verdict | null {
 		// A verdict without "for" (older shape) is kept.
 		const unaddressed = (a: any) => a.for !== undefined && (!["me", "project", "promise"].includes(String(a.for)) || !str(a.evidence, 200));
 		const line = (x: unknown) => { const l = str(x, 40); return l && /^[\p{L}\p{N}-]+$/u.test(l) ? l : undefined; };
-		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined, choices: cleanChoices(a.choices), line: line(a.line) }));
+		const alerts = list.filter((a: any) => a && String(a.title ?? "").trim() && !noop(a) && a.fyi !== true && !unaddressed(a)).slice(0, 3).map((a: any) => clean({ ...(str(a.who, 40) ? { who: { name: str(a.who, 40)! } } : {}), title: String(a.title).slice(0, 80), why: String(a.why ?? "").slice(0, 200), action: String(a.action ?? "").slice(0, 400), refs: Array.isArray(a.refs) ? a.refs.map(String) : [], button: str(a.button, 24), due: due(a.due), state: state(a.state), project: project(a.project), to: typeof a.to === "string" && /^[\w.-]{1,80}$/.test(a.to) ? a.to : undefined, choices: cleanChoices(a.choices), line: line(a.line) }));
 		const update = (Array.isArray(v.update) ? v.update : []).filter((u: any) => u && typeof u.id === "string").slice(0, 10).map((u: any) => clean({ id: u.id, state: state(u.state), title: str(u.title, 80), why: str(u.why, 200), action: str(u.action, 400), button: str(u.button, 24), due: due(u.due), project: project(u.project), choices: cleanChoices(u.choices), line: line(u.line) }));
 		const cards = (Array.isArray(v.cards) ? v.cards : []).filter((c: any) => c && typeof c.card === "string").slice(0, 8).map((c: any) => ({ card: c.card.trim().slice(0, 80), add: lines(c.add), remove: lines(c.remove) })).filter((c: any) => c.add.length || c.remove.length);
 		return { alerts, update, close: lines(v.close), memory: { add: lines(v.memory?.add), remove: lines(v.memory?.remove) }, cards, lines: parseLineEdits(v.lines) };
@@ -420,7 +422,7 @@ export function pruneLog(text: string, now: number, days = 30): string {
 }
 
 /** Public view of one item for the phone: no internal paths or commands. */
-export const publicItem = (i: Item) => ({ autonomy: i.autonomy ?? "", prepared: i.prepared ?? "", line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
+export const publicItem = (i: Item) => ({ autonomy: i.autonomy ?? "", prepared: i.prepared ?? "", line: i.line ?? "", session: i.session ?? "", quiet: !!i.quiet, id: i.id, ...(i.who ? { who: i.who } : {}), title: i.title, why: i.why, action: i.action, source: i.source, kind: String(i.sourceKey ?? "").split(":")[0], project: i.project ?? "", at: i.at, status: i.status, handledAt: i.at_status ?? "", button: i.button ?? "", due: i.due ?? "", wakeAt: i.wakeAt ?? "", note: i.note ?? "", suggest: i.suggest && !i.suggest.answer ? { session: i.suggest.session, name: i.suggest.name ?? "" } : undefined });
 
 /** A note line appended to a loop's brief, keeping the brief short (newest lines win). */
 export function addNote(old: string | undefined, text: string, now = new Date()): string {

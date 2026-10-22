@@ -36,6 +36,20 @@ createServer(async (req, res) => {
 		res.write(`data: ${version}\n\n`); clients.add(res); req.on("close", () => clients.delete(res)); return;
 	}
 	// Design mockups, dev only: /timeline is the X-style For you timeline on real data.
+	// avatarkit: /avatar?name=&source=&id= -> the person's cached photo (404 = use initials); /badge/<source> -> app icon.
+	if (req.method === "GET" && (path === "/avatar" || path.startsWith("/badge/"))) {
+		const kit = await createJiti(import.meta.url).import(new URL("../plugins/core/avatarkit.ts", import.meta.url).pathname);
+		const q = new URL(req.url, "http://x").searchParams;
+		const f = path === "/avatar" ? kit.avatarFile({ name: q.get("name") || "", source: q.get("source") || undefined, id: q.get("id") || undefined }) : kit.sourceIconFile(basename(path));
+		const data = kit.readFileOrUndefined(f);
+		if (!data) { res.writeHead(404, { "cache-control": "no-store" }); res.end(); return; }
+		res.writeHead(200, { "content-type": f.endsWith(".png") ? "image/png" : "image/jpeg", "cache-control": "max-age=86400" }); res.end(data); return;
+	}
+	// The timeline reads For you straight from the current code (the hub only reloads when its Pi session is idle).
+	if (req.method === "GET" && path === "/api/foryou" && new URL(req.url, "http://x").searchParams.has("dev")) {
+		const store = await createJiti(import.meta.url, { moduleCache: false }).import(new URL("../plugins/foryou/proactive-store.ts", import.meta.url).pathname);
+		res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(store.forYouView())); return;
+	}
 	if (req.method === "GET" && path.startsWith("/icons/")) {
 		const f = join(icons, basename(path));
 		if (!existsSync(f)) { res.writeHead(404); res.end(); return; }

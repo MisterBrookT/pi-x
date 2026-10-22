@@ -37,6 +37,7 @@ main{padding:6px 12px 40px}
 .av{position:relative;flex:none;width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--paper);display:grid;place-items:center;
   font:600 13px var(--sans);color:var(--soft);box-shadow:0 0 0 1px var(--rule)}
 .av img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.av .photo{position:absolute;inset:0}
 .av.person{box-shadow:none;color:#fff;font:600 15px var(--sans)}
 .av.pi{background:var(--ink);color:var(--paper);font:italic 600 18px var(--serif)}
 .badge{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:5px;overflow:hidden;box-shadow:0 0 0 2px var(--card)}
@@ -98,21 +99,17 @@ function icon(i){
   if(/minara|kairos/i.test(k+" "+(i.line||"")))return"/icons/minara.png";
   return"/icons/otty.png";
 }
-/* The avatar is the person who needs brook, not the app. Known people first, else "Name:" at the start of the title. */
-const PEOPLE=["Lowes","Tony","Olivia","恩浩","欧阳","易健","陈老师","王翼","沈琦"];
-function person(i){
-  const t=String(i.title||""),w=String(i.why||"")+" "+String(i.prepared||"");
-  const head=t.match(/^([^:：\s]{1,12})[:：]/);if(head&&!/^(Website|Kairos|X)$/i.test(head[1]))return head[1];
-  return PEOPLE.find(p=>t.includes(p))||PEOPLE.find(p=>w.includes(p))||"";
-}
-/* Stable soft colour per person: hash -> one of a few warm, muted hues. */
+/* The avatar is the person who needs brook (item.who from the daemon): real photo via avatarkit, else initials on a stable soft colour; π for Pi's own work. */
 const HUES=["#b5694a","#8a7a3d","#5f8a6a","#4f7a8f","#8a5f86","#a0605f","#6b6fa3","#9a7b4f"];
 const hue=n=>HUES[[...n].reduce((h,c)=>(h*31+c.codePointAt(0))>>>0,7)%HUES.length];
 const initials=n=>/^[\x00-\x7f]/.test(n)?n.slice(0,1).toUpperCase():n.replace(/老师$/,"").slice(-1);
+const srcKey=i=>{const k=(i.kind||"")+" "+(i.source||"");return/gmail|mail/i.test(k)?"gmail":/wechat/i.test(k)?"wechat":/dingtalk/i.test(k)?"dingtalk":/feishu|lark/i.test(k)?"feishu":"pi"};
+const person=i=>i.who?.name||"";
 function face(i){
-  const who=person(i),badge=`<span class="badge">${avatar(icon(i),"")}</span>`;
-  if(!who)return`<div class="av pi">π${badge}</div>`;
-  return`<div class="av person" style="background:${hue(who)}">${esc(initials(who))}${badge}</div>`;
+  const w=i.who,src=srcKey(i),badge=src==="gmail"?`<span class="badge"><img src="${GMAIL}" alt=""></span>`:`<span class="badge"><img src="/badge/${src}" alt="" onerror="this.parentNode.remove()"></span>`;
+  if(!w)return`<div class="av pi">π${badge}</div>`;
+  const q=new URLSearchParams({name:w.name,...(w.source?{source:w.source}:{}),...(w.id?{id:w.id}:{})});
+  return`<div class="av person" style="background:${hue(w.name)}">${esc(initials(w.name))}<img class="photo" src="/avatar?${q}" alt="" onerror="this.remove()">${badge}</div>`;
 }
 const viaName=i=>{const k=(i.kind||"")+" "+(i.source||"");return/gmail|mail/i.test(k)?"Gmail":/feishu|lark/i.test(k)?"Feishu":/wechat/i.test(k)?"WeChat":/dingtalk/i.test(k)?"DingTalk":"Pi"};
 const avatar=(src,alt)=>`<img src="${src}" alt="" onerror="this.replaceWith(document.createTextNode('${esc((alt||'?').slice(0,1))}'))">`;
@@ -129,7 +126,7 @@ function post(i,small){
   const L=(data.lines||[]).find(l=>l.id===i.line),c=latest(i),d=dueText(i.due);
   const acts=[];if(i.button)acts.push(`<button class="act main">${esc(i.button)}</button>`);acts.push(`<button class="act">${i.due?"Later":"Done"}</button>`);
   return `<article class="post ${i.status==="onit"?"onit":"you"}"><div class="row">${face(i)}<div class="body">
-  <div class="meta"><span class="dot"></span><span class="src">${esc(person(i)||"Pi")}</span><span class="via">via ${viaName(i)}</span>${L&&!small?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
+  <div class="meta"><span class="dot"></span><span class="src">${esc(person(i)||"Pi")}</span><span class="via">via ${viaName(i)}</span>${L?`<span>· ${esc(L.name)}</span>`:""}<span>· ${ago(i.at)}</span>${d?`<span class="due">${esc(d)}</span>`:""}</div>
   <div class="title">${esc(i.title)}</div>
   ${small?"":`<div class="ctx">${esc(i.why||i.action||"")}</div>`}
   ${c&&!small?`<div class="comment ${c.you?"you":""}"><span class="who">${c.you?"B":"π"}</span><p>${c.t?`<span class="t">${esc(c.t)} </span>`:""}${esc(c.text)}</p></div>`:""}
@@ -140,10 +137,10 @@ function post(i,small){
 let data,line="all";
 function render(){
   const items=[...(data.pending||[]),...(data.onit||[])].filter(i=>line==="all"||i.line===line);
-  const by=new Map();for(const i of items){const k=i.line||i.id;(by.get(k)||by.set(k,[]).get(k)).push(i)}
+  /* Each loop is its own top-level post, like tweets side by side. A line is only a chip/tag; nesting is for a loop's own updates (its comment). */
   const key=i=>i.due||"9999";
-  const groups=[...by.values()].map(g=>g.sort((a,b)=>key(a)<key(b)?-1:1)).sort((a,b)=>key(a[0])<key(b[0])?-1:1);
-  $("feed").innerHTML=groups.map(([h,...rest])=>post(h).replace("__SUB__",rest.length?`<div class="sub">${rest.map(i=>post(i,true).replace("__SUB__","")).join("")}</div>`:"")).join("")||'<p class="empty">Nothing needs you right now.</p>';
+  items.sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:Date.parse(b.at)-Date.parse(a.at));
+  $("feed").innerHTML=items.map(i=>post(i).replace("__SUB__","")).join("")||'<p class="empty">Nothing needs you right now.</p>';
   const due=items.filter(i=>i.due&&dueText(i.due)!=="").length;
   $("tally").innerHTML=`<b>${items.length}</b> need you${due?` · ${due} with a date`:""}`;
 }
@@ -152,7 +149,7 @@ document.addEventListener("click",e=>{
   const c=e.target.closest(".chip");if(c){line=c.dataset.l;document.querySelectorAll(".chip").forEach(x=>x.classList.toggle("on",x===c));render()}
 });
 if(!token)$("feed").innerHTML='<p class="note">No access token. Open this from the Pix dev server (npm run sim) on the Mac.</p>';
-else fetch("/api/foryou",{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
+else fetch("/api/foryou"+(window.PIX_TOKEN?"?dev":""),{headers:{authorization:"Bearer "+token}}).then(r=>{if(!r.ok)throw new Error(r.status===401?"Token rejected by the hub.":"Hub error "+r.status);return r.json()}).then(d=>{data=d;
   $("chips").innerHTML=`<button class="chip on" data-l="all">All</button>`+(d.lines||[]).filter(l=>l.open).map(l=>`<button class="chip" data-l="${esc(l.id)}">${esc(l.name)}<i>${l.open}</i></button>`).join("");render()})
  .catch(e=>$("feed").innerHTML=`<p class="note">${esc(e.message)}</p>`);
 </script></body></html>
