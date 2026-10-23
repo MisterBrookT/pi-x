@@ -133,9 +133,9 @@ test("no jitter: the working spinner is hidden while the picker is open and come
 test("phone: the question card shows its context above the question", async () => {
   const { remoteAppHtml } = await import("../plugins/remote/remote-web.ts");
   const html = typeof remoteAppHtml === "function" ? remoteAppHtml() : remoteAppHtml;
-  const src = html.match(/function askCtx[\s\S]*?\n/)[0] + html.match(/function askMany[\s\S]*?\n/)[0] + html.match(/function askCard[\s\S]*?\n/)[0];
+  const src = html.match(/function askCtx[\s\S]*?\n/)[0] + html.match(/const mqState=[\s\S]*?\nfunction askCard[\s\S]*?\n/)[0];
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const askCard = new Function("esc", src + "return askCard")(esc);
   assert.match(askCard({ id: "q", question: "Ship?", context: "**Two** builds\n- new passes", options: [{ label: "a" }] }), /<div class="ask-ctx">Two builds\n• new passes<\/div><span class="ask-kicker">Question/);
-  assert.match(askCard({ id: "q", question: "x", options: [], questions: [{ header: "A", question: "a?", context: "Why A", options: [] }, { header: "B", question: "b?", options: [] }] }), /· A<\/span><span class="mq-chosen"><\/span><\/button><div class="mq-body"><div class="ask-ctx">Why A<\/div><p>a\?/);
+  assert.match(askCard({ id: "q", question: "x", options: [], questions: [{ header: "A", question: "a?", context: "Why A", options: [] }, { header: "B", question: "b?", options: [] }] }), /1\/2 · A<\/span>[\s\S]*<div class="mq-body"><div class="ask-ctx">Why A<\/div><p>a\?/);
 });

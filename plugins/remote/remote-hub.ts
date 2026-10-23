@@ -59,7 +59,7 @@ export interface RemoteSnapshot {
   rewinds?: { id: string; text: string }[];
 }
 
-export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" }
+export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" | "quiet" }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
@@ -262,6 +262,13 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const live = sessions.get(sid);
       if (!live) return false;
       live.prompts.push(live.busy ? { text, images: [], mode: "followUp" } : text);
+      if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
+      return true;
+    },
+    note: (sid, text) => {
+      const live = sessions.get(sid);
+      if (!live) return false;
+      live.prompts.push({ text, images: [], mode: "quiet" });
       if (live.waiter) { const w = live.waiter; live.waiter = undefined; w(live.prompts.splice(0)); }
       return true;
     },

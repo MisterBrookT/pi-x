@@ -164,23 +164,26 @@ test("phone: several questions stack on one card; Submit sends one JSON array on
         { header: "Deploy", question: "When?", options: [{ label: "Now" }, { label: "Later" }] },
       ] });
     });
-    assert.equal(await page.locator(".mq").count(), 2);
-    assert.match(await page.locator(".mq").first().innerText(), /1\/2 · Scope/);
-    // Folds like Codex: only the current question shows its options; later ones show the header only.
-    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), true);
-    assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), false, "later question folded");
-    assert.match(await page.locator('.mq[data-k="1"]').innerText(), /^2\/2 · Deploy$/);
+    assert.equal(await page.locator(".ask-many").count(), 1, "one card");
+    assert.match(await page.locator(".mq-nav").innerText(), /1\/2 · Scope/);
+    assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), false, "one question at a time");
     const submit = page.locator("[data-mq-submit]");
     await page.locator('[data-mq="0"][data-mv="Full"]').click();
     assert.equal(await submit.isDisabled(), true, "waits for every answer");
-    // A pick advances; the answered one collapses to "Header: answer"; tapping it reopens.
-    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), false);
-    assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), true);
-    assert.match(await page.locator('.mq[data-k="0"] .mq-head').innerText(), /Scope[\s\S]*Full/);
-    await page.locator('[data-mq-head="0"]').click();
-    assert.equal(await page.locator('[data-mq="0"]').first().isVisible(), true, "tap reopens");
-    await page.locator('[data-mq-head="1"]').click();
+    await page.waitForFunction(() => /2\/2 · Deploy/.test(document.querySelector(".mq-nav").innerText), null, { timeout: 2000 });
     await page.locator('[data-mq-other="1"]').fill("Friday");
+    // Regression: going back and forward again must not wipe the typed answer or the pick.
+    await page.locator('[data-mq-go="-1"]').click();
+    assert.match(await page.locator(".mq-nav").innerText(), /1\/2/);
+    assert.equal(await page.locator('[data-mq="0"][data-mv="Full"]').getAttribute("class"), "picked");
+    await page.locator('[data-mq-go="1"]').click();
+    assert.equal(await page.locator('[data-mq-other="1"]').inputValue(), "Friday");
+    // ...and survives a full re-render of the card (the page re-renders on every poll).
+    await page.evaluate(() => { const q = { id: "q2", question: "How much?", options: [], questions: [
+        { header: "Scope", question: "How much?", options: [{ label: "Small" }, { label: "Full" }] },
+        { header: "Deploy", question: "When?", options: [{ label: "Now" }, { label: "Later" }] }] };
+      document.getElementById("messages").innerHTML = askCard(q); });
+    assert.equal(await page.locator('[data-mq-other="1"]').inputValue(), "Friday");
     assert.equal(await submit.isDisabled(), false);
     await submit.click();
     await submit.click({ force: true }).catch(() => {});
@@ -209,5 +212,31 @@ test("phone For you is the timeline: person, via app, latest word, the loop's ow
     assert.doesNotMatch(html, /data-fy-choice="2"/, "Later is the quiet action, not a choice button");
     assert.match(html, /data-tl-ask/);
     assert.doesNotMatch(html, /Closed/, "closed loops never show");
+  } finally { await browser.close(); server.close(); }
+});
+
+test("post page: every comment has a face, only brook's, the sender's words and the draft show, Pi's work is one progress card that opens the session", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const html = await page.evaluate(() => {
+      sessions = [{ id: "s1", name: "minara", busy: true }];
+      const now = new Date().toISOString();
+      return tlThread({ id: "a1", session: "s1", status: "onit", who: { name: "Knight", source: "feishu" }, thread: [
+        { by: "Knight", at: now, text: "Can you send the curves?", kind: "source" },
+        { by: "Pi", at: now, text: "internal note one", kind: "note" },
+        { by: "minara", at: now, text: "Chart rendered, 3 of 4 done", kind: "status" },
+        { by: "You", at: now, text: "use the v2 numbers", kind: "you" },
+      ] });
+    });
+    await page.setContent(`<div id="x">${html}</div>`);
+    assert.equal(await page.locator(".tl-thread .tl-comment").count(), 2, "only the sender's and brook's comments");
+    assert.equal(await page.locator(".tl-thread .tl-comment .tl-mav").count(), 2, "each comment has an avatar");
+    assert.match(await page.locator(".tl-c-you .tl-mav img").getAttribute("data-tl-img"), /name=me/, "brook's own photo");
+    assert.doesNotMatch(await page.locator(".tl-thread").innerText(), /internal note/);
+    const prog = page.locator(".tl-prog");
+    assert.equal(await prog.getAttribute("data-fy-open"), "s1", "tap opens the owner session");
+    assert.match(await prog.innerText(), /minara · Working · 2 updates[\s\S]*Chart rendered, 3 of 4 done/);
   } finally { await browser.close(); server.close(); }
 });

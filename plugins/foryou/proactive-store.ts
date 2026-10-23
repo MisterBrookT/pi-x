@@ -337,7 +337,7 @@ export function currentCard(dir?: string, live: LiveSession[] = [], now = Date.n
  * Returns what to tell the For you session (`here`), or where to hand the loop (`into`, with
  * `prompt`); undefined when the card is gone or the answer is bad. Every answer is logged.
  */
-export function answerCard(id: string, answer: CardAnswer, o: { choice?: number; to?: string; text?: string; by?: string; dir?: string; live?: LiveSession[]; now?: Date } = {}): { item: Item; here?: string; into?: string } | undefined {
+export function answerCard(id: string, answer: CardAnswer, o: { choice?: number; to?: string; text?: string; by?: string; dir?: string; live?: LiveSession[]; now?: Date } = {}): { item: Item; here?: string; into?: string; note?: string } | undefined {
 	const at = o.now ?? new Date();
 	const it = readAll(o.dir).find(i => i.id === id && needsYou(i, at.getTime()));
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
@@ -356,18 +356,24 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	const group = relatedWaiting(id, o.dir, at.getTime());
 	const all = (patch: Partial<Item>) => { for (const g of [it, ...group]) write(o.dir, { id: g.id, ...patch }); };
 	const also = group.length ? `\n\nThe same card also covers these related asks (same line of work); handle them together and close each with its id:\n${group.map(g => `- id=${g.id} from ${g.source}: ${g.title} (${g.why})`).join("\n")}` : "";
-	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); all({ status: "later", wakeAt: wake.toISOString() }); return { item: it }; }
-	if (answer === "no") { all({ status: "dismissed" }); return { item: it }; }
-	if (answer === "done") { all({ status: "done" }); return { item: it }; }
+	// Every decision reaches For you as one quiet line it sees on its next turn (no turn is started for it).
+	const said = (what: string) => `[decision] brook ${what} on loop ${id} ("${it.title}").`;
+	if (answer === "later") { const wake = new Date(at.getTime() + cardLaterDays * 86_400_000); wake.setHours(9, 0, 0, 0); all({ status: "later", wakeAt: wake.toISOString() }); return { item: it, note: said(`chose Later (back ${wake.toISOString().slice(0, 10)})`) }; }
+	if (answer === "no") { all({ status: "dismissed" }); return { item: it, note: said("removed it") }; }
+	if (answer === "done") { all({ status: "done" }); return { item: it, note: said("marked it done") }; }
 	// Acting on the card acts on the whole group: the lead carries the related asks; the rest wait on it.
 	const take = () => { if (!group.length) return; write(o.dir, { id, note: addNote(it.note, `Same card, handle together: ${group.map(g => `${g.id} ${g.title}`).join("; ")}`) }); for (const g of group) write(o.dir, { id: g.id, status: "waiting", wakeAt: null, note: addNote(g.note, `Handled with ${id} (${it.title})`) }); };
-	if (answer === "send") { take(); return { item: it, into: o.to }; }
-	// His own words on a loop a work session already owns go back to that session, with the loop's context.
-	if (answer === "else" && it.session && it.session !== forYouSession.id) { write(o.dir, { id, action: text }); take(); return { item: it, into: it.session }; }
+	if (answer === "send") { take(); return { item: it, into: o.to, note: said(`sent it to ${o.to}`) }; }
+	// His own words always go to the For you chat, like a normal message; For you forwards to the owner over chat.
+	// A comment never opens or resumes a tab by itself.
+	if (answer === "else" && it.session && it.session !== forYouSession.id) {
+		write(o.dir, { id, note: addNote(it.note, `brook said: ${text}`) });
+		return { item: it, here: `brook commented on loop ${id} ("${it.title}"), which ${it.session} owns:\n${text}\n\nAnswer him here. If the owner session must act, forward it to that session over chat (do not open a new tab).\n\n(The loop, for context:)\n${actPrompt(it, paths(o.dir).dir)}` };
+	}
 	if (c && c.run !== "here" && c.run !== "discuss" && c.run !== "later" && c.run !== "no") {
 		if (c.prompt) write(o.dir, { id, action: c.prompt });
 		take();
-		return { item: it, into: c.run };
+		return { item: it, into: c.run, note: said(`tapped "${c.label}" (runs in ${c.run})`) };
 	}
 	takeItem(id, forYouSession.id, o.dir, forYouFolder());
 	for (const g of group) takeItem(g.id, forYouSession.id, o.dir, forYouFolder());

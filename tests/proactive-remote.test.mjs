@@ -191,6 +191,28 @@ test("hub: Do it with a live For you session queues the task into it (no new tab
   assert.match(JSON.stringify(prompts), /Title a/);
 });
 
+test("hub: a card decision reaches For you as a quiet note (no turn), a comment as a normal message, no new tab", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [item("a"), item("b", { session: "s9" })].map(x => JSON.stringify(x)).join("\n") + "\n");
+  let launched = 0;
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir, act: async () => { launched++; }, start: async () => { launched++; } })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: dir, busy: false, messages: [] }) });
+  let next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
+  assert.equal((await fetch(`${base}/api/foryou/a/card`, { method: "POST", headers: auth, body: JSON.stringify({ answer: "later" }) })).status, 200);
+  const quiet = (await next).prompts;
+  assert.equal(quiet[0].mode, "quiet");
+  assert.match(quiet[0].text, /\[decision\] brook chose Later/);
+  next = fetch(`${base}/agent/pix-foryou/next`, { headers: auth }).then(r => r.json());
+  assert.equal((await fetch(`${base}/api/foryou/b/card`, { method: "POST", headers: auth, body: JSON.stringify({ answer: "else", text: "use v2" }) })).status, 200);
+  const msg = JSON.stringify(await next);
+  assert.match(msg, /use v2/);
+  assert.doesNotMatch(msg, /"quiet"/);
+  assert.equal(launched, 0, "no tab started or resumed");
+});
+
 test("phone composer: typing @ suggests For you items and a tap inserts the mention that is sent", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), [item("a1"), item("b2", { title: "Knight backtest" })].map(x => JSON.stringify(x)).join("\n") + "\n");
@@ -515,8 +537,8 @@ test("phone: a card a session handed back shows where it stands now, not the ori
   const post = await openPost(page.locator("#forYouPage"), "h1");
   assert.match(await post.textContent(), /Launch how\?/, "the open question");
   assert.doesNotMatch(await post.textContent(), /brook chose|Handed to/, "the post is not a past decision");
-  const thread = await page.locator("#forYouPage .fd .tl-thread").textContent();
-  assert.match(thread, /Handed to minara[\s\S]*Static mock built/, "history below, oldest first");
+  // Pi's and the session's updates are one progress card now; its latest line is the newest update.
+  assert.match(await page.locator("#forYouPage .fd .tl-prog").textContent(), /Static mock built/, "progress shows the latest update");
 });
 
 test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking one talks it through", async () => {
@@ -615,6 +637,7 @@ test("jobs read like X: each job has its own face For you picks; its page is the
   assert.match(await a.locator(".tl-comment").textContent(), /Lowes made it a Feishu task/, "the newest update is the post's one comment");
   assert.doesNotMatch(await a.locator(".tl-comment").textContent(), /2026-10-21/, "date prefix stripped");
   await a.locator(".tl-title").click();
-  const notes = await page.locator("#messages .fd .tl-thread .tl-comment p").allTextContents();
-  assert.ok(notes.findIndex(x => /draft started/.test(x)) < notes.findIndex(x => /Feishu task/.test(x)), "oldest first");
+  const prog = await page.locator("#messages .fd .tl-prog").textContent();
+  assert.match(prog, /Feishu task/, "the progress card shows the newest update");
+  assert.doesNotMatch(prog, /draft started/, "older updates stay in the session, not the post");
 });

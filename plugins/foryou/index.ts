@@ -301,6 +301,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				// No hub: answer here directly.
 				const r = answerCard(it.id, kind, { choice, to, text, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
 				if (!r) { ctx.ui.notify("That card was already answered.", "info"); return; }
+				if (r.note) pi.sendMessage({ customType: "pix-foryou-note", content: r.note, display: true }, { deliverAs: "nextTurn" });
 				if (r.here) pi.sendUserMessage(r.here, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 				if (r.into) await (deps.handOff ?? handOff)(it.id, r.into);
 			}
@@ -336,6 +337,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				const via = await (deps.answer ?? answerViaHub)(it.id, r);
 				if (via === "nohub") {
 					const a = answerCard(it.id, r.answer, { ...r, by: "mac", dir: deps.dir, live: await sessions().catch(() => []) });
+					if (a?.note) pi.sendMessage({ customType: "pix-foryou-note", content: a.note, display: true }, { deliverAs: "nextTurn" });
 					if (a?.here) pi.sendUserMessage(a.here, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 					if (a?.into) await (deps.handOff ?? handOff)(it.id, a.into);
 				}

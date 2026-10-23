@@ -13,6 +13,8 @@ export interface HubContext {
 	liveSessions(): HubLiveSession[];
 	/** Queue a prompt into a live session (follow-up if busy). False if that session is not connected. */
 	queue(session: string, text: string): boolean;
+	/** A quiet line the session sees on its next turn; it never starts a turn. */
+	note?(session: string, text: string): boolean;
 	/** Re-send one session and the session list to phones (after the plugin's session fields changed). */
 	refreshSession(session: string): void;
 }

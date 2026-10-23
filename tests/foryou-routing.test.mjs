@@ -281,12 +281,15 @@ test("loops tool choices: the coordinator publishes semantic buttons without blo
 	assert.match(await run({ action: "choices", id: "zz", choices: [{ label: "x", run: "here" }] }), /No open loop/);
 });
 
-test("card free text on a loop a work session owns goes back to that session with the loop's context", () => {
-	const d = tmp(loop("a", { status: "pending", session: "s1" }), loop("b"));
-	const r = answerCard("a", "else", { text: "the latter", dir: d, live });
-	assert.equal(r.into, "s1"); assert.equal(r.here, undefined);
-	assert.equal(inbox(d).find(i => i.id === "a").action, "the latter", "his words become the next step the session is told");
+test("a comment always goes to the For you chat, never opens or resumes the owner's tab; decisions send a quiet note", () => {
+	const d = tmp(loop("a", { status: "pending", session: "s1" }), loop("b"), loop("c"), loop("e"));
+	const r = answerCard("a", "else", { text: "use the other chart", dir: d, live });
+	assert.equal(r.into, undefined, "no tab is opened for a comment");
+	assert.match(r.here, /s1 owns[\s\S]*use the other chart[\s\S]*forward it to that session over chat/);
+	assert.match(inbox(d).find(i => i.id === "a").note, /brook said: use the other chart/, "his comment shows on the post");
 	assert.match(answerCard("b", "else", { text: "draft only", dir: d }).here, /own instruction[\s\S]*draft only/, "no owner: For you does it");
+	assert.match(answerCard("c", "later", { dir: d }).note, /^\[decision\] brook chose Later/);
+	assert.match(answerCard("e", "no", { dir: d }).note, /removed it/);
 });
 
 test("coordinator prompt: prefer relevant sessions, publish choices instead of blocking, no unapproved risky work", async () => {

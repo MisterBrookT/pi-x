@@ -97,6 +97,7 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 				const r = answerCard(cardMatch[1], answer, { choice: typeof input?.choice === "number" ? input.choice : undefined, to: typeof input?.to === "string" ? input.to : undefined, live: live(), text: typeof input?.text === "string" ? input.text : undefined, by: input?.by === "mac" ? "mac" : "phone", dir });
 				if (!r) { onProactive(); return { status: 409, body: { error: "This card was already answered" } }; }
 				try {
+					if (r.note) hub.note?.(forYouSession.id, r.note);
 					if (r.here && !hub.queue(forYouSession.id, r.here)) await (options.start ?? startForYou)(r.here);
 					if (r.into) await (options.act ?? ((x: string, _f?: boolean, i?: string) => actItem(x, { dir, send: hub.queue, live: live(), into: i })))(r.item.id, false, r.into, undefined);
 				} catch (error) { onProactive(); return failed(error); }

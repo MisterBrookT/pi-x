@@ -273,6 +273,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
 
   const deliver = (prompt: string | RemotePrompt | RemoteAbort | RemoteAction) => {
     if (!ctx) return;
+    // A quiet note (a For you card decision) waits for the next turn; it never starts one or answers a question.
+    if (typeof prompt === "object" && "mode" in prompt && prompt.mode === "quiet") {
+      pi.sendMessage({ customType: "pix-foryou-note", content: prompt.text, display: true }, { deliverAs: "nextTurn" });
+      return;
+    }
     origin = "phone";
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
