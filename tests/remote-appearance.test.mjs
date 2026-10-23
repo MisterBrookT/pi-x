@@ -367,3 +367,20 @@ test("regression: a face that failed to load over a bad network is fetched again
     assert.equal(r.nobodyHidden, true);
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a face, once loaded, is kept on the phone and shows on the next visit without the network", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext(); const page = await ctx.newPage();
+    const url = `http://127.0.0.1:${server.address().port}/`;
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const load = async online => page.evaluate(async ({ online, png }) => {
+      window.fetch = async () => { if (!online) throw TypeError("Load failed"); return new Response(JSON.stringify({ mimeType: "image/png", data: png }), { status: 200 }); };
+      document.body.insertAdjacentHTML("beforeend", tlImg("name=Lowes&source=feishu", "tl-photo"));
+      tlLoadImages(); await new Promise(r => setTimeout(r, 300));
+      return !document.querySelector("img.tl-photo").hidden;
+    }, { online, png });
+    await page.goto(url); assert.equal(await load(true), true, "first visit, online");
+    await page.reload(); assert.equal(await load(false), true, "next visit, offline: still the photo");
+  } finally { await browser.close(); server.close(); }
+});
