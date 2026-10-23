@@ -339,3 +339,31 @@ test("regression: a job's page puts the newest message first (by its own time, n
     assert.ok(r.lines.every(w => w === "0px"), "no vertical lines");
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a face that failed to load over a bad network is fetched again, not left as initials; a real 'no picture' is not retried", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const r = await page.evaluate(async () => {
+      const calls = {}; let net = "down";
+      const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+      const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+      window.fetch = async path => { calls[path] = (calls[path] || 0) + 1;
+        if (atob(path.split("/").pop().replace(/-/g, "+").replace(/_/g, "/")).includes("Nobody")) return json(404, { error: "no picture" });
+        if (net === "down") throw TypeError("Load failed");
+        return json(200, { mimeType: "image/png", data: png }); };
+      document.body.insertAdjacentHTML("beforeend", tlImg("name=Lowes&source=feishu", "tl-photo") + tlImg("name=Nobody", "tl-photo"));
+      const [lowes, nobody] = document.querySelectorAll("img.tl-photo");
+      tlLoadImages(); await new Promise(r => setTimeout(r, 50));
+      const before = lowes.hidden; net = "up";
+      await new Promise(r => setTimeout(r, 4500));
+      return { before, after: lowes.hidden, src: lowes.src.startsWith("data:image/png"), nobodyCalls: Object.entries(calls).filter(([k]) => atob(k.split("/").pop().replace(/-/g, "+").replace(/_/g, "/")).includes("Nobody"))[0][1], nobodyHidden: nobody.hidden };
+    });
+    assert.equal(r.before, true, "offline: initials for now");
+    assert.equal(r.after, false, "network back: the photo shows");
+    assert.ok(r.src);
+    assert.equal(r.nobodyCalls, 1, "no photo = asked once");
+    assert.equal(r.nobodyHidden, true);
+  } finally { await browser.close(); server.close(); }
+});
