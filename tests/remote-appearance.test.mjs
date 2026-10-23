@@ -402,3 +402,25 @@ test("regression: a grouped job card shows the newest item's person (face + name
     assert.doesNotMatch(html, /🚀/);
   } finally { await browser.close(); server.close(); }
 });
+
+test("rule: every person-led card in the feed shows that person's face, never the job icon (design.md: the avatar is the person who needs brook)", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const bad = await page.evaluate(() => {
+      const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+      const P = (id, line, h, who) => ({ id, line, title: id, at: ago(h), source: "Feishu", ...(who ? { who: { name: who, source: "feishu" } } : {}) });
+      forYou = { lines: [{ id: "k", name: "Kairos", avatar: "rocket" }, { id: "b", name: "Bench", avatar: "owl" }],
+        pending: [P("a", "k", 1, "Lowes"), P("c", "k", 3, "Kathy"), P("d", "b", 2, "王翼"), P("e", "b", 4), P("f", null, 5, "Kathy")], cards: [] };
+      fyLine = "all"; const d = document.createElement("div"); d.innerHTML = tlFeed([]);
+      return [...d.querySelectorAll(".tl-post")].map(card => {
+        const id = card.dataset.fy || card.dataset.fyDetail; const lead = card.querySelector(".tl-meta b")?.textContent;
+        const img = card.querySelector(".tl-av img.tl-photo")?.dataset.tlImg || ""; const pi = !!card.querySelector(".tl-av.pi");
+        const ok = lead === "Pi" ? pi : img.includes("name=" + encodeURIComponent(lead));
+        return ok ? null : `${id}: lead ${lead}, face ${img || (pi ? "π" : card.querySelector(".fj-av") ? "job icon" : "none")}`;
+      }).filter(Boolean);
+    });
+    assert.deepEqual(bad, []);
+  } finally { await browser.close(); server.close(); }
+});

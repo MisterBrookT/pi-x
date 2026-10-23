@@ -8,12 +8,16 @@ const origin = (() => { try { return JSON.parse(readFileSync(join(homedir(), ".p
 const log = m => console.log(`[relay deploy] ${m}`);
 try {
   log("deploying relay/ …");
-  execFileSync("npx", ["wrangler", "deploy"], { cwd: new URL("../relay/", import.meta.url), stdio: ["ignore", "ignore", "inherit"], timeout: 180_000 });
+  // A flaky network (proxy, Cloudflare) must not leave the phone on an old page: retry the deploy, then the check.
+  for (let t = 1; ; t++) {
+    try { execFileSync("npx", ["wrangler", "deploy"], { cwd: new URL("../relay/", import.meta.url), stdio: ["ignore", "ignore", "inherit"], timeout: 180_000 }); break; }
+    catch (e) { if (t >= 3) throw e; log(`deploy try ${t} failed; retrying`); await new Promise(r => setTimeout(r, 5000 * t)); }
+  }
   if (!origin) { log("deployed (no relay origin configured to verify)"); process.exit(0); }
   const { remoteAppHtml } = await import("../plugins/remote/remote-web.ts");
   const marker = remoteAppHtml.match(/<form class="composer"[\s\S]{0,400}/)[0];
-  for (let i = 0; i < 10; i++) {
-    const live = await (await fetch(origin + "/?v=" + Date.now(), { cache: "no-store" })).text();
+  for (let i = 0; i < 20; i++) {
+    const live = await fetch(origin + "/?v=" + Date.now(), { cache: "no-store" }).then(r => r.text()).catch(() => "");
     if (live.includes(marker)) { log(`live at ${origin}`); process.exit(0); }
     await new Promise(r => setTimeout(r, 2000));
   }
