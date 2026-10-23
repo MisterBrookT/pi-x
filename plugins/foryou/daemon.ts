@@ -39,7 +39,7 @@ const pixAnthropic = join(dirname(fileURLToPath(import.meta.url)), "..", "pix-an
 /** A repeating error is logged when it starts and when it changes, not every round. */
 const lastErr = new Map<string, string>();
 /** Apps whose data was blocked last round (lost Full Disk Access); rechecked every 30 s until readable. */
-// Gmail login: refreshed at most hourly (also keeps the token warm); a failure is one stable health entry.
+// Gmail login: checked at most hourly; a failure is one stable health entry.
 let gmail = { at: 0, state: "ok" as Awaited<ReturnType<typeof checkGmailAuth>>, since: "" };
 const blockedApps = new Set<"wechat" | "dingtalk">();
 const accessBack = async () => { for (const a of blockedApps) if (await probeApp(a) !== "ok") return false; return true; };

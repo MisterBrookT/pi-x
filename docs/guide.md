@@ -146,8 +146,9 @@ answers or discussion). It can also resume a paused or blocked goal, or replace 
 `/tool goal off` blocks it. See [goal-todo-background.md](goal-todo-background.md). The goal owns the outcome and verification;
 todos track steps. Finishing all todos prompts verification, not completion.
 
-The footer shows `goal on` only while a goal is active, including its waiting
-state. Inactive goals add nothing to the footer; `/goal status` shows their details.
+The footer shows `goal on` while a goal is active, and `goal waiting · check HH:MM`
+while it holds for background work: jobs, subagents, and replies it asked other
+sessions for (all one kind of pending work; no separate waiting call). Inactive goals add nothing to the footer; `/goal status` shows their details.
 An active goal remains visible even when the project path is long.
 
 Goal mode adds no judge model or dependency. The objective survives compaction.

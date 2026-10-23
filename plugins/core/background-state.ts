@@ -8,6 +8,8 @@ export const BACKGROUND_JOB_END = "pix:background-job-end";
 export const BACKGROUND_CHANGED = "pix:background-changed";
 export interface BackgroundState {
 	running: number;
+	/** Chat asks/handoffs still waiting for a reply: background work done by another session. */
+	waits?: number;
 	/** Earliest scheduled health check (epoch ms) among running jobs, if any. */
 	nextLook?: number;
 	goal?: { id: string; active: boolean };

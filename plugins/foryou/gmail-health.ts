@@ -1,7 +1,7 @@
 /**
  * Gmail MCP login check. The MCP stores an OAuth refresh token in ~/.gmail-mcp/credentials.json; if Google
- * revokes it (Testing-mode apps: after 7 days) every Gmail tool fails with invalid_grant. Refreshing it once an
- * hour also keeps the access token fresh. A failure becomes one health problem (shown once on For you, logged
+ * revokes it (Testing-mode apps: after 7 days) every Gmail tool fails with invalid_grant. Checking once an hour
+ * finds a dead login early; it cannot extend a Testing-mode token's 7-day life. A failure becomes one health problem (shown once on For you, logged
  * only when it changes), with the re-login command. Secrets never leave this function.
  */
 import { execFile } from "node:child_process";
@@ -44,9 +44,4 @@ export async function checkGmailAuth(dir = gmailDir(), post: Post = curlPost): P
 export function gmailProblem(a: GmailAuth, since: string): Problem[] {
 	if (a !== "revoked" && a !== "missing") return [];
 	return [{ text: `Gmail login expired: Gmail tools fail (invalid_grant). Re-login: ${gmailRelogin}`, since }];
-}
-
-/** Testing-mode OAuth apps get refresh tokens that die in 7 days; Google marks them with refresh_token_expires_in. */
-export function gmailTokenExpires(dir = gmailDir()): boolean {
-	try { const c = JSON.parse(readFileSync(join(dir, "credentials.json"), "utf8")); return Boolean((c.tokens ?? c).refresh_token_expires_in); } catch { return false; }
 }

@@ -6,7 +6,6 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { FooterDataProvider } from "../node_modules/@earendil-works/pi-coding-agent/dist/core/footer-data-provider.js";
 import registerGoal from "../plugins/goal/index.ts";
 import { BACKGROUND_STATE_QUERY } from "../plugins/core/background-state.ts";
-import { CHAT_WAITS_QUERY } from "../plugins/core/chat-waiting.ts";
 
 const registerFooter = await createJiti(import.meta.url).import("../plugins/footer/index.ts", { default: true });
 
@@ -74,7 +73,7 @@ test("Pix's custom footer renders the goal status from Pi's public status API", 
 	let running = 1;
 	h.pi.events.on(BACKGROUND_STATE_QUERY, (query) => { query.running += running; });
 	await h.emit("agent_settled");
-	assert.match(h.render()[0], /goal on \(waiting\)/);
+	assert.match(h.render()[0], /goal waiting/);
 	running = 0;
 	await h.emit("agent_start");
 	assert.doesNotMatch(h.render()[0], /waiting/, "native completion clears the waiting label when work resumes");
@@ -259,33 +258,23 @@ test("footer: what this session pinned shows as 'Docs 1 · Links 1' on the first
 	assert.match(h.render(90)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/, "pins survive a crowded line");
 });
 
-test("waiting: only with real pending waits; no continuations or busywork until a wake; interruption still pauses", async (t) => {
+test("a reply from another session is background work: the goal holds (no continuations) while it is open, shows the next check, then continues once", async (t) => {
 	const h = await harness(t);
 	await h.command("Coordinate the overnight work.");
-	const id = h.sm.getBranch().filter((e) => e.customType === "pix-goal").at(-1).data.id;
 	const goalTool = h.tools.get("goal");
-	await assert.rejects(goalTool.execute("w0", { id, status: "waiting", evidence: "nothing" }, undefined, undefined, h.ctx), /Nothing is pending/, "pending waits are required, so it cannot be used to idle");
+	assert.ok(!JSON.stringify(goalTool.parameters).includes("waiting"), "no separate waiting status to call");
 	let waits = 1;
 	const check = new Date(2026, 9, 23, 2, 16).getTime();
-	h.pi.events.on(CHAT_WAITS_QUERY, (q) => { q.waits += waits; if (waits) q.nextCheck = check; });
-	await goalTool.execute("w1", { id, status: "waiting", evidence: "minara-2 reply" }, undefined, undefined, h.ctx);
-	assert.match(h.render()[0], /goal waiting · check 02:16/);
+	h.pi.events.on(BACKGROUND_STATE_QUERY, (q) => { q.waits = (q.waits ?? 0) + waits; if (waits) q.nextLook = check; });
+	await h.emit("agent_settled");
 	const before = h.wakes().length;
 	for (let i = 0; i < 3; i++) await h.emit("agent_settled");
-	assert.equal(h.wakes().length, before, "no continuation wakes while waiting");
-	assert.match(h.render()[0], /goal waiting/);
-	// A reply / health check starts a turn: waiting clears, normal continuation rules apply again.
-	await h.emit("agent_start");
-	assert.match(h.render()[0], /goal on/);
-	await h.emit("agent_settled");
-	assert.equal(h.wakes().length, before + 1, "after the wake turn, pending waits do not suppress continuing useful work");
-	// Waits all closed while waiting -> one continuation to read results.
-	await goalTool.execute("w2", { id, status: "waiting", evidence: "minara-2 reply" }, undefined, undefined, h.ctx);
+	assert.equal(h.wakes().length, before, "no continuation wakes while a reply is pending");
+	assert.match(h.render()[0], /goal waiting · check 02:16/);
 	waits = 0;
-	const n = h.wakes().length;
 	await h.emit("agent_settled");
-	assert.equal(h.wakes().length, n + 1);
-	assert.match(h.wakes().at(-1).content, /Everything you were waiting on has finished/);
+	assert.equal(h.wakes().length, before + 1, "one continuation once nothing is pending");
+	assert.match(h.render()[0], /goal on/);
 	// User interruption is still a pause, never auto-resumed.
 	await h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
 	assert.match(h.render()[0], /goal paused/);
