@@ -219,7 +219,13 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   const switchModel = async (value: string) => {
     const model = choices().find(m => modelKey(m) === value);
     if (!model || !ctx?.isIdle()) return;
-    if (!(await pi.setModel(model))) ctx.ui.notify(`No API key for ${modelKey(model)}`, "warning");
+    // A remote switch must never take the session down: setModel throws (not returns false)
+    // when the provider has no key in this process, and this runs from a socket handler.
+    try {
+      if (!(await pi.setModel(model))) ctx.ui.notify(`No API key for ${modelKey(model)}`, "warning");
+    } catch (e) {
+      ctx.ui.notify(`Model switch failed: ${e instanceof Error ? e.message : String(e)}`, "warning");
+    }
     schedulePush();
   };
 
