@@ -7,8 +7,9 @@
  * cooling down after a quota/429; unknown % counts as usable. Usage is cached in ~/.pix/accounts-usage.json
  * so every session and the footer read the same numbers.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
+import crypto from "node:crypto";
 import { join } from "node:path";
 
 export interface Account { id: string; label: string; configDir?: string }
@@ -16,7 +17,14 @@ export interface Usage { left?: number; resetsAt?: string; coolUntil?: number; c
 
 const dir = () => process.env.PIX_HOME ?? join(homedir(), ".pix");
 const read = <T>(f: string, d: T): T => { try { return JSON.parse(readFileSync(join(dir(), f), "utf8")); } catch { return d; } };
-const write = (f: string, v: unknown) => { mkdirSync(dir(), { recursive: true }); const p = join(dir(), f); writeFileSync(p + ".tmp", JSON.stringify(v, null, 2)); renameSync(p + ".tmp", p); };
+// A unique temporary file avoids concurrent Pi processes overwriting each other's pending rename.
+const atomicWrite = (f: string, content: string) => {
+	mkdirSync(dir(), { recursive: true });
+	const p = join(dir(), f), tmp = `${p}.${process.pid}.${crypto.randomUUID()}.tmp`;
+	try { writeFileSync(tmp, content, { mode: 0o600, flag: "wx" }); renameSync(tmp, p); }
+	finally { try { unlinkSync(tmp); } catch { /* renamed or never created */ } }
+};
+const write = (f: string, v: unknown) => atomicWrite(f, JSON.stringify(v, null, 2));
 
 const DEFAULTS: Account[] = [
 	{ id: "minarabench", label: "minarabench", configDir: join(homedir(), ".claude-minarabench") },
@@ -30,7 +38,7 @@ export function choice(): string {
 	const v = (process.env.PIX_CLAUDE_ROUTE ?? (() => { try { return readFileSync(join(dir(), "claude-route"), "utf8"); } catch { return ""; } })()).trim();
 	return accounts().some(a => a.id === v) ? v : "auto";
 }
-export function setChoice(v: string): void { mkdirSync(dir(), { recursive: true }); writeFileSync(join(dir(), "claude-route"), v + "\n"); }
+export function setChoice(v: string): void { atomicWrite("claude-route", v + "\n"); }
 
 export const usage = (): Record<string, Usage> & { _active?: { id: string } } => read("accounts-usage.json", {});
 export function recordUsage(id: string, u: Usage): void { const all = usage(); all[id] = { ...all[id], ...u, checkedAt: Date.now() }; write("accounts-usage.json", all); }
