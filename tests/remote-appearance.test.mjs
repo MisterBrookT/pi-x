@@ -305,3 +305,13 @@ test("regression: a For you post never repeats its title as the grey line under 
     assert.doesNotMatch(full, /tl-ctx/); assert.doesNotMatch(feed, /tl-ctx/);
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: on a post page, comments and 'Also' rows use the full width (no 51px left gutter)", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const m = await page.evaluate(() => { const d = document.createElement("div"); d.className = "fd"; d.innerHTML = '<div class="tl-thread"></div><div class="tl-subs"></div>'; document.body.append(d); return [...d.children].map(x => getComputedStyle(x).marginLeft); });
+    assert.deepEqual(m, ["0px", "0px"]);
+  } finally { await browser.close(); server.close(); }
+});
