@@ -79,8 +79,12 @@ export const claudeAuth = {
 	async check({ signal }: { signal: AbortSignal }) {
 		signal.throwIfAborted();
 		if (process.env.PIX_ANTHROPIC_API_KEY) return { type: "api_key" as const, source: "configured API key" };
+		// Only confirm a Claude Code login exists. An expired token is still "configured":
+		// renewal (a slow `claude -p`) belongs to resolve() at request time. Renewing here made
+		// model switches fail when several sessions checked at once after the token expired.
 		try {
-			await readClaudeToken();
+			try { await readCredentialToken(); }
+			catch { await new Promise(r => setTimeout(r, 300)); await readCredentialToken(); } // keychain hiccup
 			signal.throwIfAborted();
 			return { type: "api_key" as const, source: "Claude Code" };
 		} catch {
