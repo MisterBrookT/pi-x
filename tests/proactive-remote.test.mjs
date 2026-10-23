@@ -388,9 +388,11 @@ test("related asks in one line of work share one card, and one answer handles th
   assert.doesNotMatch(await group.textContent(), /\b2\b|\+1/, "no counts");
   // Tap: the line's page, each ask a reply row with its own small actions.
   await group.locator(".tl-title").click();
-  await page.locator('#messages .fd .tl-sub[data-fy="h1"]').waitFor();
-  assert.equal(await page.locator('#messages .fd .tl-sub').count(), 2);
-  assert.equal(await page.locator('#messages .fd .tl-sub[data-fy="h2"] [data-fy-act="done"]').count(), 1, "inline actions per ask");
+  // Tap: the page leads with the card's ask (full, with actions); the other ask follows as a reply row.
+  await page.locator('#messages .fd .tl-sub').first().waitFor();
+  assert.equal(await page.locator('#messages .fd .tl-full').count(), 1);
+  assert.equal(await page.locator('#messages .fd .tl-sub').count(), 1);
+  assert.equal(await page.locator('#messages .fd .tl-sub [data-fy-act="done"]').count(), 1, "inline actions per ask");
   // The line chip still filters to plain posts.
   await page.locator("#messages [data-fy-back]").click();
   await page.locator('#messages [data-tl-line="bench"]').click();
@@ -630,7 +632,16 @@ test("jobs read like X: each job has its own face For you picks; its page is the
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   // Two open loops in one job: one post; its page lists each loop, and a loop's page has every update oldest first.
-  await page.locator('#messages .tl-group[data-fy-detail="l:kairos"]').waitFor({ timeout: 12000 });
+  const group = page.locator('#messages .tl-group[data-fy-detail="l:kairos"]');
+  await group.waitFor({ timeout: 12000 });
+  // Regression: tapping the group opens a page that leads with the same title the card showed, not the job's status.
+  const cardTitle = await group.locator(".tl-title").textContent();
+  await group.click();
+  await page.locator("#messages .fd").waitFor();
+  assert.equal(await page.locator("#messages .fd .tl-post .tl-title").first().textContent(), cardTitle);
+  assert.match(await page.locator("#messages .fd").textContent(), /Also in Kairos launch/);
+  assert.match(await page.locator("#messages .fd .tl-linenote").textContent(), /Arena live; site next/, "the job's status is a footnote");
+  await page.locator("#messages [data-fy-back]").click();
   await page.locator('#messages [data-tl-line="kairos"]').click();
   const a = page.locator('#messages .tl-post[data-fy="a"]');
   await a.waitFor({ timeout: 12000 });
