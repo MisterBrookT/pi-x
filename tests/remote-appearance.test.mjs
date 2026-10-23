@@ -292,3 +292,16 @@ test("regression: a message that failed to send can be removed (✕) or retried 
     assert.equal(await page.evaluate(() => pendingPrompts.length), 0, "✕ removes it");
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a For you post never repeats its title as the grey line under it", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const [full, feed] = await page.evaluate(() => {
+      const i = { id: "k", title: "Kathy: send her the doc", action: "Kathy: send her the doc", why: "Kathy: send her the doc", at: new Date().toISOString(), source: "Feishu" };
+      return [tlPost(i, [], "full"), tlPost(i, [])];
+    });
+    assert.doesNotMatch(full, /tl-ctx/); assert.doesNotMatch(feed, /tl-ctx/);
+  } finally { await browser.close(); server.close(); }
+});
