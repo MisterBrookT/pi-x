@@ -240,3 +240,24 @@ test("post page: every comment has a face, only brook's, the sender's words and 
     assert.match(await prog.innerText(), /minara · Working · 2 updates[\s\S]*Chart rendered, 3 of 4 done/);
   } finally { await browser.close(); server.close(); }
 });
+
+test("Aurora palette: a slow moving colour background, chosen in Settings; one attached photo is a small square that opens full screen", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.addInitScript(() => { localStorage.pixRemotePalette = "aurora"; });
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.palette), "aurora", "Aurora is a valid saved choice");
+    const bg = await page.evaluate(() => { const s = getComputedStyle(document.body, "::before"); return { img: s.backgroundImage, anim: s.animationName }; });
+    assert.match(bg.img, /radial-gradient/); assert.equal(bg.anim, "aurora");
+    const size = await page.evaluate(() => {
+      document.body.style.display = "block";
+      selectedImages = [{ url: "data:image/gif;base64,R0lGODlhAQABAAAAACw=", data: "x", name: "p.png" }]; paintAttachments();
+      $("attachment").hidden = false;
+      const r = document.querySelector(".att-th").getBoundingClientRect(); return { w: r.width, h: r.height };
+    });
+    assert.deepEqual(size, { w: 64, h: 64 }, "one photo is a 64px square, not the whole line");
+    await page.locator(".att-th img").dispatchEvent("click");
+    assert.equal(await page.locator("#imageViewer").isHidden(), false, "tap opens it full screen");
+  } finally { await browser.close(); server.close(); }
+});
