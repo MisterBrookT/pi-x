@@ -28,7 +28,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPixAnthropicStream } from "./stream.ts";
 import { claudeAuth, readClaudeToken } from "./claude-auth.ts";
-import { accounts, footerLabel, leftFromUsage, ready, recordUsage, usage } from "./accountkit.ts";
+import { accounts, leftFromUsage, ready, recordUsage, usage } from "./accountkit.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = process.env.PIX_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
@@ -200,11 +200,11 @@ export default async function (pi: ExtensionAPI) {
 	};
 	let timer: ReturnType<typeof setInterval> | undefined;
 	if (typeof pi.on === "function") pi.on("session_start", (_e, ctx) => {
-		const show = () => { try { ctx.ui.setStatus("pix-account", footerLabel()); } catch {} };
-		void poll().then(show); show();
-		timer ??= setInterval(() => void poll().then(show), 5 * 60_000); timer.unref?.();
+		// Account % is shown by Kaji's menu bar; keep the footer clean (clear any old label).
+		try { ctx.ui.setStatus("pix-account", undefined); } catch {}
+		void poll();
+		timer ??= setInterval(() => void poll(), 5 * 60_000); timer.unref?.();
 	});
-	if (typeof pi.on === "function") pi.on("turn_end", (_e, ctx) => { try { ctx.ui.setStatus("pix-account", footerLabel()); } catch {} });
 
 	if (debug) {
 		process.stderr.write(
