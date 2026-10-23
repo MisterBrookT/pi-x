@@ -384,3 +384,21 @@ test("regression: a face, once loaded, is kept on the phone and shows on the nex
     await page.reload(); assert.equal(await load(false), true, "next visit, offline: still the photo");
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a grouped job card shows the newest item's person (face + name), not the job icon", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const html = await page.evaluate(() => {
+      const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+      forYou = { lines: [{ id: "k", name: "Kairos launch", avatar: "rocket" }] };
+      return tlGroup(forYou.lines[0], [
+        { id: "a", line: "k", title: "Lowes: make a skill?", at: ago(5), source: "Feishu", who: { name: "Lowes", source: "feishu" } },
+        { id: "b", line: "k", title: "Kathy: send the doc", at: ago(8), source: "Feishu", who: { name: "Kathy", source: "feishu" } }]);
+    });
+    assert.match(html, /data-tl-img="name=Lowes&amp;source=feishu"/);
+    assert.match(html, /<b>Lowes<\/b>/); assert.match(html, /Kairos launch/);
+    assert.doesNotMatch(html, /🚀/);
+  } finally { await browser.close(); server.close(); }
+});

@@ -387,7 +387,8 @@ return '<button type="button" class="tl-prog" data-fy-open="'+esc(sid)+'"><span 
 const tlReplyBox=(id,ph)=>'<div class="tl-reply tl-bottom" data-fy="'+esc(id)+'"><textarea rows="1" maxlength="2000" placeholder="'+esc(ph)+'" aria-label="Reply"></textarea><button type="button" data-fy-comment>Reply</button></div>';
 /* A line with 2+ open loops is one post: the line's face and name, the newest loop as the body, the rest as "Also". */
 function tlGroup(l,T){const n=T[0],w=n.latest,last=fyTs(n.at);
-return '<article class="tl-post tl-group" data-fy-detail="l:'+esc(l.id)+'"><div class="tl-row">'+fyFace(l)+'<div class="tl-body"><div class="tl-meta"><b>'+esc(l.name)+'</b><span>· '+tlAgo(new Date(last).toISOString())+'</span></div>'
+/* The card leads with the newest item, so it wears that item's face and name (like a single post); the job name follows. */
+return '<article class="tl-post tl-group" data-fy-detail="l:'+esc(l.id)+'"><div class="tl-row">'+tlFace(n)+'<div class="tl-body"><div class="tl-meta"><b>'+esc(n.who?.name||'Pi')+'</b><span class="tl-via">via '+TLV[tlSrc(n)]+'</span><span>· '+esc(l.name)+'</span><span>· '+tlAgo(new Date(last).toISOString())+'</span></div>'
 +'<div class="tl-title">'+esc(n.title)+'</div>'+(w?'<div class="tl-ctx">'+esc(w.text)+'</div>':n.why?'<div class="tl-ctx">'+esc(n.why)+'</div>':'')
 +'<div class="tl-also">Also: '+T.slice(1).map(i=>esc(i.title)).join(' · ')+'</div></div></div></article>'}
 function tlFeed(CS){const items=[...(forYou.pending||[]),...(forYou.onit||[])].filter(i=>!['done','dismissed','resolved'].includes(i.status)),ls=(forYou.lines||[]).filter(l=>items.some(i=>i.line===l.id));
