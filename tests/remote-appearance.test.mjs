@@ -261,3 +261,17 @@ test("Aurora palette: a slow moving colour background, chosen in Settings; one a
     assert.equal(await page.locator("#imageViewer").isHidden(), false, "tap opens it full screen");
   } finally { await browser.close(); server.close(); }
 });
+
+test("Aurora colour kit: the background colours follow the agent (working, waiting, needs you, done, idle)", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.addInitScript(() => { localStorage.pixRemotePalette = "aurora"; });
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const moods = await page.evaluate(() => [moodOf({ busy: true }, 0, 1), moodOf({ waiting: 1 }, 0, 1), moodOf({ peerWait: "x" }, 0, 1), moodOf({ question: {} , busy: true }, 0, 1), moodOf({}, 5, 1), moodOf({}, 0, 1)]);
+    assert.deepEqual(moods, ["work", "wait", "wait", "you", "done", "idle"]);
+    const a0 = async m => page.evaluate(m => { document.documentElement.dataset.mood = m; return getComputedStyle(document.documentElement).getPropertyValue("--a0").trim(); }, m);
+    const seen = new Set([await a0("work"), await a0("wait"), await a0("you"), await a0("done"), await a0("idle")]);
+    assert.equal(seen.size, 5, "each state has its own colours");
+  } finally { await browser.close(); server.close(); }
+});
