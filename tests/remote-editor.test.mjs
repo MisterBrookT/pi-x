@@ -326,7 +326,7 @@ test("reopening the page shows the last conversation at once, before the Mac ans
   await page.getByText("Message 40").waitFor({ timeout: 2000 });
 });
 
-import { renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
+import { markdownMedia, renderRemoteMarkdown } from "../plugins/remote/remote-markdown.ts";
 test("chat: a markdown image with an absolute path in a message shows the picture; tap opens it full size", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pix-chatimg-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -338,21 +338,27 @@ test("chat: a markdown image with an absolute path in a message shows the pictur
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
   const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: home, busy: false, messages: [{ role: "user", text: "show me" }, { role: "assistant", text: "Here:", html: renderRemoteMarkdown(`Here:\n\n![backtest](${join(shots, "curve.png")})`, { home }) }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: home, busy: false, messages: [{ role: "user", text: "show me" }, { role: "assistant", text: "Here:", html: renderRemoteMarkdown(`Here:\n\n![backtest](${join(shots, "curve.png")})`, { home }, { inline: true }) }] }) });
+  // Like the remote plugin: pictures named in messages are uploaded with the transcript.
+  for (const m of markdownMedia()) await fetch(`${base}/agent/s1/media/${m.id}`, { method: "PUT", headers: auth, body: JSON.stringify(m) });
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
-  await page.waitForFunction(() => { const i = document.querySelector("#messages img.md-image"); return i?.complete && i.naturalWidth > 0; }, null, { timeout: 10000 });
+  await page.waitForFunction(() => { const i = document.querySelector("#messages .image-card img"); return i?.complete && i.naturalWidth > 0; }, null, { timeout: 10000 });
   // A re-render (new message) keeps the picture without fetching again.
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: home, busy: false, messages: [{ role: "user", text: "show me" }, { role: "assistant", text: "Here:", html: renderRemoteMarkdown(`Here:\n\n![backtest](${join(shots, "curve.png")})`, { home }) }, { role: "user", text: "nice" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", cwd: home, busy: false, messages: [{ role: "user", text: "show me" }, { role: "assistant", text: "Here:", html: renderRemoteMarkdown(`Here:\n\n![backtest](${join(shots, "curve.png")})`, { home }, { inline: true }) }, { role: "user", text: "nice" }] }) });
   await page.getByText("nice").waitFor();
-  await page.waitForFunction(() => document.querySelector("#messages img.md-image")?.naturalWidth > 0);
-  const box = await page.locator("#messages img.md-image").boundingBox();
+  await page.waitForFunction(() => document.querySelector("#messages .image-card img")?.naturalWidth > 0);
+  const box = await page.locator("#messages .image-card img").boundingBox();
   assert.ok(box.width <= 280 && box.height <= 300, "inline like a tool picture, not full width");
-  await page.locator("#messages img.md-image").click();
+  // Tapping opens the already-loaded picture in the image viewer: no second download, no file page.
+  const fileCalls = []; page.on("request", r => { if (/\/api\/file/.test(r.url())) fileCalls.push(r.url()); });
+  await page.locator("#messages .image-card img").click();
   await page.waitForFunction(() => !document.getElementById("imageViewer").hidden && document.getElementById("fullImage").naturalWidth > 0);
+  assert.equal(await page.locator("#fileView").isHidden(), true, "not the slow file viewer");
+  assert.deepEqual(fileCalls, [], "no download on tap");
   assert.deepEqual(errors, []);
 });
 

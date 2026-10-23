@@ -81,7 +81,7 @@ import { renderRemoteMarkdown } from '../plugins/remote/remote-markdown.ts';
   const failed = 'Please check the unavailable deployment too.';
   await page.getByPlaceholder('Steer Pi…').fill(failed);
   await page.getByRole('button', { name: 'Send' }).click();
-  await page.getByText('Could not send. Try again.').waitFor();
+  await page.getByText('Not sent', { exact: false }).first().waitFor();
   assert.match(await page.locator('#messages').textContent(), /Please check the unavailable deployment too/);
   await page.screenshot({ path: join(output, '03-steering-failure.png'), fullPage: true });
   assert.deepEqual(errors, []);

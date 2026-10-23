@@ -275,3 +275,20 @@ test("Aurora colour kit: the background colours follow the agent (working, waiti
     assert.equal(seen.size, 5, "each state has its own colours");
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a message that failed to send can be removed (✕) or retried and does not stay in the chat forever", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const html = await page.evaluate(() => {
+      current = { id: "s", messages: [] };
+      pendingPrompts = [{ id: 7, session: "s", text: "lost one", known: new Set(), failed: true, failedAt: Date.now() }];
+      return promptRows(current);
+    });
+    assert.match(html, /Not sent/); assert.match(html, /data-drop-prompt="7"/); assert.match(html, /data-retry-prompt="7"/);
+    assert.doesNotMatch(html, /Could not send\. Try again\./);
+    await page.evaluate(() => { renderChat = () => {}; dropPrompt(7); });
+    assert.equal(await page.evaluate(() => pendingPrompts.length), 0, "✕ removes it");
+  } finally { await browser.close(); server.close(); }
+});

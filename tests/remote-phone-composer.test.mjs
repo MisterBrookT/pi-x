@@ -60,7 +60,7 @@ test('optimistic prompts appear immediately and reconcile once, without losing f
   assert.match(app.promptRows({ id: 'a', messages: [] }), /&lt;steer&gt;/);
   assert.equal(app.promptRows({ id: 'b', messages: [] }), '');
   p.failed = true;
-  assert.match(app.promptRows({ id: 'a', messages: [] }), /Could not send/);
+  assert.match(app.promptRows({ id: 'a', messages: [] }), /Not sent/);
   const snapshot = { id: 'a', messages: [{ id: 'old', role: 'user', text: '<steer>' }, { id: 'new', role: 'user', text: '<steer>' }] };
   assert.equal(app.promptRows(snapshot), '');
   app.add({ ...p, id: 2, known: new Set(['old']), failed: false });

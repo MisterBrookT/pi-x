@@ -117,7 +117,7 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       const images = imagesOf(message.content);
       const loop = loopPromptSummary(text), quiet = !loop && !images.length ? quietSummary(text) : undefined;
       if (quiet) { result.push({ id, role: "system", text: clip(text), html: quietHtml(quiet, clip(text)), timestamp }); return; }
-      if (text || images.length) result.push({ id, role: "user", text: clip(text), html: loop ? loopPromptHtml(loop, clip(text)) : renderRemoteMarkdown(clip(text), files), images: images.length ? images : undefined, timestamp });
+      if (text || images.length) result.push({ id, role: "user", text: clip(text), html: loop ? loopPromptHtml(loop, clip(text)) : renderRemoteMarkdown(clip(text), files, { inline: true }), images: images.length ? images : undefined, timestamp });
     } else if (message?.role === "assistant") {
       const parts = Array.isArray(message.content) ? message.content : [];
       const calls: RemoteTool[] = parts
@@ -127,7 +127,7 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       const text = textOf(parts);
       const error = message.stopReason === "error" && message.errorMessage ? `Error: ${message.errorMessage}` : "";
       if (!calls.length && !error && /^\s*No change\.?\s*$/i.test(text)) return;
-      if (text || calls.length || error) result.push({ id, role: "assistant", text: clip(text || error), html: renderRemoteMarkdown(clip(text || error), files), tools: calls.length ? calls : undefined, timestamp });
+      if (text || calls.length || error) result.push({ id, role: "assistant", text: clip(text || error), html: renderRemoteMarkdown(clip(text || error), files, { inline: true }), tools: calls.length ? calls : undefined, timestamp });
     } else if (message?.role === "toolResult") {
       const call = tools.get(String(message.toolCallId));
       if (call) {

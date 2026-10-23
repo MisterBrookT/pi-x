@@ -16,7 +16,7 @@ import { loadArtifacts } from "../core/artifacts.ts";
 import { runningHelpers } from "./remote-helpers.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "./remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../core/question-events.ts";
-import { renderRemoteMarkdown } from "./remote-markdown.ts";
+import { markdownMedia, renderRemoteMarkdown } from "./remote-markdown.ts";
 import remend from "remend";
 import { prepareRemotePairing, prepareRelayPairing } from "./remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "./remote-mac.ts";
@@ -236,7 +236,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const branch = ctx ? branchMessages(ctx.sessionManager.getBranch()) : [];
     const body = snapshot(branch);
     if (!body) return;
-    const media = remoteMedia(branch.slice(-messageLimit * 2));
+    const media = [...remoteMedia(branch.slice(-messageLimit * 2)), ...markdownMedia()];
     const publish = async () => {
       for (const image of media) {
         if (uploadedMedia.has(image.id)) continue;
