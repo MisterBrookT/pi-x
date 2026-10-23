@@ -315,3 +315,23 @@ test("regression: on a post page, comments and 'Also' rows use the full width (a
     assert.deepEqual(m, ["4px", "4px"]);
   } finally { await browser.close(); server.close(); }
 });
+
+test("regression: a job's page puts the newest message first (by its own time, not Pi's last note) and draws no side lines", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const r = await page.evaluate(() => {
+      const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+      forYou = { lines: [{ id: "k", name: "Kairos" }], pending: [
+        { id: "old", line: "k", title: "Old doc", at: ago(72), latest: { at: ago(0.1), text: "Pi touched it" } },
+        { id: "new", line: "k", title: "New ask", at: ago(1) }] };
+      fyDetail = "l:k"; fyDetailWas = false; current = { id: "pix-foryou", messages: [] };
+      const d = document.createElement("div"); d.innerHTML = fyDetailHtml(true); document.body.append(d);
+      const lines = [...d.querySelectorAll(".tl-comment,.tl-sub")].map(x => getComputedStyle(x).borderLeftWidth);
+      return { first: d.querySelector(".tl-title").textContent, lines };
+    });
+    assert.equal(r.first, "New ask");
+    assert.ok(r.lines.every(w => w === "0px"), "no vertical lines");
+  } finally { await browser.close(); server.close(); }
+});
