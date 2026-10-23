@@ -276,20 +276,24 @@ test("Aurora colour kit: the background colours follow the agent (working, waiti
   } finally { await browser.close(); server.close(); }
 });
 
-test("regression: a message that failed to send can be removed (✕) or retried and does not stay in the chat forever", async () => {
+test("regression: a failed send shows once (in the message box), not also as a chat bubble; the top dot reads Offline", async () => {
   const server = await serve(); const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    const html = await page.evaluate(() => {
+    const r = await page.evaluate(() => {
       current = { id: "s", messages: [] };
       pendingPrompts = [{ id: 7, session: "s", text: "lost one", known: new Set(), failed: true, failedAt: Date.now() }];
-      return promptRows(current);
+      const rows = promptRows(current);
+      // It did reach the Mac: the box copy goes away too.
+      $("input").value = "lost one";
+      reconcilePrompts({ id: "s", messages: [{ id: "m1", role: "user", text: "lost one" }] });
+      $("connection").classList.add("offline");
+      return { rows, box: $("input").value, dot: getComputedStyle($("connection"), "::before").content };
     });
-    assert.match(html, /Not sent/); assert.match(html, /data-drop-prompt="7"/); assert.match(html, /data-retry-prompt="7"/);
-    assert.doesNotMatch(html, /Could not send\. Try again\./);
-    await page.evaluate(() => { renderChat = () => {}; dropPrompt(7); });
-    assert.equal(await page.evaluate(() => pendingPrompts.length), 0, "✕ removes it");
+    assert.equal(r.rows, "", "no bubble for an unsent message");
+    assert.equal(r.box, "", "arrived after all: no second copy");
+    assert.equal(r.dot, '"Offline"');
   } finally { await browser.close(); server.close(); }
 });
 

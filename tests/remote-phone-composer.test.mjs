@@ -54,13 +54,13 @@ test('expanded session retains its prefix and accepts the next patch', () => {
 
 test('optimistic prompts appear immediately and reconcile once, without losing failures', () => {
     const code = [line('const esc='), line('function reconcilePrompts('), line('function promptRows(')].join('\n');
-  const app = runInNewContext(`let pendingPrompts=[];const acknowledgedPrompts=new Set();${code};({add:p=>pendingPrompts.push(p),reconcilePrompts,promptRows})`);
+  const app = runInNewContext(`let pendingPrompts=[];const acknowledgedPrompts=new Set();const $=()=>({value:''});${code};({add:p=>pendingPrompts.push(p),reconcilePrompts,promptRows})`);
   const p = { id: 1, session: 'a', text: '<steer>', known: new Set(['old']), failed: false };
   app.add(p);
   assert.match(app.promptRows({ id: 'a', messages: [] }), /&lt;steer&gt;/);
   assert.equal(app.promptRows({ id: 'b', messages: [] }), '');
   p.failed = true;
-  assert.match(app.promptRows({ id: 'a', messages: [] }), /Not sent/);
+  assert.equal(app.promptRows({ id: 'a', messages: [] }), '', 'a failed send lives in the box, not as a bubble');
   const snapshot = { id: 'a', messages: [{ id: 'old', role: 'user', text: '<steer>' }, { id: 'new', role: 'user', text: '<steer>' }] };
   assert.equal(app.promptRows(snapshot), '');
   app.add({ ...p, id: 2, known: new Set(['old']), failed: false });
