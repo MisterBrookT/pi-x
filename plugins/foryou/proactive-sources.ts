@@ -1,13 +1,15 @@
 // Source adapters for the proactive loop. Add a new channel (email, WeChat, ...) by
 // writing one adapter and registering it below; the daemon, judge, and UI stay unchanged.
 import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Msg, Source } from "./proactive.ts";
 import { fetchGmailImap } from "./imap.ts";
 import type { DingChat } from "./dingtalk-local.ts";
+// Same path as dingtalk-local.ts; not imported so this module never loads node:sqlite (the reader runs in a worker).
+const dingRoot = join(homedir(), "Library/Containers/5ZSL2CJU2T.com.dingtalk.mac/Data/Library/Application Support/DingTalkMac");
 import { readDingTalkIsolated } from "./dingtalk-worker.ts";
 import { probeApp, reapWxDaemons, sealedReason } from "./access.ts";
 import { isLocked } from "./unlock.ts";
@@ -248,6 +250,37 @@ export async function ensureDingTalk(exec: (cmd: string, a: string[], o: object)
 /** Newest message time in a snapshot (ISO), or undefined. */
 export const newestTime = (chats: { messages: { time: string }[] }[]) => chats.flatMap(c => c.messages.map(m => m.time)).filter(t => !Number.isNaN(Date.parse(t))).sort().at(-1);
 export const dingNewest: { at?: string; launched?: boolean } = {};
+/**
+ * When the DingTalk app last wrote its message database (newest of dingtalk.db and its -wal), in ms.
+ * A quiet account (school groups silent for days) still syncs: the app keeps writing. Only a database
+ * that stopped changing means DingTalk is closed, logged out or stuck.
+ */
+export function dingSyncedAt(root = dingRoot): number {
+	try {
+		const prof = readdirSync(root).filter(n => n.endsWith("_v3"))[0]; if (!prof) return 0;
+		const db = join(root, prof, "DBFiles/dingtalk.db");
+		return Math.max(...[db, db + "-wal"].map(f => { try { return statSync(f).mtimeMs; } catch { return 0; } }));
+	} catch { return 0; }
+}
+/**
+ * Apps that MagicQuit is set to quit after idling. A quit DingTalk/WeChat/Feishu stops syncing, so For you misses
+ * messages: DingTalk was on that list and got quit every hour. Returns the watched apps on the list.
+ */
+export function autoQuitApps(json: string | undefined, watched = ["DingTalk", "WeChat", "微信", "Feishu", "Lark", "飞书"]): string[] {
+	try { const t = JSON.parse(json ?? "{}"); return watched.filter(a => t[a] === true); } catch { return []; }
+}
+export async function magicQuitList(): Promise<string | undefined> {
+	try {
+		const { stdout } = await exec("defaults", ["export", "com.MagicQuit", "-"], { timeout: 5_000 });
+		const m = String(stdout).match(/<key>com\.MagicQuit\.toggleStatus<\/key>\s*<data>([\s\S]*?)<\/data>/);
+		return m ? Buffer.from(m[1].replace(/\s+/g, ""), "base64").toString("utf8") : undefined;
+	} catch { return undefined; }
+}
+/** Warn only when there are no new messages for 24 h AND the app has not synced for 24 h. Silence alone is not a fault. */
+export function dingLooksStale(newestAt: string | undefined, syncedAtMs: number, now = Date.now()): boolean {
+	const day = 24 * 3_600_000;
+	return !!newestAt && now - Date.parse(newestAt) > day && now - syncedAtMs > day;
+}
 
 export function dingAdapters(load: (root?: string, account?: string) => DingChat[] | Promise<DingChat[]> = readDingTalkIsolated, ensure: () => Promise<boolean> = ensureDingTalk): { all: Adapter; chat: Adapter } {
 	let snapshot: DingChat[] = [];

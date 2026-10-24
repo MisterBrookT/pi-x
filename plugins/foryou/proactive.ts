@@ -114,10 +114,22 @@ export function newSince(msgs: Msg[], lastId?: string, lastTime?: string): Msg[]
  * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
  * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.
  */
+export const defaultMeAliases = ["brook", "brookkk", "唐英豪", "布 brook"];
+/**
+ * Is this sender brook? He shows up under several names (WeChat "brookkk", group nicknames like "唐英豪 浙江大学 brook",
+ * Feishu "唐英豪", the source's own "me"). Matching only one exact name made his replies look like someone else's,
+ * so loops he had already answered stayed open.
+ */
+export function isMe(sender: string, me: string, aliases: string[] = defaultMeAliases): boolean {
+	const s = sender.trim(); if (!s) return false;
+	const names = [me, ...aliases].map(n => n.trim()).filter(Boolean);
+	return s === "me" || s.endsWith("(me)") || names.some(n => s === n || s.split(/\s+/).includes(n) || n.split(/\s+/).every(w => s.split(/\s+/).includes(w)));
+}
+
 export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, openHere: number, lastTime?: string, direct = false): { fresh: Msg[]; context: Msg[]; judge: boolean } {
 	const fresh = newSince(msgs, lastId, lastTime);
 	const context = msgs.slice(0, msgs.length - fresh.length).slice(-15);
-	const fromOthers = fresh.some(m => m.sender.trim() !== me);
+	const fromOthers = fresh.some(m => !isMe(m.sender, me, defaultMeAliases));
 	// In a direct chat his own words are often a promise ("我今天光速搞一下"): always judge them.
 	return { fresh, context, judge: fromOthers || (fresh.length > 0 && (openHere > 0 || direct)) };
 }
@@ -125,7 +137,7 @@ export function planBatch(msgs: Msg[], lastId: string | undefined, me: string, o
 const loopLine = (p: Item) => `- id=${p.id}: ${p.title} [${p.status === "onit" ? "Pi is on it" : p.status === "later" || p.status === "waiting" ? p.status : "needs him"}${p.due ? `, due ${p.due}` : ""}]${p.source ? ` (from ${p.source})` : ""}${p.project ? ` project=${p.project}` : ""}${p.line ? ` line=${p.line}` : ""}${p.note ? `\n  progress: ${p.note.split("\n").at(-1)}` : ""}`;
 
 export function judgePrompt(o: { lines?: string; me: string; memory: string; source: Source; context: Msg[]; fresh: Msg[]; pending: Item[]; feedback?: Item[]; now: string; work?: WorkSession[]; cards?: boolean }): string {
-	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${o.me && m.sender.trim() === o.me ? " (me)" : ""}: ${m.text}`;
+	const fmt = (m: Msg) => `[${m.time} id=${m.id}] ${m.sender}${isMe(m.sender, o.me, defaultMeAliases) ? " (me)" : ""}: ${m.text}`;
 	return `You are ${o.me}'s proactive assistant. You watch his channels (chats, mail, ...) and keep track of his open loops:
 things still unfinished between ${o.me} and someone else. He should only see what needs him now.
 A loop is worth tracking when:

@@ -70,3 +70,20 @@ test("Feishu minutes fallback: summary and todos, brook's starred", async () => 
   assert.equal(t, "Weekly\n\n总结：\n用户反馈三条\n\n待办：\n- [ ] ⭐ Brook 整理 recap\n- [ ] 凌子昂 发群");
   assert.equal(minutesText("x", {}), "");
 });
+
+test("regression: a quiet DingTalk that still syncs is not reported as paused; one that stopped syncing is", async () => {
+  const { dingLooksStale } = await import("../plugins/foryou/proactive-sources.ts");
+  const now = Date.parse("2026-10-24T05:00:00Z"), h = 3_600_000;
+  const quiet = new Date(now - 51 * h).toISOString();
+  assert.equal(dingLooksStale(quiet, now - 10 * 60_000, now), false, "groups silent 2 days, app synced 10 min ago: fine");
+  assert.equal(dingLooksStale(quiet, now - 30 * h, now), true, "nothing written for 30 h: really stuck");
+  assert.equal(dingLooksStale(new Date(now - h).toISOString(), 0, now), false);
+});
+
+test("regression: MagicQuit set to quit DingTalk/WeChat/Feishu is reported, so a source is never silently killed every hour", async () => {
+  const { autoQuitApps, magicQuitList } = await import("../plugins/foryou/proactive-sources.ts");
+  assert.deepEqual(autoQuitApps(JSON.stringify({ DingTalk: true, WeChat: false, Kiro: true, Feishu: true })), ["DingTalk", "Feishu"]);
+  assert.deepEqual(autoQuitApps(undefined), []);
+  assert.deepEqual(autoQuitApps("not json"), []);
+  const live = await magicQuitList(); if (live) assert.equal(typeof JSON.parse(live), "object", "reads the real MagicQuit prefs");
+});

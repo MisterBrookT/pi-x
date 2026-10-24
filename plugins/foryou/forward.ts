@@ -3,7 +3,7 @@
  * The daemon fetches new messages; one cheap model call per batch only says pass or drop (with a reason).
  * What passes goes to the For you session as one chat message; For you decides, makes cards, hands work out, tracks.
  */
-import type { Msg, Source } from "./proactive.ts";
+import { defaultMeAliases, isMe, type Msg, type Source } from "./proactive.ts";
 
 export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urgent?: boolean }
 
@@ -17,6 +17,11 @@ export const DEFAULT_PASS = ["chenvis", "zju\\.edu\\.cn", "浙江大学", "Pacif
 export function mustPass(m: Msg, extra: string[] = []): boolean {
 	const hay = [m.sender, m.text.split("\n")[0].replace(/^Subject: /, "")];
 	return [...DEFAULT_PASS, ...extra].some(p => { try { const re = new RegExp(p, "i"); return hay.some(h => re.test(h)); } catch { return false; } });
+}
+
+/** His own new messages in a chat that still has open items: they may close them, so they skip the cheap filter. */
+export function mineClosing(fresh: Msg[], me: string, openHere: number): Msg[] {
+	return openHere > 0 ? fresh.filter(m => isMe(m.sender, me, defaultMeAliases)) : [];
 }
 
 export function filterPrompt(o: { me: string; source: Source; context: Msg[]; fresh: Msg[]; memory: string; lines: string }): string {
@@ -57,8 +62,8 @@ export function parseFilter(raw: string): FilterVerdict | undefined {
 export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean }
 
 /** One chat message to For you for everything that passed this round. */
-export function forwardPrompt(batches: Forward[], now = new Date()): string {
-	const fmt = (m: Msg, hot: Set<string>) => `${hot.has(m.id) ? "▸ " : "  "}[${m.id}] ${m.time} ${m.sender}: ${m.text.replace(/\s+/g, " ").slice(0, 1200)}`;
+export function forwardPrompt(batches: Forward[], now = new Date(), me = ""): string {
+	const fmt = (m: Msg, hot: Set<string>) => `${hot.has(m.id) ? "▸ " : "  "}[${m.id}] ${m.time} ${m.sender}${isMe(m.sender, me, defaultMeAliases) ? " (me = brook)" : ""}: ${m.text.replace(/\s+/g, " ").slice(0, 1200)}`;
 	const parts = batches.map(b => {
 		const hot = new Set(b.ids);
 		return `### ${b.source.name} (source key ${b.sourceKey})${b.source.project ? `, project ${b.source.project}` : ""}
@@ -73,6 +78,8 @@ ${parts.join("\n\n")}
 
 Decide with everything you know (memory, lines, open loops, the session board):
 - Already tracked or already done? Update that loop/line (loops tool "note", "done") instead of a new card.
+- A message from brook himself that answers, delivers or settles an open item means he handled it: close it (loops tool "done")
+  with a one-line note such as "you replied in WeChat 10:45". If unsure it covers the item, note it and leave it open.
 - Someone else's question, or nothing for brook? Leave it.
 - Needs brook? Create one card per piece of work (loops tool "create", with line, refs, and choices). Prepare first when
   it is cheap and read-only (read the thread, check the owner session or project), so the card brings facts or a draft.

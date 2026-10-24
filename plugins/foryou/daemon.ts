@@ -25,8 +25,8 @@ import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proacti
 import { ensureUnlocked } from "./unlock.ts";
 import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
-import { filterPrompt, forwardPrompt, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
-import { adapterFor, dingNewest, expandSources } from "./proactive-sources.ts";
+import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
+import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
 import { whoFor } from "./who.ts";
@@ -177,7 +177,10 @@ async function tick(cfg: Config) {
 				let raw = "";
 				// Meeting notes brook attended always go to For you: the summary and 待办 are his to sort, not the cheap filter's.
 				const forced = fresh.filter(m => mustPass(m, (cfg as { passList?: string[] }).passList));
-				if (forced.length) raw = JSON.stringify({ pass: true, why: `pass list: ${forced.map(m => m.sender).slice(0, 3).join(", ")}`, ids: forced.map(m => m.id) });
+				// His own reply in a chat with an open item is how that item gets closed: always forward it, never let the filter drop it.
+				const mine = mineClosing(fresh, String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length);
+				if (mine.length && !forced.length) raw = JSON.stringify({ pass: true, why: `brook replied here; ${items.filter(i => isOpen(i) && i.sourceKey === key).length} open item(s) here may be done`, ids: mine.map(m => m.id) });
+				else if (forced.length) raw = JSON.stringify({ pass: true, why: `pass list: ${forced.map(m => m.sender).slice(0, 3).join(", ")}`, ids: forced.map(m => m.id) });
 				else if (src.kind === "feishu-meeting") raw = JSON.stringify({ pass: true, why: "meeting notes: summary and 待办", ids: fresh.map(m => m.id) });
 				else try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
 				fine.push("model");
@@ -247,7 +250,7 @@ async function tick(cfg: Config) {
 	// once the thread goes quiet, everything held goes over as one message.
 	const active = !dry && await forYouThreadActive();
 	if (forwards.length && !dry) {
-		const text = forwardPrompt(forwards);
+		const text = forwardPrompt(forwards, new Date(), cfg.me);
 		if (active) {
 			holdBatch(text, P.dir);
 			for (const m of pendingMarks) m();
@@ -274,10 +277,11 @@ async function tick(cfg: Config) {
 		for (const k of kinds) seen[k] ??= at;  // start the clock for a kind never seen
 		// A read that works on a stale local DB is not "seen": DingTalk counts only up to its newest message.
 		// Quiet nights are normal, so this uses 24 h, not the silence window.
-		const dingStale = dingNewest.at && Date.now() - Date.parse(dingNewest.at) > 24 * 3_600_000 ? [{ text: `DingTalk: newest message is ${Math.round((Date.now() - Date.parse(dingNewest.at)) / 3_600_000)} h old (app closed or not syncing?)`, since: dingNewest.at }] : [];
+		const dingStale = dingLooksStale(dingNewest.at, dingSyncedAt()) ? [{ text: `DingTalk: newest message is ${Math.round((Date.now() - Date.parse(dingNewest.at)) / 3_600_000)} h old (app closed or not syncing?)`, since: dingNewest.at }] : [];
 		if (dingNewest.launched) { log("DingTalk was not running: started it (open -ga DingTalk)"); dingNewest.launched = false; }
 		if (Date.now() - gmail.at > 3_600_000) { const st = await checkGmailAuth(); gmail = { at: Date.now(), state: st === "unknown" ? gmail.state : st, since: st === "ok" ? "" : gmail.since || at }; }
-		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6)), ...dingStale, ...gmailProblem(gmail.state, gmail.since)];
+		const quitters = autoQuitApps(await magicQuitList()).map(a => ({ text: `MagicQuit quits ${a} after idling; For you misses its messages. Turn it off for ${a} in MagicQuit.`, since: at }));
+		const problems = [...healthSummary(next), ...silentSources(seen, kinds, Date.now(), Number(process.env.PIX_SILENT_HOURS ?? 6)), ...dingStale, ...quitters, ...gmailProblem(gmail.state, gmail.since)];
 		blockedApps.clear();
 		for (const f of failed) if (/lost Full Disk Access/.test(f.error)) blockedApps.add(f.source.startsWith("WeChat") ? "wechat" : "dingtalk");
 		if (JSON.stringify(problems) !== JSON.stringify(readJson<{ problems?: unknown }>(P.health, {}).problems ?? [])) log(`health: ${problems.map(p => p.text).join("; ") || "all fine"}`);

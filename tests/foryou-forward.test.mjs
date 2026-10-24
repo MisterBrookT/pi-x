@@ -103,3 +103,18 @@ test("review: hourly prompt lists every open card and asks For you to check what
   assert.match(p, /brook may have done it himself[\s\S]*close it/);
   assert.match(p, /Do not start work and do not send anything/);
 });
+
+test("regression: brook's own reply in a chat with an open item reaches For you as his, under any of his names", async () => {
+  const { mineClosing } = await import("../plugins/foryou/forward.ts");
+  const { isMe, planBatch } = await import("../plugins/foryou/proactive.ts");
+  // His real sender names seen in the logs; config me is "唐英豪".
+  for (const n of ["brookkk", "唐英豪 浙江大学 brook", "唐英豪", "布 brook"]) assert.ok(isMe(n, "唐英豪"), n);
+  for (const n of ["王翼", "Lowes", "brooklyn", ""]) assert.ok(!isMe(n, "唐英豪"), n);
+  const fresh = [msg("9", "brookkk", "机票买好了")];
+  assert.deepEqual(mineClosing(fresh, "唐英豪", 1).map(m => m.id), ["9"], "skips the cheap filter");
+  assert.deepEqual(mineClosing(fresh, "唐英豪", 0), [], "no open item here: nothing to close");
+  assert.equal(planBatch(fresh, "8", "唐英豪", 0).judge, false, "his own chatter alone is free");
+  const text = forwardPrompt([{ source: src, sourceKey: "k", fresh, context: [], why: "", ids: ["9"], howToRead: "" }], new Date(), "唐英豪");
+  assert.match(text, /brookkk \(me = brook\): 机票买好了/);
+  assert.match(text, /from brook himself .* close it/);
+});
