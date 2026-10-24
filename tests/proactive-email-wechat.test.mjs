@@ -38,3 +38,9 @@ test("parseWechatChats: only recent groups/private chats, no official accounts o
 	] } }, { sinceSec: 50, exclude: ["Noisy"] });
 	assert.deepEqual(out, [{ kind: "wechat", id: "1@chatroom", name: "WeChat: G", chat: "group" }, { kind: "wechat", id: "wxid_1", name: "WeChat: 黄老师", chat: "private" }]);
 });
+
+test("WeChat voice: the connector's inline transcript reaches the For you filter as the message text", async () => {
+  const { parseWechat } = await import("../plugins/foryou/proactive-sources.ts");
+  const msgs = parseWechat({ data: { chat: "浙大 李老师 报销", messages: [{ local_id: 280, type: "语音", time: "2026-10-24 18:36", sender: "浙大 李老师 报销", content: "[语音 11s] 英豪，刚刚陈老师说…稍等。" }] } });
+  assert.equal(msgs[0].text, "[语音 11s] 英豪，刚刚陈老师说…稍等。");
+});
