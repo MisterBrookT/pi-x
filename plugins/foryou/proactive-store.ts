@@ -242,7 +242,7 @@ export function publishChoices(id: string, choices: unknown, o: { question?: str
 	return true;
 }
 
-export type CardAnswer = "choice" | "send" | "else" | "later" | "no" | "done";
+export type CardAnswer = "choice" | "send" | "else" | "later" | "no" | "done" | "do" | "discuss";
 
 /**
  * A typed answer that is really a button: "later", "no", "done" (and close typos/translations).
@@ -342,7 +342,7 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	const it = readAll(o.dir).find(i => i.id === id && needsYou(i, at.getTime()));
 	const text = o.text?.replace(/\s+/g, " ").trim().slice(0, 2000);
 	if (answer === "else") answer = quickAnswer(text) ?? "else";
-	if (!it || !["choice", "send", "else", "later", "no", "done"].includes(answer) || (answer === "else" && !text)) return undefined;
+	if (!it || !["choice", "send", "else", "later", "no", "done", "do", "discuss"].includes(answer) || (answer === "else" && !text)) return undefined;
 	let c = answer === "choice" ? cardChoices(it, o.live ?? []).at(o.choice ?? -1) : undefined;
 	// Nested pick: brook chose an action, then where to run it (here = For you, new, or a session id).
 	if (c && o.to && !["later", "no", "discuss"].includes(c.run)) {
@@ -353,6 +353,15 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
 	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(answer === "send" ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
 	if (c?.run === "later" || c?.run === "no") answer = c.run;
+	// The two fixed buttons on every post. Do it: For you decides how (itself, or hands it to the right session). Discuss: talk first.
+	if (answer === "do" || answer === "discuss") {
+		write(o.dir, { id, note: addNote(it.note, `brook tapped: ${answer === "do" ? "Do it" : "Discuss"}`) });
+		takeItem(id, forYouSession.id, o.dir, forYouFolder());
+		const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
+		return { item: it, here: answer === "do"
+			? `brook tapped "Do it" on loop ${id}. Decide how: do it yourself if it is small, or hand it to the session that owns this work (chat tool handoff). Note each step on the loop (loops tool "note") so his post shows progress; close it with "done" and the result. Never send money, outbound messages or credentials without asking him.\n\n${base}`
+			: `brook tapped "Discuss" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}` };
+	}
 	// His tap is part of the item's story: it shows under the post as "You: <label>", then the work that follows.
 	if (c && !["later", "no"].includes(c.run)) write(o.dir, { id, note: addNote(it.note, `brook tapped: ${c.label}`) });
 	else if (answer === "else" && text && !(it.session && it.session !== forYouSession.id)) write(o.dir, { id, note: addNote(it.note, `brook said: ${text}`) });

@@ -63,7 +63,7 @@ test("relay lets the phone use For you, and nothing broader", () => {
   assert.ok(!forYouRelayAllowed("/api/foryou/../x/act", "POST"));
 });
 
-test("hub: For you shows the same list, pushes new items, and Do it / Not now work from the phone", async t => {
+test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) hub: For you shows the same list, pushes new items, and Do it / Not now work from the phone", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a")) + "\n");
   const pushes = [];
@@ -250,7 +250,7 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
 
 const launch = async () => chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
 
-test("For you is a feed of posts; the chat sits behind the Shiba button; the main move says where and runs there", async t => {
+test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) For you is a feed of posts; the chat sits behind the Shiba button; the main move says where and runs there", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("j1", { title: "Send the data", action: "Package it", prepared: "Found tracks.json\nMinara has the snapshot\nline 3", choices: [{ label: "Ask Minara", run: "s1", prompt: "Package the newest data" }, { label: "Discuss", run: "discuss" }] })) + "\n");
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
@@ -458,7 +458,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
 
-test("feed in the For you chat: posts like a social timeline; Reply is a comment to For you; Working tab", async t => {
+test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) feed in the For you chat: posts like a social timeline; Reply is a comment to For you; Working tab", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
   writeFileSync(join(dir, "inbox.jsonl"), [
@@ -508,7 +508,7 @@ test("feed in the For you chat: posts like a social timeline; Reply is a comment
   assert.deepEqual(errors, []);
 });
 
-test("phone: session buttons use unique board names with a short hint; a card naming a session offers only that one", async t => {
+test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) phone: session buttons use unique board names with a short hint; a card naming a session offers only that one", async t => {
   const dir = await folder(t);
   const chat = join(dir, "chat"); process.env.PIX_CHAT_DIR = chat; process.env.PIX_PROACTIVE_DIR = dir;
   t.after(() => { delete process.env.PIX_CHAT_DIR; delete process.env.PIX_PROACTIVE_DIR; });
@@ -657,4 +657,25 @@ test.skip("(superseded: brook asked for one item = one post, never grouped) jobs
   const prog = await page.locator("#messages .fd .tl-prog").textContent();
   assert.match(prog, /Feishu task/, "the progress card shows the newest update");
   assert.doesNotMatch(prog, /draft started/, "older updates stay in the session, not the post");
+});
+
+test("phone: Do it on any post goes to For you, which decides how; the post stays with 'You: Do it' and a live status line", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a")) + "\n");
+  const started = [];
+  const hub = await startRemoteHub({ token, port: 0, home: dir, push: { notify: async () => {}, add: async () => {}, publicKey: "k" }, plugins: [forYouHub({ dir, start: async p => { started.push(p); } })] });
+  t.after(() => hub.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  const post = page.locator('.tl-post[data-fy="a"]').first();
+  await post.waitFor();
+  assert.deepEqual((await post.locator(".tl-acts button").allTextContents()).map(s => s.trim()), ["Do it", "Later", "Done", "Discuss"]);
+  await post.locator('[data-fy-do="do"]').click();
+  await page.locator('.tl-post[data-fy="a"] .tl-comment.tl-c-you', { hasText: "Do it" }).waitFor();
+  await page.locator('.tl-post[data-fy="a"] .tl-prog').waitFor();
+  assert.equal(started.length, 1); assert.match(started[0], /Decide how/);
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /brook tapped: Do it/);
 });

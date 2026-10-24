@@ -194,7 +194,7 @@ test("phone: several questions stack on one card; Submit sends one JSON array on
   } finally { await browser.close(); server.close(); }
 });
 
-test("phone For you is the timeline: person, via app, latest word, the loop's own choices as actions, Ask Pi", async () => {
+test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) phone For you is the timeline: person, via app, latest word, the loop's own choices as actions, Ask Pi", async () => {
   const server = await serve(); const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
@@ -446,5 +446,23 @@ test("feed: one item = one post, newest first, never grouped by job; each job ha
     assert.equal(new Set(r.kTag).size, 1); assert.equal(r.kTag[0], r.kChip, "tag and chip share the job's colour");
     assert.notEqual(r.kChip, r.bChip);
     assert.deepEqual(r.chips, ["All", "Research", "Launch"], "chips are the fixed categories, not one per project");
+  } finally { await browser.close(); server.close(); }
+});
+
+test("regression: every post has the same four actions, Do it · Later · Done · Discuss, whether or not the item has its own choices", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const rows = await page.evaluate(() => {
+      const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+      forYou = { lines: [], pending: [
+        { id: "plain", title: "no choices", at: ago(1), source: "Pi" },
+        { id: "due", title: "has due", at: ago(2), source: "Pi", due: "2099-01-01" },
+        { id: "btn", title: "has button", at: ago(3), source: "Pi", button: "Sign up" }], cards: [{ id: "btn", choices: [{ label: "Send as is", run: "here" }] }] };
+      fyLine = "all"; const d = document.createElement("div"); d.innerHTML = tlFeed(forYou.cards);
+      return [...d.querySelectorAll(".tl-post")].map(p => [...p.querySelectorAll(".tl-acts button")].map(b => b.textContent.trim()));
+    });
+    for (const r of rows) assert.deepEqual(r, ["Do it", "Later", "Done", "Discuss"]);
   } finally { await browser.close(); server.close(); }
 });

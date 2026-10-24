@@ -131,3 +131,14 @@ test("categories: every line has one of five fixed kinds; For you sets it, old l
   const { lines } = applyLineEdits([], e);
   assert.match(linesForPrompt(lines), /line=x "X" kind=launch/);
 });
+
+test("Do it / Discuss: For you gets the task and decides how; the tap is recorded on the item", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "fy-do-"));
+  try {
+    const { answerCard } = await import("../plugins/foryou/proactive-store.ts");
+    const id = createItem({ title: "Reply to Lowes", why: "he asked", source: "Feishu: Lowes", action: "answer him" }, dir).id;
+    const r = answerCard(id, "do", { dir });
+    assert.match(r.here, /Decide how: do it yourself .* or hand it/);
+    assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /brook tapped: Do it/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
