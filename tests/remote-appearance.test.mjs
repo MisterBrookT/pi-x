@@ -205,7 +205,7 @@ test("phone For you is the timeline: person, via app, latest word, the loop's ow
         cards: [{ id: "a1", choices: [{ label: "Index method then send", run: "here" }, { label: "Send as is", run: "here" }, { label: "Later", run: "later" }] }] };
       return fyFeedHtml(true);
     });
-    assert.match(html, /<b>Knight<\/b><span class="tl-via">via Feishu<\/span><span>· Kairos launch<\/span>/);
+    assert.match(html, /<b>Knight<\/b><span class="tl-via">via Feishu<\/span><span class="tl-line">· <i class="tl-dot"[^>]*><\/i>Kairos launch<\/span>/);
     assert.match(html, /Chart ready, Kairos \+74%/);
     assert.match(html, /class="tl-act main" data-fy-choice="0">Index method then send/);
     assert.match(html, /data-fy-choice="1">Send as is/);
@@ -385,7 +385,7 @@ test("regression: a face, once loaded, is kept on the phone and shows on the nex
   } finally { await browser.close(); server.close(); }
 });
 
-test("regression: a grouped job card shows the newest item's person (face + name), not the job icon", async () => {
+test.skip("(superseded: no grouped cards) a grouped job card shows the newest item's person (face + name), not the job icon", async () => {
   const server = await serve(); const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
@@ -422,5 +422,28 @@ test("rule: every person-led card in the feed shows that person's face, never th
       }).filter(Boolean);
     });
     assert.deepEqual(bad, []);
+  } finally { await browser.close(); server.close(); }
+});
+
+test("feed: one item = one post, newest first, never grouped by job; each job has a stable colour dot on its tag and chip", async () => {
+  const server = await serve(); const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const r = await page.evaluate(() => {
+      const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
+      const P = (id, line, h, due) => ({ id, line, title: id, at: ago(h), source: "Feishu", who: { name: "N" + id, source: "feishu" }, ...(due ? { due } : {}) });
+      forYou = { lines: [{ id: "k", name: "Kairos launch" }, { id: "b", name: "Benchmark" }],
+        pending: [P("old", "k", 9, "2020-01-01"), P("new", "k", 1), P("mid", "b", 3), P("x", "k", 5)], cards: [] };
+      fyLine = "all"; const d = document.createElement("div"); d.innerHTML = tlFeed([]);
+      const dot = el => el.querySelector(".tl-dot")?.style.background;
+      return { ids: [...d.querySelectorAll(".tl-post")].map(e => e.dataset.fy), groups: d.querySelectorAll(".tl-group").length,
+        kTag: [...d.querySelectorAll('.tl-post')].filter(e => /Kairos/.test(e.textContent)).map(e => dot(e.querySelector(".tl-line"))),
+        kChip: dot(d.querySelector('[data-tl-line="k"]')), bChip: dot(d.querySelector('[data-tl-line="b"]')) };
+    });
+    assert.deepEqual(r.ids, ["new", "mid", "x", "old"], "newest first; a due date does not jump the queue");
+    assert.equal(r.groups, 0);
+    assert.equal(new Set(r.kTag).size, 1); assert.equal(r.kTag[0], r.kChip, "tag and chip share the job's colour");
+    assert.notEqual(r.kChip, r.bChip);
   } finally { await browser.close(); server.close(); }
 });

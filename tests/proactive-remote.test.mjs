@@ -354,7 +354,7 @@ test("bell page: every card has Something else; brook's words go to For you", as
   assert.match(started[0], /own instruction[\s\S]*Ask Minara for the newest data snapshot first/);
 });
 
-test("related asks in one line of work share one card, and one answer handles them all", async t => {
+test.skip("(superseded: brook asked for one item = one post, never grouped) related asks in one line of work share one card, and one answer handles them all", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "bench", name: "News bench", state: "s", updated: "x" }]));
   writeFileSync(join(dir, "inbox.jsonl"), [item("g1", { at: "2026-10-01T00:00:00Z", line: "bench", title: "Curve for Lowes" }), item("g2", { at: "2026-10-02T00:00:00Z", line: "bench", title: "Data for 欧阳" }), item("g3", { at: "2026-10-03T00:00:00Z", title: "Other thing" })].map(x => JSON.stringify(x)).join("\n") + "\n");
@@ -559,7 +559,7 @@ test("judge prompt: a question @-addressed to someone else is theirs; already-tr
   assert.match(p, /already tracked or already done[\s\S]*do not create a new loop/);
 });
 
-test("job: a line of work with several loops is ONE card with its loops as tasks; For you can merge lines into one job", async t => {
+test.skip("(superseded: brook asked for one item = one post, never grouped) job: a line of work with several loops is ONE card with its loops as tasks; For you can merge lines into one job", async t => {
   const dir = await folder(t);
   writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "jev-training", name: "Jev training", state: "s", updated: "x" }, { id: "minara-product", name: "Minara product", state: "s", updated: "x" }, { id: "live-arena", name: "Live arena", state: "s", updated: "x" }]));
   writeFileSync(join(dir, "inbox.jsonl"), [item("k1", { line: "jev-training", title: "Deploy Kairos", status: "onit", session: "s-m2", note: "Bench running" }), item("k2", { line: "minara-product", title: "Review Kairos doc" }), item("k3", { line: "live-arena", title: "Arena page", status: "onit", session: "s-m3" })].map(x => JSON.stringify(x)).join("\n") + "\n");
@@ -612,7 +612,7 @@ test("a line with one ask that waits on brook is one row (no second 'Waiting on 
   assert.doesNotMatch(await page.locator("#forYouPage").textContent(), /Waiting on you/);
 });
 
-test("jobs read like X: each job has its own face For you picks; its page is the post with every update as a reply, newest first", async t => {
+test.skip("(superseded: brook asked for one item = one post, never grouped) jobs read like X: each job has its own face For you picks; its page is the post with every update as a reply, newest first", async t => {
   const dir = await folder(t);
   const { parseLineEdits, applyLineEdits } = await import("../plugins/foryou/proactive-lines.ts");
   const e = parseLineEdits([{ id: "kairos", name: "Kairos launch", state: "Arena live; site next", avatar: "rocket" }, { id: "x", name: "X", state: "s", avatar: "not a face" }]);
