@@ -485,6 +485,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           if (!Array.isArray(images) || images.length > 4 || images.some((image: any) => !imageRef({ type: "image", ...image }))
             || images.reduce((sum: number, image: any) => sum + image.data.length, 0) > maxImageBase64) return send(res, 400, { error: "invalid or oversized image" });
           if (!text && !images.length) return send(res, 400, { error: "empty prompt" });
+          // Idempotent send: the phone tags each message with an id and retries with the same id until it gets an answer,
+          // so a retry after a lost reply (timeout, reconnect) is acknowledged without queueing the message twice.
+          const cid = typeof input.cid === "string" && /^[\w-]{8,64}$/.test(input.cid) ? input.cid : "";
+          if (cid) { const seen = (session as any).cids as string[] ?? ((session as any).cids = []); if (seen.includes(cid)) return send(res, 202, { queued: true, duplicate: true }); seen.push(cid); if (seen.length > 200) seen.shift(); }
           const mode = input.mode === "followUp" ? "followUp" : input.mode === "steer" ? "steer" : undefined;
           session.prompts.push(images.length || mode ? { text: text.slice(0, 100_000), images, ...(mode ? { mode } : {}) } : text.slice(0, 100_000));
           if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
@@ -557,7 +561,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
             finished = true;
             clearTimeout(timer);
             if (session.waiter === finish) session.waiter = undefined;
+            // The Mac's poll went away (sleep, network change): keep its prompts for the next poll instead of dropping them.
             if (!res.destroyed && !res.writableEnded) send(res, 200, { prompts });
+            else if (prompts.length) session.prompts.unshift(...prompts);
           };
           timer = setTimeout(() => finish([]), pollMs);
           session.waiter = finish;

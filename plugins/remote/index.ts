@@ -91,7 +91,9 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   let chatWaiting: string | undefined;
   pi.events.on(CHAT_WAITING, (data: any) => { chatWaiting = typeof data?.text === "string" && data.text ? data.text.slice(0, 120) : undefined; schedulePush(); });
   pi.events.on(QUESTION_CLOSE, (data: any) => { if (pendingQuestion && data?.id === pendingQuestion.id) { pendingQuestion = undefined; schedulePush(); } });
-  const answerQuestion = (answer: string) => { if (!pendingQuestion || !answer.trim()) return false; pi.events.emit(QUESTION_ANSWER, { id: pendingQuestion.id, answer }); return true; };
+  // Clear the question as soon as it is answered: the picker closes a moment later (QUESTION_CLOSE), and a message
+  // typed in that gap used to be taken as a second answer to an already-answered question, so it was lost.
+  const answerQuestion = (answer: string) => { if (!pendingQuestion || !answer.trim()) return false; const id = pendingQuestion.id; pendingQuestion = undefined; schedulePush(); pi.events.emit(QUESTION_ANSWER, { id, answer }); return true; };
   let streaming = "";
   let sessionId = "";
   let polling: AbortController | undefined;

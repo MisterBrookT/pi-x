@@ -592,3 +592,86 @@ test("interactive Pi turns remote on with whatever is paired; other modes and su
   assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "relay" }, mode: "rpc", relay: true, tailnet: false }), "relay", "phone-launched Pi keeps explicit mode");
   assert.equal(m({ env: { PIX_REMOTE_AUTOSTART: "relay" }, mode: "tui", relay: false, tailnet: false }), "tailnet");
 });
+
+test("regression (lost messages): a phone retry with the same id is queued once (double-submit / retry after a lost reply)", async (t) => {
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "demo", messages: [] }) });
+  const post = (cid, text) => fetch(`${base}/api/sessions/s1/prompt`, { method: "POST", headers: auth, body: JSON.stringify({ cid, text }) });
+  assert.equal((await post("cid-aaaaaaaa", "hello")).status, 202);
+  const dup = await (await post("cid-aaaaaaaa", "hello")).json();
+  assert.equal(dup.duplicate, true, "the retry is acknowledged, not queued again");
+  assert.equal((await post("cid-bbbbbbbb", "hello")).status, 202, "a new message with the same text is a new message");
+  assert.deepEqual(await (await fetch(`${base}/agent/s1/next`, { headers: auth })).json(), { prompts: ["hello", "hello"] });
+});
+
+test("regression (lost on reconnect): a message that arrives while the Mac's poll is dropping is kept for the next poll", async (t) => {
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "demo", messages: [] }) });
+  // The Mac's long poll dies (sleep, network change) without the hub noticing yet.
+  const ac = new AbortController();
+  const dead = fetch(`${base}/agent/s1/next`, { headers: auth, signal: ac.signal }).catch(() => {});
+  await new Promise(r => setTimeout(r, 30));
+  ac.abort(); await dead;
+  // Race: the phone's message lands on that dead poll before its close is processed.
+  await fetch(`${base}/api/sessions/s1/prompt`, { method: "POST", headers: auth, body: JSON.stringify({ cid: "cid-cccccccc", text: "survives" }) });
+  assert.deepEqual(await (await fetch(`${base}/agent/s1/next`, { headers: auth })).json(), { prompts: ["survives"] });
+});
+
+test("regression (question + following message): answering a question by typing, then sending another message, delivers both", async (t) => {
+  const { QUESTION_OPEN, QUESTION_ANSWER, QUESTION_CLOSE } = await import("../plugins/core/question-events.ts");
+  const dir = await mkdtemp(join(tmpdir(), "pix-remote-q-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const tokenPath = join(dir, "token");
+  const probe = await startRemoteHub({ token, port: 0 }); const port = probe.port; await probe.close();
+  let bus;
+  const h = await goalSession(t, ({ context }) => say(`echo: ${context.messages.at(-1).content.map((p) => p.text ?? "").join("")}`), {
+    tools: [], extensions: [(pi) => { bus = pi.events; }, (pi) => registerRemote(pi, { port, tokenPath, relayUrl: "" })],
+  });
+  await h.session.prompt("/rc tailnet");
+  const headers = { authorization: `Bearer ${(await readFile(tokenPath, "utf8")).trim()}`, "content-type": "application/json" };
+  const base = `http://127.0.0.1:${port}`, id = h.session.sessionManager.getSessionId();
+  const answers = [];
+  bus.on(QUESTION_ANSWER, d => { answers.push(d.answer); setTimeout(() => bus.emit(QUESTION_CLOSE, { id: d.id }), 300); });
+  bus.emit(QUESTION_OPEN, { id: "q1", question: "Which?", options: [{ label: "A" }] });
+  const post = (cid, text) => fetch(`${base}/api/sessions/${id}/prompt`, { method: "POST", headers, body: JSON.stringify({ cid, text }) });
+  await post("cid-q1aaaaaa", "my own answer");
+  await new Promise(r => setTimeout(r, 80));
+  await post("cid-q1bbbbbb", "and one more thing");   // sent before the picker has closed
+  await h.until(() => h.session.messages.some(m => m.role === "user" && JSON.stringify(m.content).includes("and one more thing")));
+  assert.deepEqual(answers, ["my own answer"], "the second message is not swallowed as another answer");
+  await new Promise(r => setTimeout(r, 400)); // let the picker's close land before teardown
+  await h.until(() => h.settledCount() >= 1);
+});
+
+test("regression (retry after timeout): the phone retries a send whose reply was lost, with the same id, so the Mac gets it exactly once", async (t) => {
+  const { chromium, devices } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "demo", cwd: "/tmp", messages: [] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  // First try: the hub receives it, but the reply is lost on the way back (iOS backgrounding, relay drop).
+  let tries = 0;
+  await page.route("**/api/sessions/s1/prompt", async route => {
+    tries++;
+    const res = await route.fetch();
+    if (tries === 1) return route.abort("failed");
+    return route.fulfill({ response: res });
+  });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.locator("#input").fill("did it arrive?");
+  await page.locator("#send").click();
+  for (let i = 0; i < 100 && tries < 2; i++) await page.waitForTimeout(100);
+  await page.waitForFunction(() => !document.querySelector("#composerStatus").textContent.includes("Sending"), null, { timeout: 15000 });
+  const got = await (await fetch(`${base}/agent/s1/next`, { headers: auth })).json();
+  assert.equal(tries >= 2, true, "retried");
+  assert.deepEqual(got.prompts, ["did it arrive?"], "queued exactly once");
+  assert.doesNotMatch(await page.locator("#composerStatus").textContent(), /Not sent/);
+});

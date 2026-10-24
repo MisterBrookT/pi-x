@@ -55,7 +55,7 @@ import { renderRemoteMarkdown } from '../plugins/remote/remote-markdown.ts';
   });
   await page.getByPlaceholder('Steer Pi…').fill(steering);
   await page.getByRole('button', { name: 'Send' }).click();
-  assert.deepEqual(await requestReceived, { text: steering, images: [] });
+  { const { cid, ...got } = await requestReceived; assert.match(cid, /^[\w-]{8,64}$/, 'each send carries a client id'); assert.deepEqual(got, { text: steering, images: [] }); }
   await bubble.waitFor();
   assert.equal(await bubble.count(), 1, 'steering appears before server acknowledges the request');
   await page.screenshot({ path: join(output, '01-steering-before-ack.png'), fullPage: true });
