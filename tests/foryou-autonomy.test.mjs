@@ -20,7 +20,7 @@ test("autonomy: lines carry do/prepare/discuss, the judge and tool can set it, t
   assert.deepEqual(parseLineEdits([{ id: "kairos", autonomy: "do" }, { id: "x", autonomy: "yolo" }]).map(e => e.autonomy), ["do", undefined]);
   writeLines(applyLineEdits(readLines(d), parseLineEdits([{ id: "kairos", autonomy: "do" }])).lines, d);
   assert.equal(readLines(d)[0].autonomy, "do");
-  assert.match(linesForPrompt(readLines(d)), /line=kairos "Kairos launch" \[autonomy: do\]/);
+  assert.match(linesForPrompt(readLines(d)), /line=kairos "Kairos launch" kind=launch \[autonomy: do\]/);
   assert.equal(setLineAutonomy("kairos", undefined, d), "prepare");
   assert.equal(setLineAutonomy("kairos", undefined, d), "discuss");
   assert.equal(setLineAutonomy("kairos", undefined, d), "do");

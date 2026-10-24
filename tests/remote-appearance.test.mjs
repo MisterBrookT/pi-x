@@ -433,17 +433,18 @@ test("feed: one item = one post, newest first, never grouped by job; each job ha
     const r = await page.evaluate(() => {
       const ago = h => new Date(Date.now() - h * 3600e3).toISOString();
       const P = (id, line, h, due) => ({ id, line, title: id, at: ago(h), source: "Feishu", who: { name: "N" + id, source: "feishu" }, ...(due ? { due } : {}) });
-      forYou = { lines: [{ id: "k", name: "Kairos launch" }, { id: "b", name: "Benchmark" }],
+      forYou = { lines: [{ id: "k", name: "Kairos launch", kind: "launch" }, { id: "b", name: "Benchmark", kind: "research" }],
         pending: [P("old", "k", 9, "2020-01-01"), P("new", "k", 1), P("mid", "b", 3), P("x", "k", 5)], cards: [] };
       fyLine = "all"; const d = document.createElement("div"); d.innerHTML = tlFeed([]);
       const dot = el => el.querySelector(".tl-dot")?.style.background;
       return { ids: [...d.querySelectorAll(".tl-post")].map(e => e.dataset.fy), groups: d.querySelectorAll(".tl-group").length,
         kTag: [...d.querySelectorAll('.tl-post')].filter(e => /Kairos/.test(e.textContent)).map(e => dot(e.querySelector(".tl-line"))),
-        kChip: dot(d.querySelector('[data-tl-line="k"]')), bChip: dot(d.querySelector('[data-tl-line="b"]')) };
+        kChip: dot(d.querySelector('[data-tl-line="launch"]')), bChip: dot(d.querySelector('[data-tl-line="research"]')), chips: [...d.querySelectorAll('.tl-chip')].map(c => c.textContent) };
     });
     assert.deepEqual(r.ids, ["new", "mid", "x", "old"], "newest first; a due date does not jump the queue");
     assert.equal(r.groups, 0);
     assert.equal(new Set(r.kTag).size, 1); assert.equal(r.kTag[0], r.kChip, "tag and chip share the job's colour");
     assert.notEqual(r.kChip, r.bChip);
+    assert.deepEqual(r.chips, ["All", "Research", "Launch"], "chips are the fixed categories, not one per project");
   } finally { await browser.close(); server.close(); }
 });

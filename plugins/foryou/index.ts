@@ -19,7 +19,7 @@ import { execFile } from "node:child_process";
 import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
 import { FACE_NAMES } from "../core/job-faces.ts";
 import { addRule, removeRule, rulesForPrompt } from "./autonomy.ts";
-import { AUTONOMY, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
+import { AUTONOMY, KINDS, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
 import { forYouView, mergeJobLines, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
@@ -155,6 +155,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
 			state: Type.Optional(Type.String({ description: "line: where it stands now" })),
 			retire: Type.Optional(Type.Boolean({ description: "line: it has ended" })),
+			kind: Type.Optional(Type.String({ description: "line: its broad category, one of: " + KINDS.join(", ") + " (research = models, evals, data; launch = product and go-to-market; phd = school, papers, reviews, advisor; personal = friends, life; admin = accounts, tools, money, paperwork). Set it on every line; the phone colours by it." })),
 			avatar: Type.Optional(Type.String({ description: "line: the job's face on the phone, one of: " + FACE_NAMES.join(", ") + ". Pick what fits the job (rocket = launch, owl = review/eval, hamster or chart = data, cap = study, sprout = training); give every line one; change it when the job changes" })),
 			autonomy: Type.Optional(StringEnum(AUTONOMY, { description: "line, rule, create: how much may happen without brook: do (just do it, report after), prepare (do read-only/draft work, put it on the card), discuss (ask first). Set when brook states a preference for this job." })),
 			scope: Type.Optional(StringEnum(["line", "person", "type"] as const, { description: "rule: what it matches: a line id, a person/source name, or a work-type word (e.g. replay)" })),
@@ -197,7 +198,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(moved ? `Merged ${p.merge.join(", ")} into ${id}; ${moved.length} loop(s) moved. They now show as tasks of one job.` : "Nothing merged (name existing lines in merge, and an id or name for the target).");
 			}
 			if (p.action === "line") {
-				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, avatar: p.avatar, autonomy: p.autonomy }]);
+				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, kind: p.kind, avatar: p.avatar, autonomy: p.autonomy }]);
 				const r = applyLineEdits(readLines(deps.dir), edits);
 				if (r.changed.length) writeLines(r.lines, deps.dir);
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");

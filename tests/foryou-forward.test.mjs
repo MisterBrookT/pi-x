@@ -118,3 +118,16 @@ test("regression: brook's own reply in a chat with an open item reaches For you 
   assert.match(text, /brookkk \(me = brook\): 机票买好了/);
   assert.match(text, /from brook himself .* close it/);
 });
+
+test("categories: every line has one of five fixed kinds; For you sets it, old lines get a sensible guess", async () => {
+  const { KINDS, guessKind, parseLineEdits, applyLineEdits, linesForPrompt } = await import("../plugins/foryou/proactive-lines.ts");
+  assert.deepEqual([...KINDS], ["research", "launch", "phd", "personal", "admin"]);
+  assert.equal(guessKind({ id: "kairos-launch", name: "Kairos launch" }), "launch");
+  assert.equal(guessKind({ id: "benchmark", name: "Benchmark / eval" }), "research");
+  assert.equal(guessKind({ id: "phd", name: "PhD / ZJU" }), "phd");
+  assert.equal(guessKind({ id: "accountkit", name: "accountkit" }), "admin");
+  const e = parseLineEdits([{ id: "x", name: "X", state: "s", kind: "launch" }, { id: "y", name: "Y", state: "s", kind: "random" }]);
+  assert.equal(e[0].kind, "launch"); assert.equal(e[1].kind, undefined, "unknown kinds are refused");
+  const { lines } = applyLineEdits([], e);
+  assert.match(linesForPrompt(lines), /line=x "X" kind=launch/);
+});

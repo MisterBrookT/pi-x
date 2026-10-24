@@ -1,7 +1,7 @@
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { sessionLabeler } from "../core/session-label.ts";
 import { isAutonomy, levelFor, risky, readRules, rulesForPrompt } from "./autonomy.ts";
-import { linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
+import { guessKind, linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -96,12 +96,12 @@ export function forYouView(dir?: string, now = Date.now()) {
 		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
-		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, avatar, autonomy }) => {
+		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, avatar, autonomy, kind }) => {
 			const open = all.filter(i => i.line === id && isOpen(i));
 			const waitsOnYou = open.some(i => needsYou(i, now));
 			// What the line is waiting on, in words: its open loops (title + whether brook or a session holds it).
 			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), ...(i.session ? { session: i.session } : {}) }));
-			return { id, name, autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
+			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
 		}),
 		watching,
 		problems,
@@ -353,6 +353,9 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	if (answer === "choice" && (!c || !Number.isInteger(o.choice) || o.choice! < 0)) return undefined;
 	appendFileSync(paths(o.dir).judgments, JSON.stringify({ at: at.toISOString(), kind: "card", id, title: it.title, answer, ...(c ? { label: c.label, run: c.run } : {}), ...(answer === "send" ? { to: o.to } : {}), ...(text ? { text } : {}), by: o.by }) + "\n");
 	if (c?.run === "later" || c?.run === "no") answer = c.run;
+	// His tap is part of the item's story: it shows under the post as "You: <label>", then the work that follows.
+	if (c && !["later", "no"].includes(c.run)) write(o.dir, { id, note: addNote(it.note, `brook tapped: ${c.label}`) });
+	else if (answer === "else" && text && !(it.session && it.session !== forYouSession.id)) write(o.dir, { id, note: addNote(it.note, `brook said: ${text}`) });
 	const group = relatedWaiting(id, o.dir, at.getTime());
 	const all = (patch: Partial<Item>) => { for (const g of [it, ...group]) write(o.dir, { id: g.id, ...patch }); };
 	const also = group.length ? `\n\nThe same card also covers these related asks (same line of work); handle them together and close each with its id:\n${group.map(g => `- id=${g.id} from ${g.source}: ${g.title} (${g.why})`).join("\n")}` : "";

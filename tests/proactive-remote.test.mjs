@@ -158,8 +158,14 @@ test("hub: For you shows the same list, pushes new items, and Do it / Not now wo
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /"id":"b","status":"dismissed"/);
 
   await openPost(page, "a");
+  const label = (await page.locator('.fd [data-fy="a"] [data-fy-choice="0"]').textContent()).trim();
   await page.locator('.fd [data-fy="a"] [data-fy-choice="0"]').click();
-  await page.locator('.fd .tl-post[data-fy="a"]').waitFor({ state: "detached" });
+  // Receipt: the post stays, shows "You: <what you tapped>" and a live status line, not a vanishing card.
+  await page.locator('#forYouPage').getByText("Got it. Pi is on it").or(page.locator('.tl-comment.tl-c-you', { hasText: label })).first().waitFor();
+  await page.locator('[data-fy-back]').first().click().catch(() => {});
+  await page.locator('.tl-post[data-fy="a"] .tl-comment.tl-c-you', { hasText: label }).waitFor();
+  await page.locator('.tl-post[data-fy="a"] .tl-prog').waitFor();
+  assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), new RegExp('"id":"a".*brook tapped: ' + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(started.length, 1, "Do it here goes to For you");
   assert.match(started[0], /Draft a reply/);
   assert.equal(await page.locator("#forYouPage").isHidden(), false, "the page stays; brook sees the result");

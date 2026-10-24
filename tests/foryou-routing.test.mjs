@@ -473,7 +473,7 @@ test("lines of work: the judge reads the map, files loops under lines, and moves
 	const { applyLineEdits, linesForPrompt } = await import("../plugins/foryou/proactive-lines.ts");
 	const lines = [{ id: "train", name: "Jev training", state: "Round 1 done", updated: "x" }];
 	const map = linesForPrompt(lines, [loop("a", { line: "train" })]);
-	assert.match(map, /line=train "Jev training": Round 1 done; open loops: a/);
+	assert.match(map, /line=train "Jev training" kind=research: Round 1 done; open loops: a/);
 	const p = judgePrompt({ lines: map, me: "b", memory: "", source: { kind: "feishu", id: "x", name: "G" }, context: [], fresh: [{ id: "1", time: "t", sender: "k", text: "hi" }], pending: [], now: "n" });
 	assert.match(p, /lines of work \(the map: read this first\)\n- line=train/);
 	const v = parseVerdict(JSON.stringify({ alerts: [{ title: "Run bench", why: "w", action: "a", line: "bench", for: "me", evidence: "e" }], update: [{ id: "a", line: "train" }], close: [], lines: [{ id: "train", state: "Backtest +3%" }, { id: "Bench", name: "Benchmark", state: "started" }, { id: "nameless", state: "x" }] }));
