@@ -675,3 +675,14 @@ test("regression (retry after timeout): the phone retries a send whose reply was
   assert.deepEqual(got.prompts, ["did it arrive?"], "queued exactly once");
   assert.doesNotMatch(await page.locator("#composerStatus").textContent(), /Not sent/);
 });
+
+test("regression (Image unavailable after reconnect): the hub tells a session when it has none of its images, so they are uploaded again", async (t) => {
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const put = async () => (await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "demo", messages: [] }) })).json();
+  assert.equal((await put()).fresh, true, "a hub that just started has no images from this session");
+  const media = remoteMedia([{ role: "user", content: [{ type: "image", mimeType: "image/png", data: Buffer.from("fixture image").toString("base64") }] }])[0];
+  await fetch(`${base}/agent/s1/media/${media.id}`, { method: "PUT", headers: auth, body: JSON.stringify(media) });
+  assert.equal((await put()).fresh, false, "once uploaded, the session is not asked again");
+});

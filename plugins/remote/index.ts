@@ -248,6 +248,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       }
       const res = await request(`/agent/${encodeURIComponent(sessionId)}`, { method: "PUT", body: JSON.stringify(body) });
       if (!res.ok) throw new Error(String(res.status));
+      // A restarted hub has lost our images: upload them again (once; an empty session stays fresh, so stop there).
+      if ((await res.json().catch(() => ({}))).fresh && media.length && uploadedMedia.size) { uploadedMedia.clear(); for (const image of media) { const r = await request(`/agent/${encodeURIComponent(sessionId)}/media/${image.id}`, { method: "PUT", body: JSON.stringify(image) }); if (r.ok) uploadedMedia.add(image.id); } }
     };
     try { await publish(); }
     catch {

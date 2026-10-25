@@ -466,3 +466,20 @@ test("regression: every post has the same four actions, Do it · Later · Done �
     for (const r of rows) assert.deepEqual(r, ["Do it", "Later", "Done", "Discuss"]);
   } finally { await browser.close(); server.close(); }
 });
+
+test("Aurora: sheets are solid enough that the drawer's text never shows through; the background moves at a visible pace", async () => {
+  const css = remoteAppHtml.match(/<style>([\s\S]*?)<\/style>/)[1];
+  const sheet = css.match(/:root\[data-palette="aurora"\] \.actions\{background:rgba\([\d,\s]+,\s*([\d.]+)\)/);
+  assert.ok(sheet && Number(sheet[1]) >= 0.85, "Aurora sheet background is at least 85% opaque");
+  const secs = Number(css.match(/animation:aurora (\d+)s/)[1]);
+  assert.ok(secs <= 25, `aurora loop is ${secs}s; slower feels static`);
+});
+
+test("phone: an image that fails during a reconnect is retried before showing 'Image unavailable'; switching agents fades in", () => {
+  const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const load = script.split("\n").find(l => l.startsWith("function loadImages()"));
+  assert.match(load, /dataset\.tries/, "failed images retry");
+  assert.match(load, /if\(n<=4\)setTimeout/, "a few tries, then give up");
+  assert.match(script, /seenSessions\.get\(id\)/, "switching shows the last copy of that agent at once");
+  assert.match(remoteAppHtml, /#messages\.swap\{animation:pixSwap/);
+});

@@ -545,7 +545,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           if (patch === undefined) publish("session", publicSession(next));
           else if (patch) publish("sessionPatch", patch);
           if (!old || patch !== null) publish("sessions", summary());
-          return send(res, 200, { ok: true });
+          // "fresh": this hub has no images from this session (it restarted, or the session is new here), so the session
+          // must upload them again; otherwise the phone shows "Image unavailable" after a reconnect.
+          return send(res, 200, { ok: true, fresh: !mediaBySession.has(id) });
         }
         if (req.method === "DELETE" && !agentMatch[2]) { drop(id); return send(res, 200, { ok: true }); }
         if (req.method === "GET" && agentMatch[2]) {
