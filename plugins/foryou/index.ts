@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { applyCardEdits, logCardChanges } from "./proactive-memory.ts";
+import { applyCardEdits, lineMemory, logCardChanges } from "./proactive-memory.ts";
 import { FACE_NAMES } from "../core/job-faces.ts";
 import { addRule, removeRule, rulesForPrompt } from "./autonomy.ts";
 import { AUTONOMY, KINDS, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
@@ -31,6 +31,7 @@ import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 
 const TOOL = "loops";
+const MEMORY_TOOL = "memory";
 
 /** Live Pi sessions from the Remote hub; empty when it is not running. */
 async function hubSessions(): Promise<LiveSession[]> {
@@ -141,6 +142,24 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	let isForYouProcess = false;
 	const sessions = deps.sessions ?? hubSessions;
 
+	// Line sessions share For you's memory: the same cards, the same log, saved with this session's name as source.
+	pi.registerTool({
+		name: MEMORY_TOOL,
+		label: "Memory",
+		description: "Keep a lasting fact in brook's shared memory (the one For you and every line session read). Cards: lines/<your line id> for facts about your line of work, people/<name> for a person, index for facts about brook. Only lasting facts (decisions, roles, preferences, results); not progress, todos, or which session does what. Check the memory above first; do not repeat a fact already there.",
+		parameters: Type.Object({
+			card: Type.String({ description: "lines/<line id>, people/<name>, or index" }),
+			add: Type.Optional(Type.Array(Type.String(), { description: "short lasting facts to add" })),
+			remove: Type.Optional(Type.Array(Type.String(), { description: "exact lines no longer true" })),
+		}),
+		async execute(_id, p, _signal, _update, ctx: any) {
+			const who = ownedLine(ctx)?.owner?.name || "a line session";
+			const ch = /^(lines|people)\/|^index$/.test(p.card) ? applyCardEdits(memoryDirOf(deps.dir), [{ card: p.card, add: p.add ?? [], remove: p.remove ?? [] }], { source: who }) : [];
+			if (ch.length) logCardChanges(proactivePaths(deps.dir).memoryLog, ch);
+			return { content: [{ type: "text" as const, text: ch.length ? `Remembered on ${ch[0].card} (+${ch[0].added.length} -${ch[0].removed.length}).` : "Nothing changed (card must be lines/<id>, people/<name> or index; give lines to add or remove)." }], details: {} };
+		},
+	});
+
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
@@ -149,7 +168,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			action: StringEnum(["remind", "remember", "rule", "line", "create", "prepared", "handoff", "note", "next", "finished", "choices", "later", "done", "drop"] as const),
 			id: Type.Optional(Type.String({ description: "Loop id (not for create)" })),
 			at: Type.Optional(Type.String({ description: "remind: ISO time with timezone, when the card comes back" })),
-			card: Type.Optional(Type.String({ description: "remember: the memory card: foryou (your own operating rules: how to work with brook, approvals, style, autonomy defaults), index (facts about brook), people/Knight, projects/newsdecision" })),
+			card: Type.Optional(Type.String({ description: "remember: the memory card: foryou (your own operating rules: how to work with brook, approvals, style, autonomy defaults), index (facts about brook), people/Knight, lines/<line id> (facts about one line of work)" })),
 			add: Type.Optional(Type.Array(Type.String(), { description: "remember: short lasting facts to add" })),
 			remove: Type.Optional(Type.Array(Type.String(), { description: "remember: exact lines no longer true" })),
 			name: Type.Optional(Type.String({ description: "line: 2-4 words (new line)" })),
@@ -224,9 +243,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	});
 
 	// The tool is only declared in the coordinator, so other sessions pay nothing for it.
+	// The line this session owns (lines.json owner), if any: it reads and writes the shared memory for that line.
+	const ownedLine = (ctx: any) => { const id = ctx?.sessionManager?.getSessionId?.(); return id && !isCoordinator(ctx) ? readLines(deps.dir).find(l => !l.hidden && l.owner?.id === id) : undefined; };
 	const apply = (ctx: any) => {
 		const active = new Set(pi.getActiveTools());
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);
+		if (ownedLine(ctx)) active.add(MEMORY_TOOL); else active.delete(MEMORY_TOOL);
 		pi.setActiveTools([...active]);
 	};
 	// Cards: in the For you session only. A card never pops up by itself: it sits as a small widget above the
@@ -383,7 +405,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	setInjected("For you memory", async (ctx: any) => isCoordinator(ctx) ? coordinatorContext(deps.dir, await sessions()) : undefined);
 	pi.on("before_agent_start", async (event, ctx) => {
 		apply(ctx);
-		if (!isCoordinator(ctx)) return undefined;
+		if (!isCoordinator(ctx)) {
+			const line = ownedLine(ctx);
+			if (!line) return undefined;
+			try { return { systemPrompt: `${event.systemPrompt}\n\n## Shared memory (line "${line.name}", id ${line.id})\nYou own this line of work. This is brook's shared memory for it; keep it true with the memory tool (lines/${line.id}).\n\n${lineMemory(memoryDirOf(deps.dir), line.id)}` }; } catch { return undefined; }
+		}
 		try { return { systemPrompt: `${event.systemPrompt}\n\n${coordinatorContext(deps.dir, await sessions())}` }; } catch { return undefined; }
 	});
 	// "@foryou:<id>" in any session: completion in the input box, and the full loop on send.

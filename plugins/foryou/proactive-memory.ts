@@ -1,7 +1,9 @@
 // For you memory: a small folder of cards, only for the For you agent (never loaded by normal Pi sessions).
 //   memory/index.md          who brook is, what to notify, plus one line per card (kept up to date here)
 //   memory/people/<name>.md  one person: role, what they work on with brook, dated facts
-//   memory/projects/<name>.md one project: folder, goal, state, dated facts
+//   memory/lines/<line id>.md one line of work (same id as lines.json): goal, state, dated facts
+//   memory/projects/<name>.md older project cards (still read; new facts go on the line card)
+// One shared memory: For you and every line's owner session read it and write to it.
 // The judge sees the index always, and only the cards that the messages mention. Every change is a
 // dated, sourced line, logged to memory.log; a weekly tidy rewrites long cards.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,11 +17,11 @@ export interface Card { name: string; text: string }
 const norm = (l: string) => l.trim().replace(/^[-*]\s*/, "").replace(/^\d{4}-\d{2}-\d{2}:\s*/, "").replace(/\s*\(from [^)]*\)$/, "");
 const GENERATED = "## Cards";
 
-/** A safe card name: "index", "foryou" (For you's own operating rules), "people/<name>" or "projects/<name>". */
+/** A safe card name: "index", "foryou" (For you's own operating rules), "people/<name>", "lines/<line id>" or "projects/<name>". */
 export function cardName(raw: unknown): string | undefined {
 	const s = String(raw ?? "").trim().replace(/\.md$/, "");
 	if (s === "index" || s === "foryou") return s;
-	const m = s.match(/^(people|projects)\/(.+)$/);
+	const m = s.match(/^(people|lines|projects)\/(.+)$/);
 	if (!m) return undefined;
 	const name = m[2].replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "").replace(/^\.+/, "").trim().slice(0, 60);
 	return name ? `${m[1]}/${name}` : undefined;
@@ -30,7 +32,7 @@ const cardFile = (dir: string, name: string) => join(memoryDir(dir), `${name}.md
 
 export function listCards(dir: string): Card[] {
 	const out: Card[] = [];
-	for (const kind of ["people", "projects"]) {
+	for (const kind of ["lines", "people", "projects"]) {
 		const d = join(memoryDir(dir), kind);
 		if (!existsSync(d)) continue;
 		for (const f of readdirSync(d).filter(f => f.endsWith(".md")).sort()) out.push({ name: `${kind}/${f.slice(0, -3)}`, text: readFileSync(join(d, f), "utf8") });
@@ -198,4 +200,12 @@ export function removeMemoryLine(dir: string, card: string, line: string, now = 
 	const ch = applyCardEdits(dir, [{ card, add: [], remove: [line] }], { now });
 	if (ch.length) logCardChanges(join(dir, "memory.log"), ch, now);
 	return ch.some(c => c.removed.length > 0);
+}
+
+/** What a line's owner session reads each turn: about brook, its own line card, and the people that card names. */
+export function lineMemory(dir: string, lineId: string): string {
+	const cards = listCards(dir), own = cards.find(c => c.name === `lines/${lineId}`);
+	const people = own ? cards.filter(c => c.name.startsWith("people/") && aliases(c).some(a => own.text.toLowerCase().includes(a.toLowerCase()))) : [];
+	const about = readIndex(dir).split(`\n${GENERATED}`)[0].trim();
+	return [about, own ? `### Card ${own.name}\n${own.text.trim()}` : `(no card yet: lines/${lineId})`, ...people.map(c => `### Card ${c.name}\n${c.text.trim()}`)].filter(Boolean).join("\n\n");
 }

@@ -206,7 +206,7 @@ Decide, in this order:
    "Send to <that session>". Otherwise omit "to".
 
 ${o.cards ? `You also keep the memory, as cards: "index" (about ${o.me}, what to notify), one card per person
-("people/<name>", e.g. "people/Knight") and one per project ("projects/<name>", e.g. "projects/newsdecision").
+("people/<name>", e.g. "people/Knight") and one per line of work ("lines/<line id>", the same id as in "lines", e.g. "lines/kairos-launch").
 Put a lasting fact on the card it is about: roles, who works on what, decisions, project state, what he cares about or ignores.
 Open loops (promises, waiting, deadlines) live in the loop list, not memory.
 - add a short line (no date; it is added for you); remove a line (copy its text) when it is no longer true
