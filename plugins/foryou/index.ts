@@ -32,6 +32,7 @@ import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 
 const TOOL = "loops";
 const MEMORY_TOOL = "memory";
+const JOB_TOOL = "job";
 
 /** Live Pi sessions from the Remote hub; empty when it is not running. */
 async function hubSessions(): Promise<LiveSession[]> {
@@ -160,6 +161,32 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		},
 	});
 
+	// A line session updates its own jobs' posts (the loops on its line), like For you does: progress, a draft back to brook, done.
+	pi.registerTool({
+		name: JOB_TOOL,
+		label: "Job",
+		description: "Update a job (loop) on your line so brook's post shows where it stands. note: progress while you work. next: this step is done and brook decides next; give the button he taps (e.g. 'Send to wenzhen') and, if you prepared something to send, the exact draft text (shown as the newest comment). finished: the whole job is done. Only loops on your own line.",
+		parameters: Type.Object({
+			id: Type.String({ description: "loop id" }),
+			action: StringEnum(["note", "next", "finished"] as const),
+			text: Type.String({ description: "note: progress; next: what is done; finished: one-line summary" }),
+			button: Type.Optional(Type.String({ description: "next: 1-3 word button for brook" })),
+			step: Type.Optional(Type.String({ description: "next: what happens when he taps it" })),
+			draft: Type.Optional(Type.String({ description: "next: exact text to send, if any" })),
+		}),
+		async execute(_id, p, _signal, _update, ctx: any) {
+			const line = ownedLine(ctx);
+			const it = readOpen(deps.dir).find(i => i.id === p.id);
+			const say = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} });
+			if (!line || !it) return say(`No open loop ${p.id}.`);
+			if (it.line !== line.id) return say(`Loop ${p.id} is on another line (${it.line ?? "none"}); ask For you.`);
+			const ok = p.action === "note" ? noteItem(p.id, p.text, deps.dir)
+				: p.action === "finished" ? finishedItem(p.id, p.text, deps.dir)
+				: nextItem(p.id, { button: p.button ?? "", action: p.step ?? p.button ?? "", note: p.text, draft: p.draft }, deps.dir);
+			return say(ok ? `Updated ${p.id} (${p.action}).` : `Nothing changed (next needs a button).`);
+		},
+	});
+
 	pi.registerTool({
 		name: TOOL,
 		label: "Loops",
@@ -248,7 +275,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const apply = (ctx: any) => {
 		const active = new Set(pi.getActiveTools());
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);
-		if (ownedLine(ctx)) active.add(MEMORY_TOOL); else active.delete(MEMORY_TOOL);
+		for (const t of [MEMORY_TOOL, JOB_TOOL]) if (ownedLine(ctx)) active.add(t); else active.delete(t);
 		pi.setActiveTools([...active]);
 	};
 	// Cards: in the For you session only. A card never pops up by itself: it sits as a small widget above the
@@ -408,7 +435,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!isCoordinator(ctx)) {
 			const line = ownedLine(ctx);
 			if (!line) return undefined;
-			try { return { systemPrompt: `${event.systemPrompt}\n\n## Shared memory (line "${line.name}", id ${line.id})\nYou own this line of work. This is brook's shared memory for it; keep it true with the memory tool (lines/${line.id}).\n\n${lineMemory(memoryDirOf(deps.dir), line.id)}` }; } catch { return undefined; }
+			try { return { systemPrompt: `${event.systemPrompt}\n\n## Shared memory (line "${line.name}", id ${line.id})\nYou own this line of work. This is brook's shared memory for it; keep it true with the memory tool (lines/${line.id}). Keep your jobs' posts current with the job tool: when a draft is ready, use next with the draft so brook can just send it.\n\n${lineMemory(memoryDirOf(deps.dir), line.id)}` }; } catch { return undefined; }
 		}
 		try { return { systemPrompt: `${event.systemPrompt}\n\n${coordinatorContext(deps.dir, await sessions())}` }; } catch { return undefined; }
 	});

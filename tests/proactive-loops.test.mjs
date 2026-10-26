@@ -272,3 +272,11 @@ test("a draft handed back with `next` becomes the newest comment on the post, re
 	assert.match(it.latest.text, /arxiv\.org\/abs\/1\n开源/, "full draft, line breaks kept");
 	assert.equal(it.thread.at(-1).kind, "prepared", "draft is the newest comment");
 });
+
+test("tapping Do it three times shows one 'You: Do it' comment", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fy-dupe-"));
+	const note = ["- 2026-10-26: brook tapped: Do it", "- 2026-10-26: checking", "- 2026-10-26: brook tapped: Do it", "- 2026-10-26: brook tapped: Do it"].join("\n");
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "t1", at: "2026-10-26T00:00:00Z", title: "x", why: "y", source: "WeChat", status: "pending", refs: [], note }) + "\n");
+	const it = forYouView(dir).pending.find(i => i.id === "t1");
+	assert.equal(it.thread.filter(e => e.kind === "you" && e.text === "Do it").length, 1);
+});

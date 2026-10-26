@@ -78,6 +78,8 @@ export function loopThread(i: Item, status: { session: string; name?: string; at
 	if (a) out.push({ by: "You", at: i.suggest!.answeredAt || i.suggest!.at, text: clip(a === "else" ? i.suggest!.text || "Replied" : { do: "Do it", discuss: "Discuss", later: "Later", no: "No", notnow: "Not now" }[a]), kind: "you" });
 	const closed = { done: "Done", dismissed: "Removed", later: "Later" }[i.status as string];
 	if (closed && i.at_status) out.push({ by: "You", at: i.at_status, text: closed, kind: "you" });
+	// A repeated tap ("Do it" three times) is one comment.
+	for (let k = out.length - 1; k > 0; k--) if (out[k].kind === "you" && out.slice(0, k).some(e => e.kind === "you" && e.text === out[k].text)) out.splice(k, 1);
 	const sorted = out.map((e, n) => [e, n] as const).sort(([x, n], [y, k]) => (Date.parse(x.at) || 0) - (Date.parse(y.at) || 0) || n - k).map(([e]) => e);
 	return sorted.length > 30 ? [sorted[0], ...sorted.slice(-29)] : sorted;
 }

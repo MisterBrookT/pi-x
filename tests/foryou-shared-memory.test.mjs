@@ -71,3 +71,22 @@ test("a session that owns no line is untouched: no memory tool, no injected memo
   assert.ok(!s.active().includes("memory"));
   assert.equal(s.prompt, undefined);
 });
+
+test("a line owner session edits its own jobs' posts with the job tool, not other lines' jobs", async () => {
+  const d = fixture();
+  writeFileSync(join(d, "inbox.jsonl"), [
+    { id: "k1", at: new Date().toISOString(), title: "Ask 恩浩 for V4", why: "w", source: "Feishu", status: "onit", line: "kairos-launch", refs: [] },
+    { id: "p1", at: new Date().toISOString(), title: "Rebuttal", why: "w", source: "WeChat", status: "onit", line: "phd", refs: [] },
+  ].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const s = await session(d, "S-KAIROS");
+  assert.ok(s.active().includes("job"));
+  const r = await s.tools.get("job").execute("x", { id: "k1", action: "next", text: "Draft ready", button: "Send to 恩浩", draft: "恩浩，V4 的 checkpoint 能发我吗？" }, undefined, undefined, s.ctx);
+  assert.match(r.content[0].text, /Updated k1/);
+  const { forYouView } = await jiti.import("../plugins/foryou/proactive-store.ts");
+  const k1 = forYouView(d).pending.find(i => i.id === "k1");
+  assert.equal(k1.button, "Send to 恩浩");
+  assert.equal(k1.latest.text, "恩浩，V4 的 checkpoint 能发我吗？");
+  const no = await s.tools.get("job").execute("x", { id: "p1", action: "note", text: "x" }, undefined, undefined, s.ctx);
+  assert.match(no.content[0].text, /another line/);
+  assert.ok(!(await session(d, "S-OTHER")).active().includes("job"));
+});

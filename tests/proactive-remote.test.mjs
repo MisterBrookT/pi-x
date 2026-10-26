@@ -720,3 +720,25 @@ test("regression (status row did nothing): in the For you feed, tapping a job's 
   await page.locator('#messages [data-key="m1"]').waitFor({ timeout: 5000 });
   assert.equal(await page.evaluate(() => document.body.classList.contains("fy-chatmode")), true);
 });
+
+test("post: main button is the job's next step, a draft is labelled as a draft, and after tapping the post says 'On it'", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), [
+    item("a", { button: "Send to wenzhen", prepared: "师兄，论文：x", preparedAt: new Date().toISOString(), who: { name: "wenzhen", source: "wechat", id: "w" } }),
+    item("b", { status: "onit", session: "s9" }),
+  ].map(x => JSON.stringify(x)).join("\n") + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  await page.locator("#forYouOpen").click();
+  const a = page.locator('.tl-post[data-fy="a"]').first();
+  await a.waitFor();
+  assert.equal((await a.locator(".tl-acts .main").textContent()).trim(), "Send to wenzhen");
+  assert.match(await a.locator(".tl-c-prepared .tl-t").textContent(), /^Draft for wenzhen/);
+  const b = page.locator('.tl-post[data-fy="b"]').first();
+  assert.equal((await b.locator(".tl-acts .main").textContent()).trim(), "On it…");
+  assert.equal(await b.locator('[data-fy-do="do"]').count(), 0, "no second Do it");
+});
