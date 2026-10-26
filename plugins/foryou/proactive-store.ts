@@ -437,6 +437,8 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 	const owner = options.into ? undefined : before.line ? liveLines(options.dir).find(l => l.id === before.line)?.owner?.id : undefined;
 	const into = options.into ?? (owner && (options.live ?? []).some(l => l.id === owner) ? owner : undefined);
 	const route = routeFor(before, options.live ?? [], into, options.cwd, options.home);
+	// For you stays in charge: it hears about every job that skipped it (a quiet note, read on its next turn).
+	const tellForYou = () => { if (into && !options.into) try { (options.chat ?? sendChat)("pix", "for-you", "note", `brook tapped Do it on loop ${id} "${before.title}" (line ${before.line}); it went straight to the line owner ${route.name} (${route.session}). Track it; step in if it stalls.`); } catch { /* For you offline: the loop still shows who has it */ } };
 	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
 	// "Picked up again" only when this same session already had the loop.
 	const prompt = route.coordinator ? coordinatorTask(before, options.dir) : actPrompt(before.session === route.session ? it : { ...it, session: undefined }, paths(options.dir).dir);
@@ -446,10 +448,12 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 	if (boardName) {
 		(options.chat ?? sendChat)("for-you", boardName, "handoff", prompt);
 		write(options.dir, { id, note: addNote(it.note, `Handed to ${boardName} over chat`) });
+		tellForYou();
 		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
 		return it;
 	}
 	if (options.send?.(route.session, prompt)) {
+		tellForYou();
 		if (options.focus) await (options.focusTab ?? focusOttyTab)(route.name);
 		return it;
 	}

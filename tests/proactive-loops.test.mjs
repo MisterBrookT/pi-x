@@ -235,8 +235,12 @@ test("regression (Do it went to For you): a loop on a line with a live owner ses
 	writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD", state: "", updated: "", owner: { id: "s-2027", name: "2027", status: "", at: "" } }]));
 	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "w1", at: new Date().toISOString(), title: "Send paper link", why: "师兄 asks", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
 	const sent = [];
-	const it = await actItem("w1", { dir, live: [{ id: "s-2027", name: "2027", cwd: "/d/2027" }], send: (s, t) => (sent.push(s), true), boardName: () => undefined });
+	const told = [];
+	const it = await actItem("w1", { dir, live: [{ id: "s-2027", name: "2027", cwd: "/d/2027" }], send: (s, t) => (sent.push(s), true), boardName: () => undefined, chat: (...a) => told.push(a) });
 	assert.equal(it.session, "s-2027");
+	assert.equal(told.length, 1, "For you is told");
+	assert.deepEqual(told[0].slice(1, 3), ["for-you", "note"]);
+	assert.match(told[0][3], /w1.*Send paper link.*2027/s);
 	assert.deepEqual(sent, ["s-2027"]);
 	// Owner not running: For you decides, as before.
 	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "w2", at: new Date().toISOString(), title: "x", why: "y", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
