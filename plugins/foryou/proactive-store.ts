@@ -433,7 +433,10 @@ export function routeFor(it: Item, live: LiveSession[], into?: string, cwd?: str
 export async function actItem(id: string, options: { dir?: string; mode?: RemoteMode; launch?: typeof launchPi; focus?: boolean; focusTab?: (name: string) => Promise<boolean>; send?: (session: string, text: string) => boolean; chat?: typeof sendChat; boardName?: (s: LiveSession) => string | undefined; live?: LiveSession[]; into?: string; cwd?: string; home?: string } = {}): Promise<Item | undefined> {
 	const before = readAll(options.dir).find(i => i.id === id && isOpen(i));
 	if (!before) return undefined;
-	const route = routeFor(before, options.live ?? [], options.into, options.cwd, options.home);
+	// Do it on a loop whose line has a live owner session goes straight there, not through the coordinator.
+	const owner = options.into ? undefined : before.line ? liveLines(options.dir).find(l => l.id === before.line)?.owner?.id : undefined;
+	const into = options.into ?? (owner && (options.live ?? []).some(l => l.id === owner) ? owner : undefined);
+	const route = routeFor(before, options.live ?? [], into, options.cwd, options.home);
 	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
 	// "Picked up again" only when this same session already had the loop.
 	const prompt = route.coordinator ? coordinatorTask(before, options.dir) : actPrompt(before.session === route.session ? it : { ...it, session: undefined }, paths(options.dir).dir);

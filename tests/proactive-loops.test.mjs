@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../plugins/foryou/proactive.ts";
-import { dismissItem, forYouView, laterItem, readOpen, takeItem } from "../plugins/foryou/proactive-store.ts";
+import { actItem, dismissItem, forYouView, laterItem, readOpen, takeItem } from "../plugins/foryou/proactive-store.ts";
 import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 const DAY = 86_400_000;
@@ -228,4 +228,18 @@ test("judgePrompt: group chats demand recipient evidence; questions after someon
 	assert.match(p, /When unsure who it is for, create nothing/);
 	assert.match(p, /"for": "me\|project\|promise", "evidence"/);
 	assert.match(p, /deadlines, and promises that matter to his projects/);
+});
+
+test("regression (Do it went to For you): a loop on a line with a live owner session goes straight to that owner", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fy-owner-"));
+	writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD", state: "", updated: "", owner: { id: "s-2027", name: "2027", status: "", at: "" } }]));
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "w1", at: new Date().toISOString(), title: "Send paper link", why: "师兄 asks", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
+	const sent = [];
+	const it = await actItem("w1", { dir, live: [{ id: "s-2027", name: "2027", cwd: "/d/2027" }], send: (s, t) => (sent.push(s), true), boardName: () => undefined });
+	assert.equal(it.session, "s-2027");
+	assert.deepEqual(sent, ["s-2027"]);
+	// Owner not running: For you decides, as before.
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "w2", at: new Date().toISOString(), title: "x", why: "y", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
+	const it2 = await actItem("w2", { dir, live: [], send: () => true, launch: async () => {} });
+	assert.equal(it2.session, "pix-foryou");
 });

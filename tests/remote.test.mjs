@@ -710,3 +710,26 @@ test("regression (blank page after send): when the transcript shrinks under the 
   const visible = await page.evaluate(() => { const r = document.getElementById("chat").getBoundingClientRect(); return [...document.querySelectorAll("#messages .msg")].some(e => { const b = e.getBoundingClientRect(); return b.bottom > r.top && b.top < r.bottom; }); });
   assert.equal(visible, true, "some message is on screen");
 });
+
+test("regression (Resume session popped up over For you): a slow past-session list does not open after brook moved on", async (t) => {
+  const { chromium, devices } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  for (const id of ["s1", "s2"]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth, body: JSON.stringify({ name: id, cwd: "/tmp", messages: [] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  let release;
+  await page.route("**/api/past", async route => { await new Promise(r => { release = r; }); await route.fulfill({ json: [{ path: "/x.jsonl", name: "old chat", cwd: "~", modified: Date.now() }] }); });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector('#sessions .row[data-id="s2"]', { state: "attached" });
+  await page.evaluate(() => { setDrawer(true); document.getElementById("resumeSession").click(); });
+  await page.waitForFunction(() => true);
+  for (let i = 0; i < 50 && !release; i++) await page.waitForTimeout(50);
+  await page.evaluate(() => open("s2"));
+  release();
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => document.getElementById("sheet").hidden), true, "no Resume sheet over the session");
+});
