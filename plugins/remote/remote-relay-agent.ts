@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { createRequire } from "node:module";
 import { readRemoteToken, tailSession } from "./remote-hub.ts";
 import { pluginRelayAllowed } from "../core/hub-plugin.ts";
 
@@ -59,8 +60,22 @@ const desktopCredentialPath = /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/credentials$/
 /** Credential replies must not linger in the request dedup cache; those operations are idempotent anyway. */
 const uncachedRelayPath = (url: string) => { const path = String(url).split("?")[0]; return path === "/api/desktop/credentials" || desktopCredentialPath.test(path); };
 
-export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number }) {
+/** Which way the relay socket goes. Two failures in a row on one route switch to the other; success keeps it. */
+export function relayRouter(start: "proxy" | "direct" = process.env.https_proxy || process.env.HTTPS_PROXY ? "proxy" : "direct") {
+  let route = start, fails = 0;
+  return {
+    pick: () => route,
+    ok: () => { fails = 0; },
+    fail: () => { if (++fails >= 2) { route = route === "proxy" ? "direct" : "proxy"; fails = 0; } },
+  };
+}
+// Pi sends fetch/WebSocket through the proxy (undici's global dispatcher). A direct socket needs undici's own WebSocket with a
+// plain Agent: Node's built-in WebSocket ignores a dispatcher from another undici copy.
+let undici: any, agent: unknown;
+const directSocket = (url: string): WebSocket => { undici ??= createRequire(import.meta.url)("undici"); agent ??= new undici.Agent(); return new undici.WebSocket(url, { dispatcher: agent }); };
+export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number; router?: ReturnType<typeof relayRouter> }) {
   const { origin, secret, localBase, localToken } = options;
+  const relayRoute = options.router ?? relayRouter();
   const parsed = new URL(origin);
   if (!(parsed.protocol === "https:" || parsed.protocol === "http:" && parsed.hostname === "127.0.0.1") || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw Error("Pix Remote relay must be an HTTPS origin (or loopback for tests)");
   let running = true, socket: WebSocket | undefined, stream: AbortController | undefined, retry: ReturnType<typeof setTimeout> | undefined;
@@ -112,7 +127,15 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
   const connect = () => {
     if (!running) return;
     const url = origin.replace(/^https:/, "wss:").replace(/^http:/, "ws:").replace(/\/$/, "") + `/socket/${relayRoom(secret)}/agent`;
-    socket = new WebSocket(url);
+    // Route: through the system proxy (Clash) or straight out. When one keeps failing, try the other, so a broken proxy
+    // (10-26: the Clash line to brooktang.fun was down for 2 h) cannot cut brook off from his Mac.
+    const route = relayRoute.pick();
+    socket = route === "direct" ? directSocket(url) : new WebSocket(url);
+    options.onState?.(`route ${route}`);
+    // A socket that never opened, or dropped within a minute, counts against its route.
+    let openedAt = 0;
+    socket.addEventListener("open", () => { openedAt = Date.now(); });
+    socket.addEventListener("close", () => { if (!openedAt || Date.now() - openedAt < 60_000) relayRoute.fail(); else relayRoute.ok(); });
     let heartbeat: ReturnType<typeof setInterval> | undefined, lastPong = Date.now();
     const current = socket;
     // After sleep or a network change the socket can look open while the relay has dropped it.
