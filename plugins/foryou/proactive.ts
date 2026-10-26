@@ -80,6 +80,8 @@ export interface Item extends Alert { autonomy?: "do" | "prepare" | "discuss"; a
 	note?: string;
 	/** What For you already prepared under the hood (a draft, the facts found), shown on the card. */
 	prepared?: string;
+	/** When `prepared` was last written (a draft ready later than the loop), so it sorts as the newest comment. */
+	preparedAt?: string;
 	/** A job card offered in a session: brook answers there (Do it / Discuss / Later / No / Something else). */
 	suggest?: { session: string; name?: string; at: string; answer?: "do" | "discuss" | "later" | "no" | "notnow" | "else"; text?: string; answeredAt?: string; by?: string } }
 
@@ -480,6 +482,7 @@ When you stop, record where the loop stands, so whoever picks it up next knows (
 - still in progress: ${cli} note ${it.id} "<what is done, what is next>"
 - this step is finished and the next step is brook's (e.g. after a test, sending the results):
   ${cli} next ${it.id} "<1-3 word outcome button, e.g. Send results to Amber>" "<the next step>" "<what is done>"
+  If you prepared something for brook to approve (a reply draft, a message), add it as a 4th argument: the exact text he would send. It becomes the newest comment on his post and the main button sends it.
 - the whole loop is finished (nothing left to do): ${cli} finished ${it.id} "<what was done, one line>"
   (brook gets it back once to check and close; never leave a finished loop "on it")`;
 }

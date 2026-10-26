@@ -259,3 +259,16 @@ test("regression (phone Do it went to For you): the card's Do it routes to the l
 	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "c2", at: new Date().toISOString(), title: "x", why: "y", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
 	assert.match(answerCard("c2", "do", { dir, live: [] }).here, /Do it/, "owner offline: For you decides");
 });
+
+test("a draft handed back with `next` becomes the newest comment on the post, ready to send", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "fy-draft-"));
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "d1", at: "2026-10-20T00:00:00Z", title: "Paper links", why: "师兄 asks", source: "WeChat", status: "onit", session: "s", refs: [], prepared: "old: nothing found yet", note: "- 2026-10-20: searching" }) + "\n");
+	const { nextItem } = await import("../plugins/foryou/proactive-store.ts");
+	assert.equal(nextItem("d1", { button: "Send to 师兄", action: "Send the reply", note: "Verified links", draft: "师兄，论文：https://arxiv.org/abs/1\n开源：https://github.com/x" }, dir), true);
+	const it = forYouView(dir).pending.find(i => i.id === "d1");
+	assert.equal(it.status, "pending", "back to brook, not 'working'");
+	assert.equal(it.button, "Send to 师兄");
+	assert.equal(it.latest.by, "prepared");
+	assert.match(it.latest.text, /arxiv\.org\/abs\/1\n开源/, "full draft, line breaks kept");
+	assert.equal(it.thread.at(-1).kind, "prepared", "draft is the newest comment");
+});

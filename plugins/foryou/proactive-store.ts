@@ -41,6 +41,8 @@ export function latestWord(i: Item, status: { session: string; name?: string; at
 	const note = last ? { text: (m ? m[2] : last.replace(/^- /, "")).replace(/^\d\d-\d\d:?\s+/, ""), at: m ? `${m[1]}T00:00:00Z` : "", by: "note" } : undefined;
 	const s = i.session ? status.find(x => x.session === i.session) : undefined;
 	const live = s?.line ? { text: s.line, at: s.at, by: s.name || "session" } : undefined;
+	// A draft written after the last step is what brook needs to see: it is the newest comment.
+	if (i.prepared && i.preparedAt && i.status === "pending" && [live?.at, note?.at].every(t => !t || Date.parse(i.preparedAt!) >= Date.parse(t))) return { text: i.prepared, at: i.preparedAt, by: "prepared" };
 	if (live && (!note || Date.parse(live.at) >= Date.parse(note.at || "0"))) return live;
 	return note ?? (i.prepared ? { text: i.prepared, at: "", by: "prepared" } : undefined);
 }
@@ -60,7 +62,7 @@ export function loopThread(i: Item, status: { session: string; name?: string; at
 	const out: ThreadEntry[] = [];
 	const source = clip([i.why, i.howToRead && !/^[\w-]+-cli\b|^lark-cli|^Feishu meeting/i.test(i.howToRead) ? i.howToRead : ""].filter(Boolean).join(" "));
 	if (source) out.push({ by: sender, at: i.at, text: source, kind: "source" });
-	if (i.prepared) out.push({ by: "Pi", at: i.at, text: clip(i.prepared), kind: "prepared" });
+	if (i.prepared) out.push({ by: "Pi", at: i.preparedAt || i.at, text: i.preparedAt ? i.prepared.trim().slice(0, 4000) : clip(i.prepared), kind: "prepared" });
 	for (const raw of String(i.note ?? "").split("\n")) {
 		const m = raw.match(/^- (\d{4}-\d{2}-\d{2}): (.*)$/), body = (m ? m[2] : raw.replace(/^- /, "")).trim();
 		if (!body || /^Prepared: /.test(body) || /^ongoing$/i.test(body)) continue;
@@ -147,11 +149,12 @@ export function nowItem(id: string, dir?: string): boolean {
  * A step is finished and the next one is brook's: the loop moves forward with a new button and action
  * (e.g. after the Databento test, "Send results to Amber") and comes back to "needs you".
  */
-export function nextItem(id: string, step: { button: string; action: string; note?: string }, dir?: string): boolean {
+export function nextItem(id: string, step: { button: string; action: string; note?: string; draft?: string }, dir?: string): boolean {
 	const it = readAll(dir).find(i => i.id === id && isOpen(i));
 	const button = step.button.replace(/\s+/g, " ").trim().slice(0, 40), action = step.action.replace(/\s+/g, " ").trim().slice(0, 200);
 	if (!it || !button || !action) return false;
-	write(dir, { id, status: "pending", wakeAt: null, button, action, note: addNote(it.note, step.note?.trim() || `Step done; next: ${action}`) });
+	const draft = step.draft?.trim().slice(0, 4000);
+	write(dir, { id, status: "pending", wakeAt: null, button, action, note: addNote(it.note, step.note?.trim() || `Step done; next: ${action}`), ...(draft ? { prepared: draft, preparedAt: new Date().toISOString() } : {}) });
 	return true;
 }
 

@@ -336,8 +336,8 @@ if (verb === "note") {
 	process.exit(0);
 }
 if (verb === "next") {
-	const [button = "", action = "", note] = process.argv.slice(4);
-	if (!nextItem(itemId, { button, action, note })) { console.error(`no open loop ${itemId} (or empty button/step)`); process.exit(1); }
+	const [button = "", action = "", note, draft] = process.argv.slice(4);
+	if (!nextItem(itemId, { button, action, note, draft })) { console.error(`no open loop ${itemId} (or empty button/step)`); process.exit(1); }
 	process.exit(0);
 }
 if (verb === "finished") {
