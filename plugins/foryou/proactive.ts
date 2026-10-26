@@ -82,6 +82,8 @@ export interface Item extends Alert { autonomy?: "do" | "prepare" | "discuss"; a
 	prepared?: string;
 	/** When `prepared` was last written (a draft ready later than the loop), so it sorts as the newest comment. */
 	preparedAt?: string;
+	/** The button brook tapped on a ready draft: his approval to do exactly that with exactly that text. */
+	approved?: string;
 	/** A job card offered in a session: brook answers there (Do it / Discuss / Later / No / Something else). */
 	suggest?: { session: string; name?: string; at: string; answer?: "do" | "discuss" | "later" | "no" | "notnow" | "else"; text?: string; answeredAt?: string; by?: string } }
 
@@ -476,9 +478,10 @@ Why: ${it.why}
 Suggested next step: ${it.action}${it.due ? `\nDue: ${it.due}` : ""}
 Original items: ${it.howToRead}
 ${it.note ? `\nProgress so far (the loop's brief):\n${it.note}\n` : ""}
-Read the referenced items and any project files you need, then prepare this next step.
-Draft anything outbound and show it to me first; do not send without my confirmation.
+${it.approved && it.prepared ? `brook tapped "${it.approved}" on this exact draft. That is his confirmation: do it now with exactly this text (no edits, nothing else outbound):\n${it.prepared}\n` : `Read the referenced items and any project files you need, then prepare this next step.
+Draft anything outbound and show it to me first; do not send without my confirmation.`}
 When you stop, record where the loop stands, so whoever picks it up next knows (one of these):
+After each step, decide brook's next move yourself (a short, specific button, not "Do it") and hand it back with next, so his post always offers the one thing that makes sense now.
 - still in progress: ${cli} note ${it.id} "<what is done, what is next>"
 - this step is finished and the next step is brook's (e.g. after a test, sending the results):
   ${cli} next ${it.id} "<1-3 word outcome button, e.g. Send results to Amber>" "<the next step>" "<what is done>"

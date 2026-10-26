@@ -156,7 +156,7 @@ export function nextItem(id: string, step: { button: string; action: string; not
 	const button = step.button.replace(/\s+/g, " ").trim().slice(0, 40), action = step.action.replace(/\s+/g, " ").trim().slice(0, 200);
 	if (!it || !button || !action) return false;
 	const draft = step.draft?.trim().slice(0, 4000);
-	write(dir, { id, status: "pending", wakeAt: null, button, action, note: addNote(it.note, step.note?.trim() || `Step done; next: ${action}`), ...(draft ? { prepared: draft, preparedAt: new Date().toISOString() } : {}) });
+	write(dir, { id, status: "pending", wakeAt: null, button, action, note: addNote(it.note, step.note?.trim() || `Step done; next: ${action}`), approved: null, ...(draft ? { prepared: draft, preparedAt: new Date().toISOString() } : {}) });
 	return true;
 }
 
@@ -360,7 +360,11 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	if (c?.run === "later" || c?.run === "no") answer = c.run;
 	// The two fixed buttons on every post. Do it: For you decides how (itself, or hands it to the right session). Discuss: talk first.
 	if (answer === "do" || answer === "discuss") {
-		write(o.dir, { id, note: addNote(it.note, `brook tapped: ${answer === "do" ? "Do it" : "Discuss"}`) });
+		// The main button is the job's own next step ("Send to wenzhen"): his tap shows under the post with that label,
+		// and when it sits on a ready draft it is his approval of exactly that draft.
+		const label = answer === "do" ? (it.button || "Do it") : "Discuss";
+		const approved = answer === "do" && it.button && it.prepared && it.preparedAt ? it.button : undefined;
+		write(o.dir, { id, note: addNote(it.note, `brook tapped: ${label}`), ...(approved ? { approved } : {}) });
 		// Do it on a loop whose line has a live owner session: straight to that owner; For you gets a quiet note and keeps tracking.
 		const owner = answer === "do" && it.line ? liveLines(o.dir).find(l => l.id === it.line)?.owner : undefined;
 		if (owner && (o.live ?? []).some(l => l.id === owner.id))

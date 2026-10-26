@@ -280,3 +280,28 @@ test("tapping Do it three times shows one 'You: Do it' comment", async () => {
 	const it = forYouView(dir).pending.find(i => i.id === "t1");
 	assert.equal(it.thread.filter(e => e.kind === "you" && e.text === "Do it").length, 1);
 });
+
+test("regression (Send to wenzhen showed as 'Do it' and the owner asked again): tapping the post's own button on a ready draft is a comment with that label and approval of that exact draft", () => {
+	const dir = mkdtempSync(join(tmpdir(), "fy-approve-"));
+	writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD", state: "", updated: "", owner: { id: "s-2027", name: "2027", status: "", at: "" } }]));
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "a1", at: "2026-10-26T00:00:00Z", title: "Links", why: "师兄 asks", source: "WeChat", status: "pending", line: "phd", refs: [], button: "Send to wenzhen", action: "Send the reply", prepared: "师兄，论文：x", preparedAt: "2026-10-26T12:00:00Z" }) + "\n");
+	const r = answerCard("a1", "do", { dir, live: [{ id: "s-2027", name: "2027", cwd: "/d" }] });
+	assert.equal(r.into, "s-2027");
+	const it = forYouView(dir).pending.concat(forYouView(dir).onit ?? []).find(i => i.id === "a1") ?? readOpen(dir).find(i => i.id === "a1");
+	assert.ok(it.thread.some(e => e.kind === "you" && e.text === "Send to wenzhen"), "his tap shows as 'Send to wenzhen'");
+	const raw = readOpen(dir).find(i => i.id === "a1");
+	assert.equal(raw.approved, "Send to wenzhen");
+});
+
+test("the owner's task after an approval says to do exactly the approved draft, and a new step needs a new approval", async () => {
+	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
+	const base = { id: "a2", at: "x", title: "Links", why: "w", source: "WeChat", sourceKey: "", howToRead: "", status: "onit", action: "Send the reply", prepared: "师兄，论文：x" };
+	assert.match(actPrompt({ ...base, approved: "Send to wenzhen" }), /tapped "Send to wenzhen" on this exact draft[\s\S]*师兄，论文：x/);
+	assert.match(actPrompt(base), /do not send without my confirmation/);
+	assert.match(actPrompt(base), /decide brook's next move yourself/);
+	const dir = mkdtempSync(join(tmpdir(), "fy-approve2-"));
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ ...base, approved: "Send to wenzhen", refs: [] }) + "\n");
+	const { nextItem } = await import("../plugins/foryou/proactive-store.ts");
+	nextItem("a2", { button: "Tell 陈老师", action: "x", draft: "new" }, dir);
+	assert.equal(readOpen(dir).find(i => i.id === "a2").approved, null);
+});
