@@ -679,3 +679,26 @@ test("phone: Do it on any post goes to For you, which decides how; the post stay
   assert.equal(started.length, 1); assert.match(started[0], /Decide how/);
   assert.match(readFileSync(join(dir, "inbox.jsonl"), "utf8"), /brook tapped: Do it/);
 });
+
+test("phone sidebar lists a line's owner session by the line name, with the folder name underneath", async t => {
+  const d = await mkdtemp(join(tmpdir(), "fy-line-name-"));
+  t.after(() => rm(d, { recursive: true, force: true }));
+  writeFileSync(join(d, "lines.json"), JSON.stringify([{ id: "kairos-launch", name: "Kairos launch", state: "", updated: "", owner: { id: "s-minara", name: "minara", status: "", at: "" } }]));
+  const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d })] });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`, headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  for (const [id, name] of [["s-minara", "minara"], ["s-other", "documents"]]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers, body: JSON.stringify({ name, cwd: "/tmp/" + name, messages: [] }) });
+  const list = await (await fetch(`${base}/api/sessions`, { headers })).json();
+  assert.equal(list.find(s => s.id === "s-minara").line, "Kairos launch");
+  assert.equal(list.find(s => s.id === "s-other").line, undefined);
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s-minara"; });
+  await page.goto(`${base}/#token=${token}`);
+  const row = page.locator('#sessions .row[data-id="s-minara"]');
+  await row.waitFor({ state: "attached" });
+  assert.equal(await row.locator("b").textContent(), "Kairos launch");
+  assert.equal(await row.locator("small").textContent(), "minara");
+  await page.waitForFunction(() => document.getElementById("title").textContent === "Kairos launch");
+});

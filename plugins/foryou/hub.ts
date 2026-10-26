@@ -1,4 +1,4 @@
-import { hideLine, isAutonomy, setLineAutonomy } from "./proactive-lines.ts";
+import { hideLine, isAutonomy, readLines, setLineAutonomy } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
@@ -55,7 +55,11 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 
 	return {
 		initial: () => [["foryou", forYou()]],
-		summary: id => id === forYouSession.id && card ? { card: true } : undefined,
+		// A session that owns a line is shown by the line's name ("Kairos launch"), not its folder ("minara").
+		summary: id => {
+			const line = id === forYouSession.id ? undefined : readLines(dir).find(l => !l.hidden && l.owner?.id === id);
+			return { ...(id === forYouSession.id && card ? { card: true } : {}), ...(line ? { line: line.name } : {}) };
+		},
 		session: id => id === forYouSession.id && card ? { card, cards } : undefined,
 		// A session joining can add a "Send to" button to the card.
 		sessionJoined: id => { if (id !== forYouSession.id) onProactive(); },

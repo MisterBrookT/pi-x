@@ -686,3 +686,27 @@ test("regression (Image unavailable after reconnect): the hub tells a session wh
   await fetch(`${base}/agent/s1/media/${media.id}`, { method: "PUT", headers: auth, body: JSON.stringify(media) });
   assert.equal((await put()).fresh, false, "once uploaded, the session is not asked again");
 });
+
+test("regression (blank page after send): when the transcript shrinks under the reader, the page jumps to the newest message instead of showing nothing", async (t) => {
+  const { chromium, devices } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const long = Array.from({ length: 60 }, (_, i) => ({ id: "m" + i, role: i % 2 ? "assistant" : "user", text: "message " + i + " " + "words ".repeat(120) }));
+  const put = messages => fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", busy: true, messages }) });
+  await put(long);
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  // The reader is scrolled up in a long chat; then the Mac sends a much shorter window (a reload, a compaction, the snapshot cap).
+  // iOS keeps a stale scroll offset while momentum or the keyboard settles; reproduce "no message in view" directly:
+  // a tall gap above the messages and the reader scrolled into it.
+  await page.evaluate(() => { const c = document.getElementById("chat"); c.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 })); const gap = document.createElement("style"); gap.id = "gap"; gap.textContent = "#messages{padding-top:30000px}"; document.head.append(gap); c.scrollTop = 0; });
+  await page.evaluate(() => { setFollow(false); renderChat(false); });
+  await page.waitForTimeout(100);
+  const visible = await page.evaluate(() => { const r = document.getElementById("chat").getBoundingClientRect(); return [...document.querySelectorAll("#messages .msg")].some(e => { const b = e.getBoundingClientRect(); return b.bottom > r.top && b.top < r.bottom; }); });
+  assert.equal(visible, true, "some message is on screen");
+});
