@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { judgePrompt, needsYou, parseInbox, parseVerdict, pendingItems, updateLine, wakeTime } from "../plugins/foryou/proactive.ts";
-import { actItem, dismissItem, forYouView, laterItem, readOpen, takeItem } from "../plugins/foryou/proactive-store.ts";
+import { actItem, answerCard, dismissItem, forYouView, laterItem, readOpen, takeItem } from "../plugins/foryou/proactive-store.ts";
 import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
 
 const DAY = 86_400_000;
@@ -246,4 +246,16 @@ test("regression (Do it went to For you): a loop on a line with a live owner ses
 	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "w2", at: new Date().toISOString(), title: "x", why: "y", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
 	const it2 = await actItem("w2", { dir, live: [], send: () => true, launch: async () => {} });
 	assert.equal(it2.session, "pix-foryou");
+});
+
+test("regression (phone Do it went to For you): the card's Do it routes to the line's live owner and leaves For you a note", () => {
+	const dir = mkdtempSync(join(tmpdir(), "fy-card-owner-"));
+	writeFileSync(join(dir, "lines.json"), JSON.stringify([{ id: "phd", name: "PhD", state: "", updated: "", owner: { id: "s-2027", name: "2027", status: "", at: "" } }]));
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "c1", at: new Date().toISOString(), title: "Send paper link", why: "师兄 asks", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
+	const r = answerCard("c1", "do", { dir, live: [{ id: "s-2027", name: "2027", cwd: "/d" }] });
+	assert.equal(r.into, "s-2027");
+	assert.equal(r.here, undefined, "For you is not asked to do it");
+	assert.match(r.note, /c1.*2027/s);
+	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ id: "c2", at: new Date().toISOString(), title: "x", why: "y", source: "WeChat", status: "pending", line: "phd", refs: [] }) + "\n");
+	assert.match(answerCard("c2", "do", { dir, live: [] }).here, /Do it/, "owner offline: For you decides");
 });

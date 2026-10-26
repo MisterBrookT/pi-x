@@ -356,6 +356,10 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 	// The two fixed buttons on every post. Do it: For you decides how (itself, or hands it to the right session). Discuss: talk first.
 	if (answer === "do" || answer === "discuss") {
 		write(o.dir, { id, note: addNote(it.note, `brook tapped: ${answer === "do" ? "Do it" : "Discuss"}`) });
+		// Do it on a loop whose line has a live owner session: straight to that owner; For you gets a quiet note and keeps tracking.
+		const owner = answer === "do" && it.line ? liveLines(o.dir).find(l => l.id === it.line)?.owner : undefined;
+		if (owner && (o.live ?? []).some(l => l.id === owner.id))
+			return { item: it, into: owner.id, note: `[decision] brook tapped Do it on loop ${id} ("${it.title}"); it went straight to the line owner ${owner.name} (${owner.id}). Track it; step in if it stalls.` };
 		takeItem(id, forYouSession.id, o.dir, forYouFolder());
 		const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
 		return { item: it, here: answer === "do"

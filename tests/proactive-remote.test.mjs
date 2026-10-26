@@ -702,3 +702,21 @@ test("phone sidebar lists a line's owner session by the line name, with the fold
   assert.equal(await row.locator("small").textContent(), "minara");
   await page.waitForFunction(() => document.getElementById("title").textContent === "Kairos launch");
 });
+
+test("regression (status row did nothing): in the For you feed, tapping a job's 'for-you · Working' row opens the For you chat", async t => {
+  const dir = await folder(t);
+  writeFileSync(join(dir, "inbox.jsonl"), JSON.stringify(item("a", { status: "onit", session: "pix-foryou", note: "- 2026-10-26: checking" })) + "\n");
+  const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
+  t.after(() => hub.close());
+  await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name: "for-you", cwd: dir, busy: true, messages: [{ id: "m1", role: "assistant", text: "on the 蚂蚁 paper" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
+  await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+  const row = page.locator('#messages .tl-post[data-fy="a"] .tl-prog').first();
+  await row.waitFor();
+  await row.click();
+  await page.locator('#messages [data-key="m1"]').waitFor({ timeout: 5000 });
+  assert.equal(await page.evaluate(() => document.body.classList.contains("fy-chatmode")), true);
+});
