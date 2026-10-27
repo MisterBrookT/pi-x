@@ -77,7 +77,7 @@ test("Esc closes the switcher without switching; P opens it in reading mode; tap
   await page.getByText("in general-bench").waitFor();
 });
 
-test("hold ⌘: rows show ⌘1…; ⌘2 opens the first session, ⌘1 For you", async t => {
+test("hold ⌘: ⌘0 is For you, ⌘1…⌘9 the sessions", async t => {
   const hub = await startRemoteHub({ token, port: 0 });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
@@ -89,9 +89,10 @@ test("hold ⌘: rows show ⌘1…; ⌘2 opens the first session, ⌘1 For you", 
   await page.waitForSelector("#sessions [data-id]");
   await page.keyboard.down("Meta");
   assert.equal(await page.evaluate(() => document.body.classList.contains("cmd-held")), true);
-  assert.equal(await page.locator("#forYouOpen").getAttribute("data-num"), "1");
+  assert.equal(await page.locator("#forYouOpen").getAttribute("data-num"), "0");
+  assert.equal(await page.locator("#sessions [data-id]").first().getAttribute("data-num"), "1");
   const second = await page.locator("#sessions [data-id]").nth(1).getAttribute("data-id");
-  await page.keyboard.press("3");
+  await page.keyboard.press("2");
   await page.keyboard.up("Meta");
   await page.waitForFunction(id => localStorage.pixRemoteSession === id, second);
   assert.equal(await page.evaluate(() => document.body.classList.contains("cmd-held")), false);

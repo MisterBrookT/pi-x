@@ -912,7 +912,7 @@ test("iPad input: a click anywhere in it types (no + menu), it spans the width, 
   assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.3", "auto: bigger on iPad");
   await page.keyboard.press("Meta+=");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.5");
-  await page.keyboard.press("Meta+0");
+  await page.keyboard.press("Meta+-");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.3");
 });
 
