@@ -95,3 +95,11 @@ test("todo bar reflects done, active and pending items and keeps the full list e
   assert.equal(els.todoNow.textContent, "Fix");
   assert.equal(els.todoList.innerHTML, '<li class="done">Read</li><li class="active">Fix</li><li class="pending child">Ship</li>');
 });
+
+test("a workflow ended only by a Pi reload says its helpers kept working, not a bare 'stopped'", () => {
+  const [m] = remoteMessages([{ role: "custom", customType: "subagent-notify", display: true, content: "Background task stopped: **workflow**\n\nWorkflow stopped because the extension session was replaced or reloaded.\n\nChild outputs:\n- key=task-2 run=a status=completed\n  Saved output: /x\n- key=task-1 run=b status=running" }]);
+  assert.equal(m.background.state, "detached");
+  assert.match(m.background.command, /Pi reload; helpers kept working, 1\/2 done/);
+  const [real] = remoteMessages([{ role: "custom", customType: "subagent-notify", display: true, content: "Background task stopped: **worker**\n\nStopped by user." }]);
+  assert.equal(real.background.state, "stopped");
+});

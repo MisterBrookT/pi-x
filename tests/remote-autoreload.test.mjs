@@ -77,3 +77,9 @@ test("background jobs are visible to the idle gate through Pi's event bus", () =
   events.on(BACKGROUND_STATE_QUERY, state => { state.running = 2; });
   assert.equal(backgroundState({ events }).running, 2);
 });
+
+test("auto-reload waits while this session has async subagent runs (a reload kills their workflow tracker)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../plugins/remote/index.ts", import.meta.url), "utf8");
+  assert.match(src.match(/ready: \(\) =>[^\n]*/)[0], /runningHelpers\(/);
+});

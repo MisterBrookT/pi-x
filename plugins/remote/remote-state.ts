@@ -48,7 +48,7 @@ export interface RemoteBackground {
   id: string;
   /** Short agent name(s) shown instead of "Job <id>". */
   name?: string;
-  state: "running" | "completed" | "failed" | "stopped" | "paused";
+  state: "running" | "completed" | "failed" | "stopped" | "paused" | "detached";
   command: string;
   output: string;
   truncated: boolean;
@@ -106,6 +106,11 @@ function subagentBackground(text: string): RemoteBackground | undefined {
   const [first = "", ...rest] = text.split("\n");
   const body = rest.join("\n").trim();
   const single = first.match(subagentHeader);
+  // A Pi reload ends only the parent tracker; its async children keep running. Say so instead of a bare "stopped".
+  if (single && single[1] === "stopped" && /replaced or reloaded/.test(body)) {
+    const done = (body.match(/status=completed/g) || []).length, total = (body.match(/^- key=/gm) || []).length;
+    return { kind: "subagent", id: "", name: single[2], state: "detached", command: `tracker ended by a Pi reload; helpers kept working${total ? `, ${done}/${total} done when it ended` : ""}`, output: clip(body, 4_000), truncated: body.length > 4_000 };
+  }
   if (single) return { kind: "subagent", id: "", name: single[2], state: single[1] as RemoteBackground["state"], command: single[3] ?? "", output: clip(body, 4_000), truncated: body.length > 4_000 };
   const group = first.match(subagentGroupHeader);
   if (group) return { kind: "subagent", id: "", name: group[3].replace(/\*\*/g, "").slice(0, 240), state: "completed", command: `${group[2]} tasks`, output: clip(body, 4_000), truncated: body.length > 4_000 };

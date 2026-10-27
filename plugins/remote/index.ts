@@ -119,7 +119,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   const pixRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
   const autoReload = !autoReloadEnabled() ? undefined : createAutoReload({
     version: () => pixCodeVersion(pixRoot),
-    ready: () => !!ctx?.isIdle() && !pendingQuestion && backgroundState(pi).running === 0,
+    // Async subagent runs count too: a reload kills their parent workflow tracker even though the children live on.
+    ready: () => !!ctx?.isIdle() && !pendingQuestion && backgroundState(pi).running === 0 && runningHelpers(ctx?.sessionManager?.getSessionFile?.()).length === 0,
     reload: () => pi.sendUserMessage("/rc reload", { expandPromptTemplates: true }),
     log: logRelay,
   });
