@@ -1,5 +1,6 @@
 // Local remote-control hub: a loopback HTTP service shared by every Pi session that ran /rc.
 // Sessions push snapshots and long-poll for phone prompts; phones read Server-Sent Events.
+import { frameCheck } from "./remote-frame.ts";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -429,6 +430,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         const { status, ...result } = editMatch[2] === "source" ? readEditable(url.searchParams.get("path"), roots) : saveEditable(await body(req), roots);
         return send(res, status, result);
       }
+      if (req.method === "GET" && path === "/api/frame-check") return send(res, 200, await frameCheck(url.searchParams.get("url") ?? ""));
       const fileMatch = path.match(/^\/api\/sessions\/([^/]+)\/(files|file|file\/preview|file\/thumb)$/);
       if (req.method === "GET" && fileMatch) {
         const session = sessions.get(decodeURIComponent(fileMatch[1]));
