@@ -878,10 +878,11 @@ const act={
   s:()=>{setDrawer(true);soon(()=>focusIn(document.querySelector('aside.list'),'.row-wrap.on [data-id]'))},
   f:()=>{setFiles(true);soon(()=>focusIn($('filesPanel'),'.file-row'))},
   m:()=>{if($('modelChip').hidden)return;showModel(true);soon(()=>focusIn($('modelSheet'),'[aria-checked="true"]'))},
-  a:()=>{showActions(true);soon(()=>focusIn($('actions')))},
-  '+':()=>{showActions(true);soon(()=>focusIn($('actions')))},
-  u:()=>$('file').click(),
-  v:()=>{if(typeof toggleVoice==='function'&&!$('mic').hidden)toggleVoice()},
+  // iPad/Mac: like Pi, typing never opens the + menu, uploads or voice (paste with ⌘V instead).
+  a:wide()?null:()=>{showActions(true);soon(()=>focusIn($('actions')))},
+  '+':wide()?null:()=>{showActions(true);soon(()=>focusIn($('actions')))},
+  u:wide()?null:()=>$('file').click(),
+  v:wide()?null:()=>{if(typeof toggleVoice==='function'&&!$('mic').hidden)toggleVoice()},
   n:()=>{$('newSession').click();soon(()=>{if(!$('sheet').hidden)focusIn($('sheet'))})},
   e:()=>{if(!$('fileView').hidden&&!$('editFile').hidden)$('editFile').click()},
   '?':()=>keyHelp(),
@@ -891,9 +892,9 @@ if(act){e.preventDefault();act()}});
 // Keyboard shortcuts for a Bluetooth keyboard: ⌘/Ctrl+. stops Pi, ⌥↑/⌥↓ switches session, / focuses the message box.
 document.addEventListener('keydown',e=>{if(!$('desktopView').hidden)return;const mod=e.metaKey||e.ctrlKey,typing=e.target.closest?.('textarea,input');
 if(mod&&e.key==='.'&&current?.busy){e.preventDefault();$('stop').click();return}
-if(e.ctrlKey&&!e.metaKey&&(e.key==='m'||e.key==='M'||e.code==='KeyM')&&Speech){e.preventDefault();toggleVoice();return}
+if(e.ctrlKey&&!e.metaKey&&(e.key==='m'||e.key==='M'||e.code==='KeyM')&&Speech&&!wide()){e.preventDefault();toggleVoice();return}
 // While typing: Ctrl+U attaches a photo (Ctrl+letters that move the cursor in Apple text fields stay untouched).
-if(e.ctrlKey&&!e.metaKey&&!e.altKey&&(e.code==='KeyU'||e.key==='u'||e.key==='U')){e.preventDefault();(editor&&!$('insertImage').hidden?$('insertImage'):$('file')).click();return}
+if(e.ctrlKey&&!e.metaKey&&!e.altKey&&(e.code==='KeyU'||e.key==='u'||e.key==='U')&&!wide()){e.preventDefault();(editor&&!$('insertImage').hidden?$('insertImage'):$('file')).click();return}
 if(e.altKey&&!mod&&(e.key==='ArrowUp'||e.key==='ArrowDown')&&sessions.length>1){e.preventDefault();const order=sessionGroups(sessions).flatMap(g=>g[1]),i=order.findIndex(s=>s.id===active),next=order[(i+(e.key==='ArrowUp'?order.length-1:1))%order.length];if(next)void open(next.id).then(()=>$('input').focus());return}
 if(!typing&&!mod&&!e.altKey&&e.key==='/'&&$('sheet').hidden){e.preventDefault();$('input').focus()}});
 function fitKeyboard(){const vv=window.visualViewport;const focused=document.activeElement===$('input');const offset=focused&&vv?Math.max(0,innerHeight-vv.height-vv.offsetTop):0;document.documentElement.style.setProperty('--keyboard-offset',offset+'px');document.body.classList.toggle('keyboard',focused&&offset>0);requestAnimationFrame(()=>{if(!$('chat').hidden)showSomething()})}

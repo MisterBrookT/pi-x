@@ -905,6 +905,8 @@ test("iPad input: a click anywhere in it types (no + menu), it spans the width, 
   await page.mouse.click(box.x + box.width - 20, box.y + box.height / 2);
   assert.equal(await page.evaluate(() => document.activeElement.id), "input");
   assert.equal(await page.locator("#actions").isVisible(), false, "no upload menu");
+  for (const k of ["a", "+", "Control+u"]) { await page.locator("#input").blur(); await page.keyboard.press(k); assert.equal(await page.locator("#actions").isVisible(), false, k + " opens no + menu on iPad"); }
+  await page.locator("#input").focus();
   const w = await page.evaluate(() => document.querySelector("#input").getBoundingClientRect().width / document.querySelector(".box").getBoundingClientRect().width);
   assert.ok(w > 0.95, "the text area fills the line, so words do not wrap early: " + w);
   assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.3", "auto: bigger on iPad");
