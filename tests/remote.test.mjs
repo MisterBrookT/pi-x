@@ -733,3 +733,43 @@ test("regression (Resume session popped up over For you): a slow past-session li
   await page.waitForTimeout(400);
   assert.equal(await page.evaluate(() => document.getElementById("sheet").hidden), true, "no Resume sheet over the session");
 });
+
+test("regression (blank page while typing): when the chat area resizes (keyboard, attached image) with nothing in view, it jumps back to the newest message", async (t) => {
+  const { chromium, devices } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const long = Array.from({ length: 40 }, (_, i) => ({ id: "m" + i, role: i % 2 ? "assistant" : "user", text: "message " + i + " " + "words ".repeat(80) }));
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: long }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  // Stale scroll in an empty gap (what iOS leaves when the keyboard opens), then only the chat's size changes; no new messages.
+  await page.evaluate(() => { const g = document.createElement("style"); g.textContent = "#messages{padding-top:30000px}"; document.head.append(g); setFollow(false); document.getElementById("chat").scrollTop = 0; });
+  await page.evaluate(() => { document.documentElement.style.setProperty("--keyboard-offset", "300px"); });
+  await page.waitForTimeout(200);
+  const visible = await page.evaluate(() => { const r = document.getElementById("chat").getBoundingClientRect(); return [...document.querySelectorAll("#messages .msg")].some(e => { const b = e.getBoundingClientRect(); return b.bottom > r.top && b.top < r.bottom; }); });
+  assert.equal(visible, true);
+});
+
+test("two helpers show as one row ('2 workers'), tap to see each", async (t) => {
+  const { chromium, devices } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", busy: true, messages: [{ id: "a", role: "user", text: "hi" }], helpers: [{ id: "h1", agent: "worker", tools: 15, idleMs: 33000, task: "A" }, { id: "h2", agent: "worker", tools: 10, idleMs: 540000, task: "B" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  const row = page.locator("#helpers > details");
+  await row.first().waitFor();
+  assert.equal(await row.count(), 1);
+  assert.match(await row.locator("summary").first().textContent(), /2 workers\s*· 25 tools · active 33s ago/);
+  await row.locator("summary").first().click();
+  assert.equal(await page.locator("#helpers .helper-list .helper").count(), 2);
+});
