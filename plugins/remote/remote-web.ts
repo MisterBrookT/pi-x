@@ -180,19 +180,29 @@ body.cmd-held [data-num]{position:relative}body.cmd-held [data-num]::after{conte
 @media(max-width:760px),(pointer:coarse){.appearance-sheet #sheetBody .levels button{min-height:44px;padding:0 9px}}
 @media(prefers-reduced-motion:reduce){.list{transition:none!important}}
 
-.pi-footer{max-width:720px;margin:4px auto 0;display:flex;align-items:center;gap:12px;padding:0 6px;min-height:22px;font:12px/1.4 ui-monospace,"SF Mono",Menlo,monospace;color:var(--muted);white-space:nowrap}
-.pi-footer .pf-pins{flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;display:flex;gap:6px;align-items:center}
+
+.pi-footer{max-width:none;margin:0;padding:2px 0 0;font:12.5px/1.55 ui-monospace,"SF Mono",Menlo,monospace;color:var(--muted)}
+.pi-footer .pf-row{display:flex;align-items:center;gap:16px;white-space:nowrap;min-height:20px}
+.pi-footer .pf-path,.pi-footer .pf-stat{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pi-footer .pf-pins{margin-left:auto;min-width:0;overflow-x:auto;scrollbar-width:none;display:flex;gap:6px;align-items:center}
 .pi-footer .pf-pins::-webkit-scrollbar{display:none}
-.pi-footer .pf-pin{color:var(--muted);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;background:none;border:0;padding:4px 0;font:inherit;cursor:pointer}
-.pi-footer .pf-pin:hover{color:var(--text)}
-.pi-footer .pf-model{margin-left:auto;background:none;border:0;padding:4px 0;font:inherit;color:var(--muted);cursor:pointer}
+.pi-footer .pf-pin{color:var(--muted);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px;background:none;border:0;padding:0;font:inherit;cursor:pointer}
+.pi-footer .pf-pin:hover,.pi-footer .pf-model:hover{color:var(--text)}
+.pi-footer .pf-model{margin-left:auto;background:none;border:0;padding:0;font:inherit;color:var(--muted);cursor:pointer}
 @media(max-width:760px){.pi-footer{display:none!important}}
-/* iPad / wide: Mac-like input. Flat box with hairlines, small radius, no shadow; model, context and pins live in the footer line. */
+/* iPad / wide: the input is Pi's own editor. No box: a hairline above and below the text, monospace, Enter sends;
+   attach and voice stay reachable by paste and ⌘V. The two footer lines sit under it, exactly like the Mac. */
 @media(min-width:761px){
-.box{border-radius:10px;box-shadow:none!important;padding:8px 8px 6px}
-#modelChip,#ctxRing,#pinnedChip{display:none!important}
-.composer{background:var(--bg);border-top:1px solid var(--line);padding-top:10px}
+.composer{background:var(--bg);padding:6px 24px 8px}
+.composer>.box,.composer>.pi-footer{max-width:none}
+.box{border:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:0;box-shadow:none!important;background:transparent;padding:8px 0;flex-direction:row;align-items:flex-start}
+#input{font:14px/1.55 ui-monospace,"SF Mono",Menlo,monospace;padding:0;min-height:22px;background:transparent}
+#input::placeholder{color:transparent}
+.box-controls{flex:0 0 auto}
+#modelChip,#ctxRing,#pinnedChip,#attach,#mic,#send,.box-controls .spacer{display:none!important}
 }
+/* Touch iPad without a keyboard: Return is a newline there, so keep a quiet + and send arrow (no fill, no ring). */
+@media(min-width:761px) and (pointer:coarse){#attach,#send{display:inline-flex!important;width:40px;height:40px;background:none!important;border:0!important;box-shadow:none!important;color:var(--muted)}}
 </style><style>.fy-feedmode #form{display:none}.fy-feedmode #toBottom{display:none!important}.fy-only .fp-meta span{white-space:nowrap}.fy-only .fy-warn{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;margin:8px 0 0}.fy-only .fy-warn:active{-webkit-line-clamp:unset}.fy-feedmode #messages{padding-bottom:calc(110px + env(safe-area-inset-bottom))}.fy-only .fp-tabs{position:sticky;top:0}.fy-dog{position:fixed;right:18px;bottom:calc(22px + env(safe-area-inset-bottom));z-index:30;width:62px;height:62px;border-radius:50%;border:0;padding:0;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.28);display:grid;place-items:center;cursor:pointer;transition:transform .25s}.fy-dog .av{width:54px;height:54px;margin:0;box-shadow:none}.fy-dog .av svg{width:48px;height:48px}.fy-dog svg{width:26px;height:26px;fill:none;stroke:#111;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.fy-dog.open{top:calc(68px + env(safe-area-inset-top));bottom:auto;right:12px;width:auto;height:38px;padding:0 14px 0 10px;border-radius:19px;background:var(--pill);box-shadow:none;color:var(--text);font:inherit;font-size:14px;display:flex;gap:4px;align-items:center}.fy-dog.open svg{width:18px;height:18px;stroke:var(--text)}.fy-chatmode .msg:has(.loop-ctx.quiet){display:none}.fy-only .fp-go{display:block;width:auto;max-width:100%;padding:0;min-height:0;border:0;background:none;color:var(--text);text-align:left}.fy-only .fp-go b{display:inline-flex;align-items:center;min-height:36px;padding:0 16px;border-radius:999px;background:var(--text);color:var(--bg);font-size:14.5px;font-weight:700}
 .fy-only .fp-go small{color:var(--muted);opacity:1;margin:5px 2px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.35}
 .fy-only .fp-go.picked b{outline:2px solid var(--text);outline-offset:2px}.fy-only .fp-bar{margin-top:2px}.fy-dog.hop{animation:fy-hop .45s cubic-bezier(.3,1.6,.5,1)}@keyframes fy-hop{0%{transform:translateY(0) scale(1)}35%{transform:translateY(-14px) scale(1.08) rotate(-6deg)}70%{transform:translateY(0) scale(.95)}100%{transform:none}}.fy-chatmode #messages{animation:fy-up .28s ease-out}@keyframes fy-up{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}@media(prefers-reduced-motion:reduce){.fy-dog.hop,.fy-chatmode #messages{animation:none}}.fy-only article.fp{display:flex;gap:12px;padding:14px 4px 10px;border-bottom:1px solid var(--line);margin:0}.fy-only .fp-text>p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--text);opacity:.85}.fy-only .fp-text>b{font-size:16.5px}</style><style>.fy-src svg{width:21px;height:21px;fill:none;stroke:#fff;stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}.fy-src.sess{background:var(--muted,#8a877c)}
@@ -723,7 +733,8 @@ function renderTodos(){const items=current?.todos||[],bar=$('todoBar');bar.hidde
 function renderPiFooter(){const f=$('piFooter');if(!f)return;const m=current?.model,c=current?.context,p=current?.pinned||[];f.hidden=!current;if(!current)return;
 const pct=c&&c.percent!=null?Math.round(c.percent)+'%':'';const right=[m?esc(m.name):'',current.thinking&&current.thinking!=='off'?esc(current.thinking):'',pct?(c.window?pct+'/'+fmtTokens(c.window):pct):''].filter(Boolean).join(' ');
 const pins=p.slice().reverse().map((x,k)=>'<'+(x.kind==='file'?'button type="button" data-pin-file="'+esc(x.url)+'"':'a href="'+esc(x.url)+'" target="_blank" rel="noopener"')+' class="pf-pin" title="'+esc(x.title)+'">'+esc(x.title.length>22?x.title.slice(0,21).trimEnd()+'…':x.title)+'</'+(x.kind==='file'?'button':'a')+'>').join('<span class="pf-sep">·</span>');
-f.innerHTML='<span class="pf-pins">'+pins+'</span><button type="button" class="pf-model" data-pf-model>'+right+'</button>'}
+const sess=sessions.find(x=>x.id===current.id)||{};const path=esc(shortPath(sess.cwd||current.cwd||''));
+f.innerHTML='<div class="pf-row"><span class="pf-path">'+path+'</span><span class="pf-pins">'+pins+'</span></div><div class="pf-row"><span class="pf-stat">'+(c&&c.tokens!=null?fmtTokens(c.tokens)+' tokens':'')+'</span><button type="button" class="pf-model" data-pf-model>'+right+'</button></div>'}
 document.addEventListener('click',e=>{if(e.target.closest('[data-pf-model]'))$('modelChip').click()});
 function renderModel(){renderContext();renderPiFooter();renderHelpers();renderTodos();const m=current?.model;$('modelChip').hidden=!current;for(const b of document.querySelectorAll('#sessionActions button'))b.disabled=!current||!!current.busy;if(!m)return;$('modelChip').innerHTML=modelIcon;$('modelChip').setAttribute('aria-label','Model: '+m.name+(current.thinking&&current.thinking!=='off'?', '+current.thinking+' thinking':''));$('modelChip').title=m.name+(current.thinking&&current.thinking!=='off'?' '+current.thinking:'');
 $('modelList').innerHTML=(current.models||[]).map(x=>'<button type="button" role="menuitemradio" data-model="'+esc(x.id)+'" aria-checked="'+(x.id===m.id)+'"><b>'+esc(x.name)+'</b><small>'+esc(x.id.split('/')[0])+'</small></button>').join('');

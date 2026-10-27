@@ -855,6 +855,11 @@ test("iPad gets a Pi-style footer under the input (pins open, model · thinking 
   assert.equal((await ipad.locator("#piFooter .pf-model").innerText()).trim(), "claude-opus-4-5 minimal 16%/200k");
   assert.equal(await ipad.locator('#piFooter a.pf-pin[href="https://x.dev/plan"]').innerText(), "Kairos plan");
   assert.equal(await ipad.locator("#modelChip").isVisible(), false, "no duplicate model chip on iPad");
+  assert.match(await ipad.locator("#piFooter .pf-path").innerText(), /tmp/, "first line starts with the folder, like Pi");
+  assert.equal(await ipad.locator("#send").isVisible(), false, "no buttons in Pi's input: Enter sends");
+  await ipad.locator("#input").fill("hello");
+  await ipad.locator("#input").press("Enter");
+  await ipad.waitForFunction(() => document.querySelector("#input").value === "");
   const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await phone.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await phone.goto(`${base}/#token=${token}`);
