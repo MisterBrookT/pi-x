@@ -136,6 +136,15 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       const images = imagesOf(message.content);
       const loop = loopPromptSummary(text), quiet = !loop && !images.length ? quietSummary(text) : undefined;
       if (quiet) { result.push({ id, role: "system", text: clip(text), html: quietHtml(quiet, clip(text)), timestamp }); return; }
+      // "/skill:name args" arrives expanded as <skill name location>body</skill> then the args: show a skill row plus what was typed.
+      const sk = text.match(/^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]*))?$/);
+      if (sk) {
+        const desc = (sk[3].match(/^#\s+.+\n\n([^\n]+)/m)?.[1] ?? "").slice(0, 200);
+        result.push({ id: id + "-skill", role: "system", text: `Skill ${sk[1]}`, html: `<div class="skill-row"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/></svg><span>Skill</span><b>${escapeText(sk[1])}</b>${desc ? `<small>${escapeText(desc)}</small>` : ""}</div>`, timestamp });
+        const typed = (sk[4] ?? "").trim();
+        if (typed || images.length) result.push({ id, role: "user", text: clip(typed), html: renderRemoteMarkdown(clip(typed), files, { inline: true }), images: images.length ? images : undefined, timestamp });
+        return;
+      }
       if (text || images.length) result.push({ id, role: "user", text: clip(text), html: loop ? loopPromptHtml(loop, clip(text)) : renderRemoteMarkdown(clip(text), files, { inline: true }), images: images.length ? images : undefined, timestamp });
     } else if (message?.role === "assistant") {
       const parts = Array.isArray(message.content) ? message.content : [];

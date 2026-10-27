@@ -1025,3 +1025,21 @@ test("⌥↓/⌥↑ scroll the chat a page while typing in the box", async (t) =
   assert.ok(await page.evaluate(() => document.getElementById("chat").scrollTop) < before - 200);
   assert.equal(await page.evaluate(() => document.activeElement.id), "input");
 });
+
+test("a long multi-line draft keeps the line being typed in view", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.locator("#input").focus();
+  for (let i = 0; i < 16; i++) { await page.keyboard.type("line " + i); await page.keyboard.press("Shift+Enter"); }
+  await page.keyboard.type("last");
+  assert.ok(await page.evaluate(() => { const i = document.getElementById("input"); return i.scrollTop + i.clientHeight >= i.scrollHeight - 2; }), "caret line visible");
+});

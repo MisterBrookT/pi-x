@@ -103,3 +103,12 @@ test("a workflow ended only by a Pi reload says its helpers kept working, not a 
   const [real] = remoteMessages([{ role: "custom", customType: "subagent-notify", display: true, content: "Background task stopped: **worker**\n\nStopped by user." }]);
   assert.equal(real.background.state, "stopped");
 });
+
+test("/skill:name shows a Skill row plus what was typed, not the whole SKILL.md as a user bubble", () => {
+  const text = '<skill name="remote" location="/s/remote/SKILL.md">\nReferences are relative to /s/remote.\n\n# Remote\n\nKeep the Mac for editing.\n\nlong body\n</skill>\n\ncheck dgx';
+  const [row, user] = remoteMessages([{ role: "user", content: text, timestamp: 1 }]);
+  assert.equal(row.role, "system");
+  assert.match(row.html, /class="skill-row".*<b>remote<\/b><small>Keep the Mac for editing\.<\/small>/);
+  assert.equal(user.role, "user");
+  assert.equal(user.text, "check dgx");
+});
