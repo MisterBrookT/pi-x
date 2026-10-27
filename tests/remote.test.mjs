@@ -780,3 +780,33 @@ test("no green or orange status dots anywhere on the phone page (design.md: calm
   for (const c of ["#34c759", "#ff9f0a", "#3a9b5c", "52,199,89"]) assert.ok(!src.includes(c), "no " + c);
   assert.match(src, /\.dot,\.helper \.dot,\.tl-pdot,\.ln-dot\{display:none!important\}/);
 });
+
+test("iPad / wide: drag the sessions edge to resize (remembered), ⌘B hides sessions, ⌘E docks files beside the chat", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  page.on("pageerror", e => { throw e; });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  const listW = () => page.evaluate(() => Math.round(document.querySelector(".list").getBoundingClientRect().width));
+  const edge = await listW();
+  await page.mouse.move(edge - 2, 400); await page.mouse.down(); await page.mouse.move(250, 400, { steps: 5 }); await page.mouse.up();
+  assert.ok(Math.abs((await listW()) - 250) <= 2, "resized by drag");
+  await page.reload(); await page.waitForSelector("#messages .msg");
+  assert.ok(Math.abs((await listW()) - 250) <= 2, "width remembered");
+  await page.keyboard.press("Meta+b");
+  assert.equal(await page.locator(".list").isVisible(), false, "⌘B hides sessions");
+  await page.keyboard.press("Meta+b");
+  assert.equal(await page.locator(".list").isVisible(), true);
+  await page.keyboard.press("Meta+e");
+  await page.waitForTimeout(400);
+  const r = await page.evaluate(() => ({ main: document.querySelector(".main").getBoundingClientRect().right, files: document.getElementById("filesPanel").getBoundingClientRect().left, shade: getComputedStyle(document.getElementById("shade")).opacity }));
+  assert.ok(r.main <= r.files + 1, "files sit beside the chat, not over it");
+  assert.equal(r.shade, "0", "no grey shade over the chat");
+});
