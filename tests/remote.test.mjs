@@ -773,3 +773,10 @@ test("two helpers show as one row ('2 workers'), tap to see each", async (t) => 
   await row.locator("summary").first().click();
   assert.equal(await page.locator("#helpers .helper-list .helper").count(), 2);
 });
+
+test("no green or orange status dots anywhere on the phone page (design.md: calm first)", async () => {
+  const { remoteWebPage } = await import("../plugins/remote/remote-web.ts").catch(() => ({}));
+  const src = (await import("node:fs")).readFileSync(new URL("../plugins/remote/remote-web.ts", import.meta.url), "utf8");
+  for (const c of ["#34c759", "#ff9f0a", "#3a9b5c", "52,199,89"]) assert.ok(!src.includes(c), "no " + c);
+  assert.match(src, /\.dot,\.helper \.dot,\.tl-pdot,\.ln-dot\{display:none!important\}/);
+});
