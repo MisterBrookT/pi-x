@@ -14,6 +14,7 @@ import { BACKGROUND_CHANGED, backgroundState } from "../core/background-state.ts
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
 import { loadArtifacts } from "../core/artifacts.ts";
 import { runningHelpers } from "./remote-helpers.ts";
+import { footerStatus } from "../core/footer-status.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "./remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../core/question-events.ts";
 import { markdownMedia, renderRemoteMarkdown } from "./remote-markdown.ts";
@@ -183,7 +184,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); const n = bg.running + (bg.waits ?? 0); return { waiting: busy ? 0 : n, nextLook: n ? bg.nextLook : undefined }; })(), ...(chatWaiting ? { peerWait: chatWaiting } : {}), ...(() => { const p = loadArtifacts(sessionId).map(x => ({ title: x.title, url: x.kind === "file" ? x.url.replace(/^~(?=\/|$)/, options.home ?? process.env.HOME ?? "") : x.url, kind: x.kind })); return p.length ? { pinned: p.reverse() } : {}; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); const n = bg.running + (bg.waits ?? 0); return { waiting: busy ? 0 : n, nextLook: n ? bg.nextLook : undefined }; })(), ...(chatWaiting ? { peerWait: chatWaiting } : {}), ...(() => { const p = loadArtifacts(sessionId).map(x => ({ title: x.title, url: x.kind === "file" ? x.url.replace(/^~(?=\/|$)/, options.home ?? process.env.HOME ?? "") : x.url, kind: x.kind })); return p.length ? { pinned: p.reverse() } : {}; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), footer: footerStatus(pi), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
   const contextUsage = () => {

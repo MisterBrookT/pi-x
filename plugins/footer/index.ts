@@ -31,7 +31,12 @@ async function loadOptions(): Promise<FooterOptions> {
   catch { return { ...defaultFooterOptions }; }
 }
 
+import { FOOTER_STATUS_QUERY, type FooterStatus } from "../core/footer-status.ts";
+
 export default function (pi: ExtensionAPI) {
+  // Latest status texts, answered to the remote so the phone footer matches this one.
+  let shared: FooterStatus = {};
+  pi.events.on(FOOTER_STATUS_QUERY, (data: unknown) => { if (data && typeof data === "object") Object.assign(data, shared); });
   let options = { ...defaultFooterOptions };
   let firstOutputAt: number | undefined;
   let latestSpeed: number | undefined;
@@ -135,6 +140,7 @@ export default function (pi: ExtensionAPI) {
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
         // Who this session waits on (chat asks/handoffs) gets its own line.
         const waits = statuses.get("pix-chat-waits");
+        shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ") || undefined, waits: waits || undefined };
         // Always the last line, so the footer never jumps: "⏳ waiting: none" when nothing is pending.
         return [truncateToWidth(theme.fg("dim", location), width), stats, truncateToWidth(theme.fg("dim", waits || "⏳ waiting: none"), width)];
       },

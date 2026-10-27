@@ -51,6 +51,7 @@ export interface RemoteSnapshot {
   todos?: { id: string; text: string; status: string; parentId?: string }[];
   /** Running pi-subagents helpers launched by this session. */
   helpers?: RemoteHelper[];
+  footer?: { work?: string; core?: string; waits?: string };
   /** Current model and thinking level, and the choices the phone may switch between. */
   model?: { id: string; name: string };
   thinking?: string;

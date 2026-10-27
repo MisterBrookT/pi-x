@@ -965,3 +965,19 @@ test("iPad input behaves like Pi's editor: ↑/↓ browse earlier prompts, ⌃C 
   await page.keyboard.press("Shift+Tab");
   assert.deepEqual(JSON.parse((await req).postData()), { action: "thinking", value: "high" });
 });
+
+test("iPad footer shows the Mac footer's jobs, goal and waiting lines", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", footer: { work: "2 jobs", core: "goal: ship", waits: "⏳ waiting: minara" }, messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#piFooter .pf-waits");
+  const text = await page.locator("#piFooter").innerText();
+  for (const s of ["2 jobs", "goal: ship", "⏳ waiting: minara"]) assert.ok(text.includes(s), s);
+});
