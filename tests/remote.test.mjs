@@ -1003,3 +1003,25 @@ test("iPad: typing anywhere goes straight into the message box, and Enter clears
   await page.waitForTimeout(200);
   assert.equal(await page.locator("#input").inputValue(), "", "box empties right away");
 });
+
+test("⌥↓/⌥↑ scroll the chat a page while typing in the box", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const messages = Array.from({ length: 40 }, (_, i) => ({ id: "m" + i, role: i % 2 ? "assistant" : "user", text: "line " + i + " ".padEnd(200, "x") }));
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.locator("#input").focus();
+  await page.waitForTimeout(300);
+  const before = await page.evaluate(() => document.getElementById("chat").scrollTop);
+  await page.keyboard.press("Alt+ArrowUp");
+  await page.waitForTimeout(700);
+  assert.ok(await page.evaluate(() => document.getElementById("chat").scrollTop) < before - 200);
+  assert.equal(await page.evaluate(() => document.activeElement.id), "input");
+});
