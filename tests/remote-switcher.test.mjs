@@ -76,3 +76,23 @@ test("Esc closes the switcher without switching; P opens it in reading mode; tap
   await page.getByRole("option", { name: /general-bench/ }).click();
   await page.getByText("in general-bench").waitFor();
 });
+
+test("hold ⌘: rows show ⌘1…; ⌘2 opens the first session, ⌘1 For you", async t => {
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  for (const id of ["a", "b"]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name: "s-" + id, cwd: "/tmp", messages: [{ id: "m", role: "user", text: "in " + id }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#sessions [data-id]");
+  await page.keyboard.down("Meta");
+  assert.equal(await page.evaluate(() => document.body.classList.contains("cmd-held")), true);
+  assert.equal(await page.locator("#forYouOpen").getAttribute("data-num"), "1");
+  const second = await page.locator("#sessions [data-id]").nth(1).getAttribute("data-id");
+  await page.keyboard.press("3");
+  await page.keyboard.up("Meta");
+  await page.waitForFunction(id => localStorage.pixRemoteSession === id, second);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("cmd-held")), false);
+});
