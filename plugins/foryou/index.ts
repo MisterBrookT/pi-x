@@ -22,7 +22,7 @@ import { addRule, removeRule, rulesForPrompt } from "./autonomy.ts";
 import { AUTONOMY, KINDS, applyLineEdits, parseLineEdits, readLines, slug, writeLines } from "./proactive-lines.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { summarizeTurn } from "./session-status.ts";
-import { forYouView, mergeJobLines, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
+import { forYouView, mergeJobLines, readOpen, actItem, preparedItem, finishedItem, answerCard, currentCard, stillWaiting, quickAnswer, coordinatorContext, dismissItem, doneItem, forYouSession, sessionLine, publishChoices, laterItem, nextItem, noteItem, trackTurn, createItem, remindItem, type LiveSession } from "./proactive-store.ts";
 import type { CardAnswer } from "./proactive-store.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { forYouHub, forYouRelayAllowed } from "./hub.ts";
@@ -154,7 +154,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			remove: Type.Optional(Type.Array(Type.String(), { description: "exact lines no longer true" })),
 		}),
 		async execute(_id, p, _signal, _update, ctx: any) {
-			const who = ownedLine(ctx)?.owner?.name || "a line session";
+			const who = ctx?.sessionManager?.getSessionName?.() || ownedLine(ctx)?.owner?.name || "a line session";
 			const ch = /^(lines|people)\/|^index$/.test(p.card) ? applyCardEdits(memoryDirOf(deps.dir), [{ card: p.card, add: p.add ?? [], remove: p.remove ?? [] }], { source: who }) : [];
 			if (ch.length) logCardChanges(proactivePaths(deps.dir).memoryLog, ch);
 			return { content: [{ type: "text" as const, text: ch.length ? `Remembered on ${ch[0].card} (+${ch[0].added.length} -${ch[0].removed.length}).` : "Nothing changed (card must be lines/<id>, people/<name> or index; give lines to add or remove)." }], details: {} };
@@ -271,7 +271,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 
 	// The tool is only declared in the coordinator, so other sessions pay nothing for it.
 	// The line this session owns (lines.json owner), if any: it reads and writes the shared memory for that line.
-	const ownedLine = (ctx: any) => { const id = ctx?.sessionManager?.getSessionId?.(); return id && !isCoordinator(ctx) ? readLines(deps.dir).find(l => !l.hidden && l.owner?.id === id) : undefined; };
+	const ownedLine = (ctx: any) => { const id = ctx?.sessionManager?.getSessionId?.(); return id && !isCoordinator(ctx) ? sessionLine(id, deps.dir) : undefined; };
 	const apply = (ctx: any) => {
 		const active = new Set(pi.getActiveTools());
 		if (isCoordinator(ctx)) active.add(TOOL); else active.delete(TOOL);

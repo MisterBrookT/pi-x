@@ -1,7 +1,7 @@
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { sessionLabeler } from "../core/session-label.ts";
 import { isAutonomy, levelFor, risky, readRules, rulesForPrompt } from "./autonomy.ts";
-import { guessKind, linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
+import { guessKind, type Line, linesForPrompt, liveLines, mergeLines, readLines, trackLine } from "./proactive-lines.ts";
 // The one list, with IO. Every view (Mac pill via the daemon CLI, iPhone via the Remote hub)
 // reads and changes items only through here, so they always agree.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -104,7 +104,7 @@ export function forYouView(dir?: string, now = Date.now()) {
 			const open = all.filter(i => i.line === id && isOpen(i));
 			const waitsOnYou = open.some(i => needsYou(i, now));
 			// What the line is waiting on, in words: its open loops (title + whether brook or a session holds it).
-			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), ...(i.session ? { session: i.session } : {}) }));
+			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), status: i.status, ...(i.session ? { session: i.session } : {}), ...(i.note ? { last: i.note.split("\n").at(-1)!.replace(/^- [\d-]+: /, "") } : {}) }));
 			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
 		}),
 		watching,
@@ -366,9 +366,9 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 		const approved = answer === "do" && it.button && it.prepared && it.preparedAt ? it.button : undefined;
 		write(o.dir, { id, note: addNote(it.note, `brook tapped: ${label}`), ...(approved ? { approved } : {}) });
 		// Do it on a loop whose line has a live owner session: straight to that owner; For you gets a quiet note and keeps tracking.
-		const owner = answer === "do" && it.line ? liveLines(o.dir).find(l => l.id === it.line)?.owner : undefined;
-		if (owner && (o.live ?? []).some(l => l.id === owner.id))
-			return { item: it, into: owner.id, note: `[decision] brook tapped Do it on loop ${id} ("${it.title}"); it went straight to the line owner ${owner.name} (${owner.id}). Track it; step in if it stalls.` };
+		const owner = answer === "do" ? workOwner(it, o.live ?? [], o.dir) : undefined;
+		if (owner)
+			return { item: it, into: owner.id, note: `[decision] brook tapped Do it on loop ${id} ("${it.title}"); it went straight to the ${owner.role} owner ${owner.name} (${owner.id}). Track it; step in if it stalls.` };
 		takeItem(id, forYouSession.id, o.dir, forYouFolder());
 		const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
 		return { item: it, here: answer === "do"
@@ -418,6 +418,26 @@ export const forYouFolder = (home = homedir()) => home;
 /** A Pi session connected to Remote, as the hub knows it. */
 export interface LiveSession { id: string; name: string; cwd: string; busy?: boolean }
 
+/**
+ * Who should do a loop's next step without asking the coordinator. One line can hold several loops, each
+ * worked by its own session: the loop's own live session comes first, then the line's owner, else none
+ * (For you coordinates).
+ */
+export function workOwner(it: Item, live: LiveSession[], dir?: string): { id: string; name: string; role: "loop" | "line" } | undefined {
+	const isLive = (id?: string) => !!id && id !== forYouSession.id && live.some(l => l.id === id);
+	if (isLive(it.session)) return { id: it.session!, name: live.find(l => l.id === it.session)!.name, role: "loop" };
+	const owner = it.line ? liveLines(dir).find(l => l.id === it.line)?.owner : undefined;
+	if (owner && isLive(owner.id)) return { id: owner.id, name: owner.name ?? owner.id, role: "line" };
+	return undefined;
+}
+
+/** The line a session works on: the one it owns, else the line of an open loop it holds. */
+export function sessionLine(id: string, dir?: string): Line | undefined {
+	const lines = liveLines(dir);
+	const loopLine = () => readAll(dir).find(i => i.session === id && i.status === "onit" && i.line && lines.some(l => l.id === i.line))?.line;
+	return lines.find(l => l.owner?.id === id) ?? lines.find(l => l.id === loopLine());
+}
+
 export const expandHome = (p: string, home = homedir()) => resolve(p.replace(/^~(?=\/|$)/, home));
 const folderName = (dir: string) => dir.split("/").filter(Boolean).pop() || "pi";
 const shortName = (it: Item) => (it.title.length > 28 ? `${it.title.slice(0, 27)}…` : it.title);
@@ -447,11 +467,11 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 	const before = readAll(options.dir).find(i => i.id === id && isOpen(i));
 	if (!before) return undefined;
 	// Do it on a loop whose line has a live owner session goes straight there, not through the coordinator.
-	const owner = options.into ? undefined : before.line ? liveLines(options.dir).find(l => l.id === before.line)?.owner?.id : undefined;
-	const into = options.into ?? (owner && (options.live ?? []).some(l => l.id === owner) ? owner : undefined);
+	const owner = options.into ? undefined : workOwner(before, options.live ?? [], options.dir);
+	const into = options.into ?? owner?.id;
 	const route = routeFor(before, options.live ?? [], into, options.cwd, options.home);
 	// For you stays in charge: it hears about every job that skipped it (a quiet note, read on its next turn).
-	const tellForYou = () => { if (into && !options.into) try { (options.chat ?? sendChat)("pix", "for-you", "note", `brook tapped Do it on loop ${id} "${before.title}" (line ${before.line}); it went straight to the line owner ${route.name} (${route.session}). Track it; step in if it stalls.`); } catch { /* For you offline: the loop still shows who has it */ } };
+	const tellForYou = () => { if (into && !options.into) try { (options.chat ?? sendChat)("pix", "for-you", "note", `brook tapped Do it on loop ${id} "${before.title}" (line ${before.line}); it went straight to the ${owner?.role ?? "line"} owner ${route.name} (${route.session}). Track it; step in if it stalls.`); } catch { /* For you offline: the loop still shows who has it */ } };
 	const it: Item = { ...takeItem(id, route.session, options.dir, route.cwd)!, status: "onit", session: route.session, sessionCwd: route.cwd };
 	// "Picked up again" only when this same session already had the loop.
 	const prompt = route.coordinator ? coordinatorTask(before, options.dir) : actPrompt(before.session === route.session ? it : { ...it, session: undefined }, paths(options.dir).dir);
@@ -617,7 +637,11 @@ export function trackTurn(session: { id: string; name?: string; cwd?: string }, 
 		const last = i.note?.split("\n").at(-1) ?? "";
 		if (!last.endsWith(status)) write(dir, { id: i.id, note: addNote(i.note, `${session.name ?? "session"}: ${status}`, now) });
 	}
-	for (const line of new Set(mine.map(i => i.line).filter(Boolean) as string[])) trackLine(line, { id: session.id, ...(session.name ? { name: session.name } : {}), status }, dir, now.toISOString());
+	// Several sessions may work loops on one line. The line keeps its owner while that owner still holds an open
+	// loop there; another session's turn updates only its own loops (it takes the line only when the owner left).
+	const all = readAll(dir), lines = liveLines(dir);
+	const keeps = (line: string) => { const o = lines.find(l => l.id === line)?.owner; return !!o && o.id !== session.id && all.some(i => i.line === line && i.session === o.id && i.status === "onit"); };
+	for (const line of new Set(mine.map(i => i.line).filter(Boolean) as string[])) if (!keeps(line)) trackLine(line, { id: session.id, ...(session.name ? { name: session.name } : {}), status }, dir, now.toISOString());
 	return mine.map(i => i.id);
 }
 

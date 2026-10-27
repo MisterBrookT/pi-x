@@ -5,7 +5,7 @@ import type { HubPlugin } from "../core/hub-plugin.ts";
 import { avatarFile, readFileOrUndefined, sourceIconFile } from "../core/avatarkit.ts";
 import { paths as proactivePaths } from "./proactive.ts";
 import { editMemoryLine, markMemorySeen, memoryUnseen, memoryView, removeMemoryLine } from "./proactive-memory.ts";
-import { setItemAutonomy, contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
+import { setItemAutonomy, contextSections, coordinatorContext, actItem, answerCard, startForYou, currentCard, waitingCards, forYouSession, sessionLine, dismissItem, doneItem, forYouView, laterItem, nowItem, type Card, type CardAnswer } from "./proactive-store.ts";
 
 export interface ForYouHubOptions {
 	/** Proactive list folder; defaults to ~/.pix/proactive. Tests inject a temp dir and launcher. */
@@ -57,7 +57,7 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		initial: () => [["foryou", forYou()]],
 		// A session that owns a line is shown by the line's name ("Kairos launch"), not its folder ("minara").
 		summary: id => {
-			const line = id === forYouSession.id ? undefined : readLines(dir).find(l => !l.hidden && l.owner?.id === id);
+			const line = id === forYouSession.id ? undefined : sessionLine(id, dir);
 			return { ...(id === forYouSession.id && card ? { card: true } : {}), ...(line ? { line: line.name } : {}) };
 		},
 		session: id => id === forYouSession.id && card ? { card, cards } : undefined,
