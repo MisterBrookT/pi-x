@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { chromium } from "playwright";
 import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
+process.env.PIX_FRAME_CHECK_PRIVATE = "1"; // the fixture site is on 127.0.0.1
 test("pi-rc tab: link opens as a tab beside the chat; blocked sites say so", async t => {
 	const site = createServer((req, res) => { if (req.url === "/deny") res.setHeader("x-frame-options", "DENY"); res.end("<title>Docs</title><h1>Kairos docs</h1>"); });
 	await new Promise(r => site.listen(0, r));
