@@ -839,3 +839,26 @@ test("⌘⇧L slides the sessions panel out instead of snapping (wide screens)",
   assert.equal(await page.locator(".list").isVisible(), false, "hidden at the end");
   assert.ok(await page.evaluate(() => document.querySelector(".main").getBoundingClientRect().left) < 2, "chat takes the full width");
 });
+
+test("iPad gets a Pi-style footer under the input (pins open, model · thinking · context); iPhone keeps its chips", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", model: { id: "a/claude-opus-4-5", name: "claude-opus-4-5" }, thinking: "minimal", context: { tokens: 31000, window: 200000, percent: 15.7 }, pinned: [{ title: "Kairos plan", url: "https://x.dev/plan", kind: "doc" }], messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const ipad = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await ipad.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await ipad.goto(`${base}/#token=${token}`);
+  await ipad.waitForSelector("#piFooter .pf-model");
+  assert.equal((await ipad.locator("#piFooter .pf-model").innerText()).trim(), "claude-opus-4-5 minimal 16%/200k");
+  assert.equal(await ipad.locator('#piFooter a.pf-pin[href="https://x.dev/plan"]').innerText(), "Kairos plan");
+  assert.equal(await ipad.locator("#modelChip").isVisible(), false, "no duplicate model chip on iPad");
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await phone.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await phone.goto(`${base}/#token=${token}`);
+  await phone.waitForSelector("#messages .msg");
+  assert.equal(await phone.locator("#piFooter").isVisible(), false);
+  assert.equal(await phone.locator("#modelChip").isVisible(), true);
+});
