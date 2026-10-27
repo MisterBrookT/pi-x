@@ -141,7 +141,8 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     // After sleep or a network change the socket can look open while the relay has dropped it.
     // The relay answers "ping" itself; no answer within 45 s means reconnect.
     socket.addEventListener("open", () => { lastPong = Date.now(); heartbeat = setInterval(() => {
-      if (Date.now() - lastPong > beatMs * 3) { options.onState?.("stale"); current.close(); return; }
+      // close() waits for the relay's close reply, which a dead link never sends: abandon it and reconnect now.
+      if (Date.now() - lastPong > beatMs * 3) { options.onState?.("stale"); abandon(); return; }
       try { current.send("ping"); } catch {}
     }, beatMs); });
     socket.addEventListener("close", () => clearInterval(heartbeat));
@@ -178,7 +179,10 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         send(await requests.get(message.id));
       } catch { /* Never act on unauthenticated or malformed frames. */ }
     });
-    socket.addEventListener("close", () => { options.onState?.("closed"); stream?.abort(); if (running) retry = setTimeout(connect, 1_500); });
+    let ended = false;
+    const ended1 = (delay: number) => { if (ended) return; ended = true; clearInterval(heartbeat); options.onState?.("closed"); stream?.abort(); if (running && socket === current) retry = setTimeout(connect, delay); };
+    const abandon = () => { relayRoute.fail(); ended1(0); try { (current as any).terminate?.() ?? current.close(); } catch {} };
+    socket.addEventListener("close", () => ended1(1_500));
     socket.addEventListener("error", () => { options.onState?.("error"); current?.close(); });
   };
   connect();

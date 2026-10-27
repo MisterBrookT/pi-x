@@ -101,6 +101,27 @@ test("the Mac notices a relay link that silently died and reconnects", async t =
   assert.equal(connections, 2, "a link that answers pings is kept");
 });
 
+test("a dead relay link that never finishes closing is replaced at once, not after the close handshake", async t => {
+  // Seen 10-27: 'stale' logged 83 times over 22 min before 'closed', so the phone got no progress the whole time.
+  const { WebSocketServer } = await import("ws");
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  const raw = [];
+  t.after(() => { for (const s of raw) s.destroy(); server.close(); });
+  await new Promise(r => server.once("listening", r));
+  let connections = 0;
+  server.on("connection", (socket, req) => {
+    connections++;
+    if (connections === 1) { raw.push(req.socket); req.socket.pause(); return; } // black hole: no pong, no close reply
+    socket.on("message", data => { if (String(data) === "ping") socket.send("pong"); });
+  });
+  const { startRemoteRelayAgent } = await import("../plugins/remote/remote-relay-agent.ts");
+  const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret: "s".repeat(43), localBase: "http://127.0.0.1:9", localToken: "x", heartbeatMs: 50 });
+  t.after(() => agent.stop());
+  await agent.ready;
+  for (let i = 0; i < 120 && connections < 2; i++) await new Promise(r => setTimeout(r, 25));
+  assert.equal(connections, 2, "reconnects within a few heartbeats even though the old socket never closes");
+});
+
 test("the Mac relays live-text stream events to the phone", async t => {
   const { WebSocketServer } = await import("ws");
   const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
