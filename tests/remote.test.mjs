@@ -1043,3 +1043,27 @@ test("a long multi-line draft keeps the line being typed in view", async (t) => 
   await page.keyboard.type("last");
   assert.ok(await page.evaluate(() => { const i = document.getElementById("input"); return i.scrollTop + i.clientHeight >= i.scrollHeight - 2; }), "caret line visible");
 });
+
+test("a message sent while Pi works shows as a dim 'Steering:' line, not a chat bubble; Esc stops Pi", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", busy: true, messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.locator("#input").focus();
+  await page.route("**/prompt", () => {});
+  await page.keyboard.type("also check tests");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector("#messages .steer-line");
+  assert.equal(await page.locator("#messages .steer-line").textContent(), "Steering: also check tests");
+  assert.equal(await page.locator("#messages .msg.user .bubble", { hasText: "also check tests" }).count(), 0);
+  const abort = page.waitForRequest((r) => r.url().includes("/abort"));
+  await page.keyboard.press("Escape");
+  await abort;
+});
