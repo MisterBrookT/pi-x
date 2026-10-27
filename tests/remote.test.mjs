@@ -791,7 +791,7 @@ test("iPad / wide: drag the sessions edge to resize (remembered), ⌘B hides ses
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
   page.on("pageerror", e => { throw e; });
-  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; localStorage.pixTextSize = "100"; });
   await page.goto(`${base}/#token=${token}`);
   await page.waitForSelector("#messages .msg");
   const listW = () => page.evaluate(() => Math.round(document.querySelector(".list").getBoundingClientRect().width));
@@ -887,4 +887,29 @@ test("⌘V with a copied image attaches it (iPad has no + button)", async (t) =>
     document.querySelector("#input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
   });
   await page.waitForSelector("#attachment:not([hidden])", { timeout: 5000 });
+});
+
+test("iPad input: a click anywhere in it types (no + menu), it spans the width, and ⌘+ / ⌘− / ⌘0 change text size", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 }, screen: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  const box = await page.locator(".box").boundingBox();
+  await page.mouse.click(box.x + box.width - 20, box.y + box.height / 2);
+  assert.equal(await page.evaluate(() => document.activeElement.id), "input");
+  assert.equal(await page.locator("#actions").isVisible(), false, "no upload menu");
+  const w = await page.evaluate(() => document.querySelector("#input").getBoundingClientRect().width / document.querySelector(".box").getBoundingClientRect().width);
+  assert.ok(w > 0.95, "the text area fills the line, so words do not wrap early: " + w);
+  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.15", "auto: bigger on iPad");
+  await page.keyboard.press("Meta+=");
+  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.3");
+  await page.keyboard.press("Meta+0");
+  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.15");
 });
