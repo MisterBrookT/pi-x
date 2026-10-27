@@ -801,10 +801,12 @@ test("iPad / wide: drag the sessions edge to resize (remembered), ⌘B hides ses
   await page.reload(); await page.waitForSelector("#messages .msg");
   assert.ok(Math.abs((await listW()) - 250) <= 2, "width remembered");
   await page.keyboard.press("Meta+b");
+  await page.waitForTimeout(400);
   assert.equal(await page.locator(".list").isVisible(), false, "⌘B hides sessions");
   await page.keyboard.press("Meta+b");
   assert.equal(await page.locator(".list").isVisible(), true);
   await page.keyboard.press("Meta+Shift+L");
+  await page.waitForTimeout(400);
   assert.equal(await page.locator(".list").isVisible(), false, "⌘⇧L hides sessions, like Otty");
   await page.keyboard.press("Meta+Shift+L");
   await page.keyboard.press("Meta+Shift+I");
@@ -816,4 +818,24 @@ test("iPad / wide: drag the sessions edge to resize (remembered), ⌘B hides ses
   const r = await page.evaluate(() => ({ main: document.querySelector(".main").getBoundingClientRect().right, files: document.getElementById("filesPanel").getBoundingClientRect().left, shade: getComputedStyle(document.getElementById("shade")).opacity }));
   assert.ok(r.main <= r.files + 1, "files sit beside the chat, not over it");
   assert.equal(r.shade, "0", "no grey shade over the chat");
+});
+
+test("⌘⇧L slides the sessions panel out instead of snapping (wide screens)", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.keyboard.press("Meta+Shift+L");
+  const mid = await page.evaluate(() => document.querySelector(".list").getBoundingClientRect().right);
+  assert.ok(mid > 5, "still partly on screen right after the key: it animates");
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator(".list").isVisible(), false, "hidden at the end");
+  assert.ok(await page.evaluate(() => document.querySelector(".main").getBoundingClientRect().left) < 2, "chat takes the full width");
 });
