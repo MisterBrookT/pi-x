@@ -1,0 +1,44 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { chromium } from "playwright";
+import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
+import { relayAllowed } from "../plugins/remote/remote-relay-agent.ts";
+
+const token = "a".repeat(32);
+const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+
+test("a folder with more than 3 images shows a 4-tile album with +N; the viewer steps through them in name order", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "pix-album-"));
+  const dir = join(home, "review"); mkdirSync(dir);
+  const png = join(home, "x.png");
+  execFileSync("sips", ["-s", "format", "png", "-z", "40", "40", "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericDocumentIcon.icns", "--out", png], { stdio: "ignore" });
+  for (let i = 1; i <= 10; i++) execFileSync("cp", [png, join(dir, `page-${i}.png`)]);
+  writeFileSync(join(dir, "notes.txt"), "x");
+  const hub = await startRemoteHub({ token, port: 0, home });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: dir, messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.locator("#filesButton").click();
+  await page.waitForSelector("#fileList .album");
+  assert.equal(await page.locator("#fileList .album [data-album-i]").count(), 4);
+  assert.equal(await page.locator("#fileList .album .more").textContent(), "+6");
+  await page.waitForFunction(() => document.querySelector("#fileList .album img")?.src.startsWith("data:image/jpeg"));
+  await page.locator("#fileList .album [data-album-i]").nth(1).click();
+  assert.equal(await page.locator("#ivCount").textContent(), "2 / 10");
+  await page.locator("#ivNext").click();
+  assert.equal(await page.locator("#ivCount").textContent(), "3 / 10", "page-3 follows page-2 (name order, not page-10)");
+  await page.keyboard.press("ArrowLeft"); await page.keyboard.press("ArrowLeft"); await page.keyboard.press("ArrowLeft");
+  assert.equal(await page.locator("#ivCount").textContent(), "10 / 10", "wraps around");
+  await page.waitForFunction(() => document.querySelector("#fullImage").src);
+  assert.ok(relayAllowed("/api/sessions/s1/file/thumb?path=/x", "GET"), "thumbnails reach the phone through the relay");
+});

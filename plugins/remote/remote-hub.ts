@@ -13,6 +13,7 @@ import { launchableFolder, listFolders, pastSessions, resumableSession, listMemo
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, saveUpload, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { previewRemoteDocument } from "./remote-document-preview.ts";
+import { remoteThumbnail } from "./remote-thumb.ts";
 import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "../desktop/remote-desktop.ts";
 import { createDesktopCredentialStore, type DesktopCredentialStore } from "../desktop/remote-desktop-credentials.ts";
 import { createDesktopInput, createDesktopInputController, type DesktopInputController } from "../desktop/remote-desktop-input.ts";
@@ -427,7 +428,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         const { status, ...result } = editMatch[2] === "source" ? readEditable(url.searchParams.get("path"), roots) : saveEditable(await body(req), roots);
         return send(res, status, result);
       }
-      const fileMatch = path.match(/^\/api\/sessions\/([^/]+)\/(files|file|file\/preview)$/);
+      const fileMatch = path.match(/^\/api\/sessions\/([^/]+)\/(files|file|file\/preview|file\/thumb)$/);
       if (req.method === "GET" && fileMatch) {
         const session = sessions.get(decodeURIComponent(fileMatch[1]));
         if (!session) return send(res, 404, { error: "session is no longer connected" });
@@ -440,6 +441,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (fileMatch[2] === "file") {
           const { status, ...chunk } = readRemoteChunk(target, Number(url.searchParams.get("offset")) || 0, roots);
           return send(res, status, chunk);
+        }
+        if (fileMatch[2] === "file/thumb") {
+          const { status, ...result } = await remoteThumbnail(target, roots);
+          return send(res, status, result);
         }
         const file = checkRemotePath(target, roots);
         if (file && !file.dir && (file.kind === "pdf" || file.kind === "slides")) {
