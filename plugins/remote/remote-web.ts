@@ -673,7 +673,7 @@ const appearanceLabels={warm:'Warm',neutral:'Neutral',cool:'Cool',aurora:'Aurora
 // so every part (chat, sidebar, footer) scales together. ⌘+ / ⌘− / ⌘0 change it on this device.
 const textSizes=['auto','90','100','115','130','150'];
 function textSizeValue(){try{return textSizes.includes(localStorage.pixTextSize)?localStorage.pixTextSize:'auto'}catch{return 'auto'}}
-function textScale(){const v=textSizeValue();if(v!=='auto')return +v/100;const w=Math.min(screen.width,screen.height);return w>=1000?1.25:w>=740?1.15:1}
+function textScale(){const v=textSizeValue();if(v!=='auto')return +v/100;const w=Math.max(innerWidth,screen.width);return w>=1600?1.4:w>=1000?1.3:w>=761?1.2:1}
 function setTextSize(v){try{localStorage.pixTextSize=v}catch{}applyAppearance();for(const b of document.querySelectorAll('[data-text-size]'))b.setAttribute('aria-checked',String(b.dataset.textSize===v))}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-text-size]');if(b)setTextSize(b.dataset.textSize)});
 document.addEventListener('keydown',e=>{if(!(e.metaKey||e.ctrlKey)||e.altKey||!['=','+','-','0'].includes(e.key))return;e.preventDefault();e.stopImmediatePropagation();if(e.key==='0')return setTextSize('auto');
