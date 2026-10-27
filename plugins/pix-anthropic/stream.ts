@@ -651,6 +651,14 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				const send = async (acc: Account) => {
 					const h = { ...headers };
 					if (acc.configDir && oauth) h.Authorization = `Bearer ${await readClaudeToken(acc.configDir)}`;
+					const res = await doFetch(url, { method: "POST", headers: h, body: serialized, signal: options?.signal });
+					// Claude Code rotates the login token (and revokes the old one) when any `claude` run
+					// refreshes it. A token read moments earlier then gets 401: re-read it once and retry.
+					if (res.status !== 401 || !oauth || options?.signal?.aborted) return res;
+					const fresh = await readClaudeToken(acc.configDir).catch(() => undefined);
+					if (!fresh || h.Authorization === `Bearer ${fresh}`) return res;
+					await res.body?.cancel().catch(() => undefined);
+					h.Authorization = `Bearer ${fresh}`;
 					return doFetch(url, { method: "POST", headers: h, body: serialized, signal: options?.signal });
 				};
 				const order = plan();
@@ -661,8 +669,8 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 						res = await send(order[n]!);
 						if (res.ok || options?.signal?.aborted || n === order.length - 1) break;
 						const t = await res.clone().text().catch(() => "");
-						if (!isQuota(res.status, t)) break;
-						coolDown(order[n]!.id, res.headers);
+						if (!isQuota(res.status, t) && res.status !== 401) break;
+						if (res.status !== 401) coolDown(order[n]!.id, res.headers);
 						if (config.debug) process.stderr.write(`[pix-anthropic] ${order[n]!.id} ${res.status}; trying ${order[n + 1]!.id}\n`);
 						await res.body?.cancel().catch(() => undefined);
 					}
