@@ -16,6 +16,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { selectedTools, toolSettings, type ToolSettings } from "./tool-settings.ts";
 import { CAPABILITIES, defaultToolMode, toolChoice } from "./tool-panel.ts";
 import { DISCOVERY_STATE, GOAL_TOOL_STATE, GOAL_TOOL_PERMISSION } from "./tool-discovery.ts";
+import { applyBashBackstop } from "./bash-timeout.ts";
 
 const TOOL_SEARCH = "tool_search";
 
@@ -76,6 +77,7 @@ export default function (pi: ExtensionAPI, settings: ToolSettings = toolSettings
 
   // Deferred tools stay callable from codemode whether active or not; an explicit off must hold there too.
   pi.on("tool_call", (event) => {
+    applyBashBackstop(event);
     if (toolChoice(event.toolName, settings.read()) !== false) return;
     return { block: true, reason: `${event.toolName} is disabled by the user. Only the user may enable it through /tool.` };
   });
