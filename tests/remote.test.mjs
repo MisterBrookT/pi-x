@@ -804,6 +804,13 @@ test("iPad / wide: drag the sessions edge to resize (remembered), ⌘B hides ses
   assert.equal(await page.locator(".list").isVisible(), false, "⌘B hides sessions");
   await page.keyboard.press("Meta+b");
   assert.equal(await page.locator(".list").isVisible(), true);
+  await page.keyboard.press("Meta+Shift+L");
+  assert.equal(await page.locator(".list").isVisible(), false, "⌘⇧L hides sessions, like Otty");
+  await page.keyboard.press("Meta+Shift+L");
+  await page.keyboard.press("Meta+Shift+I");
+  await page.waitForTimeout(400);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("files-open")), true, "⌘⇧I opens files, like Otty");
+  await page.keyboard.press("Meta+Shift+I");
   await page.keyboard.press("Meta+e");
   await page.waitForTimeout(400);
   const r = await page.evaluate(() => ({ main: document.querySelector(".main").getBoundingClientRect().right, files: document.getElementById("filesPanel").getBoundingClientRect().left, shade: getComputedStyle(document.getElementById("shade")).opacity }));
