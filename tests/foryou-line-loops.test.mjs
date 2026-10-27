@@ -76,3 +76,23 @@ test("live ids like loop-546a09e3 route to that session even when its loop waits
 	assert.equal(answerCard("546a09e3", "do", { dir: d, live: ids }).into, "loop-546a09e3");
 	assert.equal(sessionLine("loop-546a09e3", setup(loop("q", { status: "pending", session: "loop-546a09e3" })))?.id, "kairos");
 });
+
+test("For you's lines list shows a loop run by another session with that session, not the line owner", async t => {
+	const { chromium } = await import("playwright");
+	const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
+	const tk = "l".repeat(32), hub = await startRemoteHub({ token: tk, port: 0 });
+	const browser = await chromium.launch();
+	t.after(async () => { await browser.close(); await hub.close(); });
+	const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+	await page.goto(`http://127.0.0.1:${hub.port}/#token=${tk}`);
+	await page.waitForFunction(() => typeof linesParts === "function");
+	const html = await page.evaluate(() => {
+		sessions = [{ id: "m1", name: "minara-1" }, { id: "m2", name: "minara-2" }];
+		forYou = { lines: [{ id: "kairos", name: "Kairos launch", open: 2, mode: "working", owner: { id: "m1", name: "minara-1", status: "launch prep", at: new Date().toISOString() },
+			loops: [{ id: "launch", title: "Launch checklist", session: "m1", status: "onit" }, { id: "docs", title: "Polish docs", session: "m2", status: "onit", last: "minara-2: Docs pushed." }] }] };
+		return linesParts(true).body;
+	});
+	assert.match(html, /data-loop-session="m2"><b>minara-2<\/b> · Polish docs<small>Docs pushed\.<\/small>/);
+	assert.doesNotMatch(html, /data-loop-session="m1"/, "the owner's own loop is not repeated");
+	assert.match(html, /minara-1/);
+});
