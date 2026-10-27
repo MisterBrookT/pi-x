@@ -867,3 +867,24 @@ test("iPad gets a Pi-style footer under the input (pins open, model · thinking 
   assert.equal(await phone.locator("#piFooter").isVisible(), false);
   assert.equal(await phone.locator("#modelChip").isVisible(), true);
 });
+
+test("⌘V with a copied image attaches it (iPad has no + button)", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.evaluate(async () => {
+    const c = document.createElement("canvas"); c.width = c.height = 8;
+    const blob = await new Promise(r => c.toBlob(r, "image/png"));
+    const dt = new DataTransfer(); dt.items.add(new File([blob], "shot.png", { type: "image/png" }));
+    document.querySelector("#input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForSelector("#attachment:not([hidden])", { timeout: 5000 });
+});
