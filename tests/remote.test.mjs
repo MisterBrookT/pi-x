@@ -909,9 +909,9 @@ test("iPad input: a click anywhere in it types (no + menu), it spans the width, 
   await page.locator("#input").focus();
   const w = await page.evaluate(() => document.querySelector("#input").getBoundingClientRect().width / document.querySelector(".box").getBoundingClientRect().width);
   assert.ok(w > 0.95, "the text area fills the line, so words do not wrap early: " + w);
-  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.3", "auto: bigger on iPad");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.3", "auto: bigger on iPad");
   await page.keyboard.press("Meta+=");
-  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.5");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.5");
   await page.keyboard.press("Meta+0");
-  assert.equal(await page.evaluate(() => document.documentElement.style.zoom), "1.3");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.3");
 });
