@@ -981,3 +981,25 @@ test("iPad footer shows the Mac footer's jobs, goal and waiting lines", async (t
   const text = await page.locator("#piFooter").innerText();
   for (const s of ["2 jobs", "goal: ship", "⏳ waiting: minara"]) assert.ok(text.includes(s), s);
 });
+
+test("iPad: typing anywhere goes straight into the message box, and Enter clears it at once (before the Mac answers)", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.locator("#messages").click();
+  await page.keyboard.type("hello there");
+  assert.equal(await page.locator("#input").inputValue(), "hello there");
+  await page.route("**/prompt", async (r) => { await new Promise((ok) => setTimeout(ok, 1500)); await r.continue(); });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator("#input").inputValue(), "", "box empties right away");
+});
