@@ -915,3 +915,24 @@ test("iPad input: a click anywhere in it types (no + menu), it spans the width, 
   await page.keyboard.press("Meta+0");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.scale), "1.3");
 });
+
+test("⌘⇧X snip: drag a box, the message box gets what is inside (element, size, font, text) and, where the browser allows, the picture", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }, { id: "b", role: "assistant", text: "Point at this reply" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; localStorage.pixTextSize = "100"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg.assistant");
+  const r = await page.locator("#messages .msg.assistant").boundingBox();
+  await page.keyboard.press("Meta+Shift+X");
+  await page.mouse.move(r.x - 5, r.y - 5); await page.mouse.down(); await page.mouse.move(r.x + r.width + 5, r.y + r.height + 5, { steps: 4 }); await page.mouse.up();
+  await page.waitForFunction(() => /Snip \d+×\d+/.test(document.querySelector("#input").value));
+  assert.match(await page.locator("#input").inputValue(), /msg\.assistant .*"Point at this reply/);
+  assert.equal(await page.locator("#snipLayer").count(), 0, "overlay gone");
+  await page.waitForSelector("#attachment:not([hidden])", { timeout: 3000 });
+});
