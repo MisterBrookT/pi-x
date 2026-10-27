@@ -501,6 +501,12 @@ test("⌘, opens and closes Settings, laid out as Otty-style cards", async (t) =
   await page.keyboard.press("Meta+Comma");
   await page.waitForSelector("#sheet.appearance-sheet:not([hidden])");
   assert.ok(await page.locator("#sheet .set-card .set-row").count() >= 4);
+  // Otty layout on wide screens: a section sidebar, 48px rows, a 22px title.
+  assert.ok(await page.locator("#sheet .set-nav button").count() >= 3);
+  assert.ok(await page.locator("#sheet .set-nav").isVisible());
+  await page.evaluate(() => { localStorage.pixTextSize = "100"; applyAppearance(); });
+  assert.ok(Math.abs((await page.locator("#sheet .set-row").first().boundingBox()).height - 48) <= 1.5);
+  assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById("sheetTitle")).fontSize), "22px");
   await page.keyboard.press("Meta+Comma");
   await page.waitForSelector("#sheet", { state: "hidden" });
 });
