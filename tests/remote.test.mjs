@@ -936,3 +936,32 @@ test("⌘⇧X snip: drag a box, the message box gets what is inside (element, si
   assert.equal(await page.locator("#snipLayer").count(), 0, "overlay gone");
   await page.waitForSelector("#attachment:not([hidden])", { timeout: 3000 });
 });
+
+test("iPad input behaves like Pi's editor: ↑/↓ browse earlier prompts, ⌃C clears, ⇧Tab cycles thinking", async (t) => {
+  const { chromium } = await import("playwright");
+  const hub = await startRemoteHub({ token, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  const actions = [];
+  hub.onAction?.((a) => actions.push(a));
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", thinking: "low", thinkingLevels: ["off", "low", "high"], messages: [{ id: "a", role: "user", text: "first ask" }, { id: "b", role: "assistant", text: "ok" }, { id: "c", role: "user", text: "second ask" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${token}`);
+  await page.waitForSelector("#messages .msg");
+  await page.locator("#input").focus();
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await page.locator("#input").inputValue(), "second ask");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await page.locator("#input").inputValue(), "first ask");
+  await page.keyboard.press("ArrowDown"); await page.keyboard.press("ArrowDown");
+  assert.equal(await page.locator("#input").inputValue(), "", "back to the empty draft");
+  await page.keyboard.type("some draft");
+  await page.keyboard.press("Control+c");
+  assert.equal(await page.locator("#input").inputValue(), "");
+  const req = page.waitForRequest((r) => r.url().includes("/action") && r.method() === "POST");
+  await page.keyboard.press("Shift+Tab");
+  assert.deepEqual(JSON.parse((await req).postData()), { action: "thinking", value: "high" });
+});
