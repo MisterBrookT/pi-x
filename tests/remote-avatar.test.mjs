@@ -10,7 +10,7 @@ const script = remoteAppHtml.match(/<script>([\s\S]*?)<\/script>/)[1];
 const pick = prefix => script.split("\n").find(line => line.startsWith(prefix)) ?? assert.fail(`missing ${prefix}`);
 const app = runInNewContext([
   pick("const esc="), pick("const shibaFace="), pick("function avatarHtml"), pick("function avatarMood"), pick("function helperLine"),
-  pick("function imagesHtml"), pick("function tool("), pick("function background("), pick("function activity("), pick("function transcript("), pick("let transcriptRun"),
+  pick("function imagesHtml"), pick("function tool("), pick("function skillRow("), pick("function background("), pick("function activity("), pick("function transcript("), pick("let transcriptRun"),
   "({ transcript, avatarMood, helperLine, run: () => transcriptRun })",
 ].join("\n"), { current: { id: "s" }, loadedImages: new Map() });
 

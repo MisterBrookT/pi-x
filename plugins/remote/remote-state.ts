@@ -38,6 +38,8 @@ export interface RemoteTool {
   output?: string;
   isError?: boolean;
   images?: RemoteImage[];
+  /** Set when the call read a skill's SKILL.md: shown as "Skill loaded", not as a plain read. */
+  skill?: { name: string; description: string };
 }
 
 export interface RemoteBackground {
@@ -81,6 +83,17 @@ function toolLabel(args: any): string | undefined {
   return typeof value === "string" ? value.replace(/\s+/g, " ").slice(0, 120) : undefined;
 }
 
+const skillPath = /(?:^|\/)([^/]+)\/SKILL\.md$/;
+/** A read of `<name>/SKILL.md` is a skill load; name and description come from its frontmatter when present. */
+function skillOf(name: string, args: any, output: string): RemoteTool["skill"] {
+  const path = name === "read" && typeof args?.path === "string" ? args.path : "";
+  const dir = path.match(skillPath)?.[1];
+  if (!dir) return undefined;
+  const front = output.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
+  const field = (key: string) => front.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^["']|["']$/g, "") ?? "";
+  return { name: field("name") || dir, description: field("description").slice(0, 240) };
+}
+
 function stringify(value: unknown): string {
   if (typeof value === "string") return value;
   try { return JSON.stringify(value, null, 2); } catch { return String(value); }
@@ -109,6 +122,7 @@ const loopPromptHtml = (s: { title: string; you?: string }, text: string) => `<p
 export function remoteMessages(messages: readonly any[], files?: MentionContext): RemoteMessage[] {
   const result: RemoteMessage[] = [];
   const tools = new Map<string, RemoteTool>();
+  const args = new Map<string, any>();
   messages.forEach((message, index) => {
     const timestamp = typeof message?.timestamp === "number" ? message.timestamp : 0;
     const id = `${timestamp}-${index}`;
@@ -124,6 +138,7 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
         .filter((part: any) => part?.type === "toolCall")
         .map((part: any) => ({ id: String(part.id), name: String(part.name), input: clip(stringify(part.arguments), 2_000), label: toolLabel(part.arguments) }));
       for (const call of calls) tools.set(call.id, call);
+      for (const part of parts) if (part?.type === "toolCall") args.set(String(part.id), part.arguments);
       const text = textOf(parts);
       const error = message.stopReason === "error" && message.errorMessage ? `Error: ${message.errorMessage}` : "";
       if (!calls.length && !error && /^\s*No change\.?\s*$/i.test(text)) return;
@@ -133,6 +148,8 @@ export function remoteMessages(messages: readonly any[], files?: MentionContext)
       if (call) {
         call.output = clip(textOf(message.content), 4_000);
         call.isError = Boolean(message.isError);
+        const skill = call.isError ? undefined : skillOf(call.name, args.get(call.id), textOf(message.content));
+        if (skill) call.skill = skill;
         const images = imagesOf(message.content);
         if (images.length) call.images = images;
       }
