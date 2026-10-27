@@ -483,3 +483,24 @@ test("phone: an image that fails during a reconnect is retried before showing 'I
   assert.match(script, /seenSessions\.get\(id\)/, "switching shows the last copy of that agent at once");
   assert.match(remoteAppHtml, /#messages\.swap\{animation:pixSwap/);
 });
+
+test("⌘, opens and closes Settings, laid out as Otty-style cards", async (t) => {
+  const { chromium } = await import("playwright");
+  const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
+  const tk = "c".repeat(32);
+  const hub = await startRemoteHub({ token: tk, port: 0 });
+  t.after(() => hub.close());
+  const base = `http://127.0.0.1:${hub.port}`;
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${tk}`, "content-type": "application/json" }, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.goto(`${base}/#token=${tk}`);
+  await page.waitForSelector("#messages .msg");
+  await page.keyboard.press("Meta+Comma");
+  await page.waitForSelector("#sheet.appearance-sheet:not([hidden])");
+  assert.ok(await page.locator("#sheet .set-card .set-row").count() >= 4);
+  await page.keyboard.press("Meta+Comma");
+  await page.waitForSelector("#sheet", { state: "hidden" });
+});

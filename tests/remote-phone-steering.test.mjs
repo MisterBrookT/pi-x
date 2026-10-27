@@ -42,7 +42,8 @@ import { renderRemoteMarkdown } from '../plugins/remote/remote-markdown.ts';
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.getByText('The build check is still running.', { exact: false }).waitFor();
   const steering = 'Please prioritize the regression test before changing the implementation.';
-  const bubble = page.locator('#messages .msg.user .bubble').filter({ hasText: steering });
+  // Pending steer shows as a dim 'Steering:' line (like Pi); once the Mac records it, it becomes a normal bubble.
+  const bubble = page.locator('#messages .msg.user .bubble, #messages .msg.steer-line').filter({ hasText: steering });
   let releaseAck;
   const ack = new Promise(resolveAck => { releaseAck = resolveAck; });
   let received;
