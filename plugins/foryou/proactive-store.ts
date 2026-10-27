@@ -105,7 +105,7 @@ export function forYouView(dir?: string, now = Date.now()) {
 			const waitsOnYou = open.some(i => needsYou(i, now));
 			// What the line is waiting on, in words: its open loops (title + whether brook or a session holds it).
 			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), status: i.status, ...(i.session ? { session: i.session } : {}), ...(i.note ? { last: i.note.split("\n").at(-1)!.replace(/^- [\d-]+: /, "") } : {}) }));
-			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
+			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), sessions: [...new Set([owner?.id, ...open.map(i => i.session)].filter((x): x is string => !!x && x !== forYouSession.id))], open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
 		}),
 		watching,
 		problems,
@@ -431,10 +431,10 @@ export function workOwner(it: Item, live: LiveSession[], dir?: string): { id: st
 	return undefined;
 }
 
-/** The line a session works on: the one it owns, else the line of an open loop it holds. */
+/** The line a session works on: the one it owns, else the line of an open loop it holds (on it or waiting on brook). */
 export function sessionLine(id: string, dir?: string): Line | undefined {
 	const lines = liveLines(dir);
-	const loopLine = () => readAll(dir).find(i => i.session === id && i.status === "onit" && i.line && lines.some(l => l.id === i.line))?.line;
+	const loopLine = () => readAll(dir).find(i => i.session === id && isOpen(i) && i.line && lines.some(l => l.id === i.line))?.line;
 	return lines.find(l => l.owner?.id === id) ?? lines.find(l => l.id === loopLine());
 }
 

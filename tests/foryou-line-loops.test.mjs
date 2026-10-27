@@ -66,4 +66,13 @@ test("one grouped line card lists each loop with its own session and latest stat
 	const byId = Object.fromEntries(lines[0].loops.map(l => [l.id, l]));
 	assert.equal(byId.docs.session, "m2"); assert.equal(byId.docs.last, "minara-2: Docs pushed."); assert.equal(byId.docs.status, "onit");
 	assert.equal(byId.launch.session, "m1"); assert.equal(byId.launch.last, undefined);
+	assert.deepEqual(lines[0].sessions, ["m1", "m2"], "every session on the line, owner first");
+});
+
+test("live ids like loop-546a09e3 route to that session even when its loop waits on brook", () => {
+	const ids = [{ id: "loop-546a09e3", name: "minara-2", cwd: "/w/minara" }, { id: "loop-24187005", name: "minara-1", cwd: "/w/minara" }];
+	const d = setup(loop("546a09e3", { status: "pending", session: "loop-546a09e3" }));
+	assert.deepEqual(workOwner(inbox(d)[0], ids, d), { id: "loop-546a09e3", name: "minara-2", role: "loop" });
+	assert.equal(answerCard("546a09e3", "do", { dir: d, live: ids }).into, "loop-546a09e3");
+	assert.equal(sessionLine("loop-546a09e3", setup(loop("q", { status: "pending", session: "loop-546a09e3" })))?.id, "kairos");
 });
