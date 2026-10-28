@@ -40,7 +40,7 @@ for (const finishWhileBusy of [false, true]) {
 					role: "assistant", api: model.api, provider: model.provider, model: model.id,
 					content: index === 0
 						? [{ type: "toolCall", id: "start-job", name: "background", arguments: { action: "start", command } }]
-						: [{ type: "text", text: index === 1 ? "waiting for completion." : "Continued automatically." }],
+						: [{ type: "text", text: index === 1 ? "Waiting for completion." : "Continued automatically." }],
 					stopReason: index === 0 ? "toolUse" : "stop", timestamp: Date.now(),
 					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
 				};
