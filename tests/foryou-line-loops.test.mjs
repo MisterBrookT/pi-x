@@ -92,7 +92,7 @@ test("For you's lines list shows a loop run by another session with that session
 			loops: [{ id: "launch", title: "Launch checklist", session: "m1", status: "onit" }, { id: "docs", title: "Polish docs", session: "m2", status: "onit", last: "minara-2: Docs pushed." }] }] };
 		return linesParts(true).body;
 	});
-	assert.match(html, /data-loop-session="m2"><b>minara-2<\/b> · Polish docs<small>Docs pushed\.<\/small>/);
+	assert.match(html, /data-loop-session="m2"><b>minara-2<\/b> Polish docs<small>Docs pushed\.<\/small>/);
 	assert.doesNotMatch(html, /data-loop-session="m1"/, "the owner's own loop is not repeated");
 	assert.match(html, /minara-1/);
 });

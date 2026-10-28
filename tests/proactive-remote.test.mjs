@@ -321,7 +321,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   await p1.waitFor(); await p2.waitFor();
   await put(true);
   await page.locator("#messages .fy-status").waitFor({ timeout: 8000 });
-  assert.match(await page.locator("#messages .fy-status").textContent(), /^Thinking…$/);
+  assert.match(await page.locator("#messages .fy-status").textContent(), /^Thinking$/);
   assert.equal(await p1.count(), 1, "posts stay put while it works");
   await put(false);
   const q1 = await openPost(page.locator("#messages"), "k1");
@@ -447,7 +447,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   const hub = await startRemoteHub({ token, port: 0, home: dir, plugins: [forYouHub({ dir })] });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
-  const put = (extra) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: true, messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "", tools: [{ id: "t1", name: "bash", label: "ls -t ~/.pi/agent/chat", input: "ls", output: "x" }, ...extra] }], ...(extra.length ? {} : { peerWait: "Waiting for pix" }) }) });
+  const put = (extra) => fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: true, messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "", tools: [{ id: "t1", name: "bash", label: "ls -t ~/.pi/agent/chat", input: "ls", output: "x" }, ...extra] }], ...(extra.length ? {} : { peerWait: "waiting for pix" }) }) });
   await put([{ id: "t2", name: "chat", label: "send to pix" }]);
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
@@ -456,12 +456,12 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   await page.goto(`${base}/#token=${token}`);
   const st = page.locator("#messages .fy-status");
   await st.waitFor();
-  assert.match(await st.textContent(), /^Messaging a session…$/);
+  assert.match(await st.textContent(), /^Messaging a session$/);
   for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing", "#messages .job-card"]) assert.equal(await page.locator(sel).count(), 0, sel);
   assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
   await put([]);
-  await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
-  assert.match(await st.textContent(), /^Thinking… · Waiting for pix$/);
+  await page.waitForFunction(() => /waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
+  assert.match(await st.textContent(), /^Thinking, waiting for pix$/);
   assert.equal(await page.locator("#messages .fy-status").count(), 1, "one steady row, updated in place");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
@@ -757,6 +757,6 @@ test("post: main button is the job's next step, a draft is labelled as a draft, 
   assert.equal((await a.locator(".tl-acts .main").textContent()).trim(), "Send to wenzhen");
   assert.match(await a.locator(".tl-c-prepared .tl-t").textContent(), /^Draft for wenzhen/);
   const b = page.locator('.tl-post[data-fy="b"]').first();
-  assert.equal((await b.locator(".tl-acts .main").textContent()).trim(), "On it…");
+  assert.equal((await b.locator(".tl-acts .main").textContent()).trim(), "On it");
   assert.equal(await b.locator('[data-fy-do="do"]').count(), 0, "no second Do it");
 });

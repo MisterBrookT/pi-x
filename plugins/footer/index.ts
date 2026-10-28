@@ -48,7 +48,7 @@ export default function (pi: ExtensionAPI) {
   let memoryUrl: string | undefined, memoryNew = { at: 0, n: 0 };
   // "· N queued": For you batches held while brook is mid-thread (see core/foryou-queue.ts).
   let queued = { at: 0, n: 0 };
-  const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? ` · ${queued.n} queued` : ""; };
+  const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? `, ${queued.n} queued` : ""; };
   // "Docs 1 · Cookbook… +1": what this session pinned (core/artifacts.ts), each a terminal link straight to its target.
   let pinned: { at: number; links: { label: string; url: string }[] } = { at: 0, links: [] }, sessionId = "";
   const pinnedLinks = () => { if (Date.now() - pinned.at > 5000) const items = sessionId ? loadArtifacts(sessionId) : []; if (sessionId) void resolveLabels(sessionId, items).then(() => { pinned.at = 0; }); pinned = { at: Date.now(), links: artifactLinks(items, undefined, pinEnded(), mainLine()) }; return pinned.links; };
@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
         if (fastModeActiveFor(model)) right += " fast";
         const statuses = footerData.getExtensionStatuses();
         const account = model?.provider === "pix-anthropic" ? statuses.get("pix-account") : undefined;
-        if (account) right = `${account} · ${right}`;
+        if (account) right = `${account}  ${right}`;
         const work = statuses.get("pix-background");
         animate(Boolean(work));
         const frame = SUBAGENT_SPINNER_FRAMES[Math.floor(Date.now() / SUBAGENT_SPINNER_INTERVAL_MS) % SUBAGENT_SPINNER_FRAMES.length];
@@ -129,20 +129,20 @@ export default function (pi: ExtensionAPI) {
         // Narrow panes: the jobs label alone can be wider than the screen (crash 2026-10-15 at width 22).
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
-        const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
+        const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(", ");
         const pins = pinnedLinks().map((l) => l.url ? `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07` : l.label).join("  ");
-        const linkText = [...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const linkText = [...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join("  ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         // Pins always show (they are what brook looks for); the other links only when they fit.
-        const base = [pins, core].filter(Boolean).join(" · ");
-        const withLinks = [base, linkText].filter(Boolean).join(" · ");
+        const base = [pins, core].filter(Boolean).join("  ");
+        const withLinks = [base, linkText].filter(Boolean).join("  ");
         const status = (linkText && visibleWidth(withLinks) + 20 <= width ? withLinks : base) || undefined;
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
         // Who this session waits on (chat asks/handoffs) gets its own line.
         const waits = statuses.get("pix-chat-waits");
-        shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ") || undefined, waits: waits || undefined };
+        shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(", ") || undefined, waits: waits || undefined };
         // Always the last line, so the footer never jumps: "waiting: none" when nothing is pending.
         return [truncateToWidth(theme.fg("dim", location), width), stats, truncateToWidth(theme.fg("dim", waits || "waiting: none"), width)];
       },

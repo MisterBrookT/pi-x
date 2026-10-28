@@ -87,7 +87,7 @@ test("goal mode waits quietly for an actual background process and resumes from 
 	const g = await gate(t);
 	const h = await goalSession(t, ({ index, goal }) => {
 		if (index === 0) return call("background", { action: "start", command: g.command });
-		if (index === 1) return say("Waiting for the background result.");
+		if (index === 1) return say("waiting for the background result.");
 		if (index === 2) return finish(goal, "completed", "Background command returned result-marker.");
 		return say("Completed.");
 	});
@@ -108,7 +108,7 @@ for (const control of ["pause", "clear"]) {
 	test(`${control} prevents a goal-owned background completion from restarting the agent`, options, async (t) => {
 		const g = await gate(t);
 		const h = await goalSession(t, ({ index }) => index === 0
-			? call("background", { action: "start", command: g.command }) : say("Waiting for the background result."));
+			? call("background", { action: "start", command: g.command }) : say("waiting for the background result."));
 		await h.session.prompt("/goal Run this check.");
 		const [, response] = await g.request;
 		await h.until(() => h.requests.length === 2 && !h.session.isStreaming);
@@ -211,7 +211,7 @@ test("real public compaction retains an active goal and reinjects it afterward",
 test("a new session defaults to goal off while another session has an active goal", options, async (t) => {
 	const g = await gate(t);
 	const first = await goalSession(t, ({ index }) => index === 0
-		? call("background", { action: "start", command: g.command }) : say("Waiting for the result."));
+		? call("background", { action: "start", command: g.command }) : say("waiting for the result."));
 	await first.session.prompt("/goal Session-A-only objective.");
 	await g.request;
 	await first.until(() => first.requests.length === 2 && !first.session.isStreaming);

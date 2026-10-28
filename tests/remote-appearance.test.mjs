@@ -165,12 +165,12 @@ test("phone: several questions stack on one card; Submit sends one JSON array on
       ] });
     });
     assert.equal(await page.locator(".ask-many").count(), 1, "one card");
-    assert.match(await page.locator(".mq-nav").innerText(), /1\/2 · Scope/);
+    assert.match(await page.locator(".mq-nav").innerText(), /1\/2, Scope/);
     assert.equal(await page.locator('[data-mq="1"]').first().isVisible(), false, "one question at a time");
     const submit = page.locator("[data-mq-submit]");
     await page.locator('[data-mq="0"][data-mv="Full"]').click();
     assert.equal(await submit.isDisabled(), true, "waits for every answer");
-    await page.waitForFunction(() => /2\/2 · Deploy/.test(document.querySelector(".mq-nav").innerText), null, { timeout: 2000 });
+    await page.waitForFunction(() => /2\/2, Deploy/.test(document.querySelector(".mq-nav").innerText), null, { timeout: 2000 });
     await page.locator('[data-mq-other="1"]').fill("Friday");
     // Regression: going back and forward again must not wipe the typed answer or the pick.
     await page.locator('[data-mq-go="-1"]').click();
@@ -237,7 +237,7 @@ test("post page: every comment has a face, only brook's, the sender's words and 
     assert.doesNotMatch(await page.locator(".tl-thread").innerText(), /internal note/);
     const prog = page.locator(".tl-prog");
     assert.equal(await prog.getAttribute("data-fy-open"), "s1", "tap opens the owner session");
-    assert.match(await prog.innerText(), /minara · Working · 2 updates[\s\S]*Chart rendered, 3 of 4 done/);
+    assert.match(await prog.innerText(), /minara Working, 2 updates[\s\S]*Chart rendered, 3 of 4 done/);
   } finally { await browser.close(); server.close(); }
 });
 
@@ -293,7 +293,7 @@ test("regression: a failed send shows once (in the message box), not also as a c
     });
     assert.equal(r.rows, "", "no bubble for an unsent message");
     assert.equal(r.box, "", "arrived after all: no second copy");
-    assert.equal(r.dot, '"Reconnecting…"');
+    assert.equal(r.dot, '"Reconnecting"');
   } finally { await browser.close(); server.close(); }
 });
 
