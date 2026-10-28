@@ -104,9 +104,11 @@ export const docsComments: Adapter = {
 	async fetch(src) {
 		const file = docsCommentsFile(src);
 		if (!existsSync(file)) return [];
-		return readFileSync(file, "utf8").split("\n").filter(l => l.trim()).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
-			.filter(c => c?.id) // resolved ones stay listed (the cursor is the last line); the daemon skips them
-			.map(c => ({ id: String(c.id), time: String(c.time ?? c.at ?? c.created ?? ""), sender: String(c.author ?? "?").trim(),
+		// A status change is a new line with the same id: the latest line wins, at the place of the comment's last line.
+		const latest = new Map<string, any>();
+		for (const l of readFileSync(file, "utf8").split("\n")) { if (!l.trim()) continue; try { const c = JSON.parse(l); if (c?.id) { latest.delete(String(c.id)); latest.set(String(c.id), c); } } catch { /* skip */ } }
+		return [...latest.values()]
+			.map(c => ({ id: String(c.id), time: String(c.time ?? c.at ?? c.created ?? ""), ...(/^(resolved|done|closed|wontfix)$/i.test(String(c.status ?? "")) ? { resolved: true } : {}), ...(/test$|^test/i.test(String(c.author ?? "")) ? { test: true } : {}), sender: String(c.author ?? "?").trim(),
 				text: [`${c.page ?? "?"}${c.selector ? ` (${c.selector})` : ""}: ${String(c.text ?? "")}`, c.note ? `note: ${c.note}` : "", /^(resolved|done|closed|wontfix)$/i.test(String(c.status ?? "")) ? "[resolved]" : ""].filter(Boolean).join(" — ").slice(0, 1500) }));
 	},
 	howToRead: (src, refs) => `Website review comments in ${String(src.file ?? "~/workspace/tools/kdocs/comments.jsonl")} (one JSON line each; news-docs owns the site). Comment ids: ${refs.join(", ") || "n/a"}.`,

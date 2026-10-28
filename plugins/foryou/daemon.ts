@@ -28,6 +28,7 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
 import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
+import { behavior } from "../core/behavior.ts";
 import { watchDocs } from "./docs-watch.ts";
 import { docsCommentsFile } from "./proactive-sources.ts";
 import { addLive, clearLive, liveSourcesToCheck, readLive, repliedSince } from "./live-strip.ts";
@@ -48,7 +49,8 @@ const lastErr = new Map<string, string>();
 // Gmail login: checked at most hourly; a failure is one stable health entry.
 let gmail = { at: 0, state: "ok" as Awaited<ReturnType<typeof checkGmailAuth>>, since: "" };
 /** Fast-lane judge budget: batches per rolling hour (PIX_FAST_BUDGET). */
-const FAST_BUDGET = Number(process.env.PIX_FAST_BUDGET ?? 20);
+// Read per use from Settings (~/.pix/behavior.json), else PIX_FAST_BUDGET, else 20.
+const fastBudget = () => behavior("fastBudget");
 const fastJudged: number[] = [];
 const blockedApps = new Set<"wechat" | "dingtalk">();
 const accessBack = async () => { for (const a of blockedApps) if (await probeApp(a) !== "ok") return false; return true; };
@@ -178,7 +180,7 @@ async function tick(cfg: Config, fast = false, only?: Source[]) {
 			let msgs = await adapter.fetch(src);
 			// Fast lane: Gmail only from people For you knows; the rest waits for the full sweep (cursor not moved).
 			if (fast && src.fastKnownOnly) { const known = fromKnown(newSince(msgs, state[sourceKey(src)], state[`${sourceKey(src)}@t`]), knownPeople(memoryDir(P.dir))); if (!known.length) continue; }
-			if (fast && !underBudget(fastJudged, Date.now(), FAST_BUDGET)) { if (logOnce("fast: budget")) log(`fast: judge budget (${FAST_BUDGET}/h) used; the rest waits for the full sweep`); break; }
+			if (fast && !underBudget(fastJudged, Date.now(), fastBudget())) { if (logOnce("fast: budget")) log(`fast: judge budget (${fastBudget()}/h) used; the rest waits for the full sweep`); break; }
 			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
@@ -192,7 +194,9 @@ async function tick(cfg: Config, fast = false, only?: Source[]) {
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh: fresh0, context: ctx, judge: judge0 } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
 			// Unfiltered sources (review comments): his own comments count too; already-resolved ones are not sent.
-			const fresh = src.always ? fresh0.filter(m => !m.text.endsWith("[resolved]")) : fresh0, judge = src.always ? fresh.length > 0 : judge0;
+			// A comment resolved since its row was made clears that row (the strip shows only open comments).
+			if (src.always && !dry && msgs.some(m => (m as { resolved?: boolean }).resolved) && !msgs.some(m => !(m as { resolved?: boolean }).resolved && !(m as { test?: boolean }).test) && clearLive(key, P.dir)) log(`live: ${src.name} cleared (comments resolved)`);
+			const fresh = src.always ? fresh0.filter(m => !(m as { resolved?: boolean }).resolved && !(m as { test?: boolean }).test) : fresh0, judge = src.always ? fresh.length > 0 : judge0;
 			// His own message is the newest here: he has handled this chat; its live-strip row goes.
 			if (!dry && repliedSince(msgs, key, String(src.me ?? cfg.me), P.dir)) log(`live: ${src.name} cleared (brook replied)`);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.

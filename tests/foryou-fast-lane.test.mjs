@@ -47,7 +47,7 @@ test("daemon: fast tick every ~1 min on shared cursors; asks mid-thread go to Fo
 	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
 	assert.match(src, /tick\(cfg, true\)/);
 	assert.match(src, /fastSources\(cfg, state/);
-	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), FAST_BUDGET\)/);
+	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), fastBudget\(\)\)/);
 	assert.match(src, /filter\(f => f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private" \|\|/);
 	assert.match(src, /addLive\(P\.dir/);
 	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is marked");
@@ -218,7 +218,9 @@ test("Docs comments: a source with no filter; each new batch forwards (his own c
 	const daemon = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
 	assert.match(daemon, /if \(!state\[key\] && !src\.always\)/, "first comments are sent, not marked seen");
 	assert.match(daemon, /else if \(src\.always\) raw = JSON\.stringify\(\{ pass: true/, "no model filter");
-	assert.match(daemon, /src\.always \? fresh0\.filter\(m => !m\.text\.endsWith\("\[resolved\]"\)\)/);
+	assert.match(daemon, /src\.always \? fresh0\.filter\(m => !\(m as \{ resolved\?: boolean \}\)\.resolved && !\(m as \{ test\?: boolean \}\)\.test\)/, "resolved and test comments never forward or make a row");
+	assert.match(daemon, /clearLive\(key, P\.dir\)\) log\(`live: \$\{src\.name\} cleared \(comments resolved\)`\)/);
+	assert.match(daemon, /underBudget\(fastJudged, Date\.now\(\), fastBudget\(\)\)/, "budget read from Settings per use");
 	assert.match(daemon, /f\.source\.chat === "private" \|\| !!f\.source\.always\)/, "mid-chat: straight to For you + a strip row, never held");
 });
 
@@ -283,4 +285,16 @@ test("saveState with base merges by changed keys: a watch tick and a sweep runni
 	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
 	assert.match(src, /watchDocs\(file, \(\) => \{ log\(`docs-comments: watch -> forward/);
 	assert.match(src, /tick\(cfg, true, \[src\]\)/);
+});
+
+test("Docs comments 10-28: a later line with the same id (status change) wins; pinpoint-test lines are tests", async () => {
+	const { adapters } = await import("../plugins/foryou/proactive-sources.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-docs2-")), file = join(d, "comments.jsonl");
+	writeFileSync(file, [
+		{ id: "latency25734", author: "pinpoint-test", page: "/latency-test", text: "", status: "open", at: "2026-10-28T12:03:48.000Z" },
+		{ id: "k1", author: "Lowes", page: "/docs", text: "fix hero", status: "open", at: "2026-10-28T12:04:00.000Z" },
+		{ id: "latency25734", author: "pinpoint-test", page: "/latency-test", text: "", status: "resolved", at: "2026-10-28T12:03:49.000Z" },
+	].map(x => JSON.stringify(x)).join("\n"));
+	const msgs = await adapters["docs-comments"].fetch({ kind: "docs-comments", id: "kdocs", name: "Docs comments", always: true, file });
+	assert.deepEqual(msgs.map(m => [m.id, !!m.resolved, !!m.test, m.time]), [["k1", false, false, "2026-10-28T12:04:00.000Z"], ["latency25734", true, true, "2026-10-28T12:03:49.000Z"]]);
 });
