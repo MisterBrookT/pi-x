@@ -64,7 +64,7 @@ export interface RemoteSnapshot {
   rewinds?: { id: string; text: string }[];
 }
 
-export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" | "quiet" }
+export interface RemotePrompt { text: string; images: { mimeType: string; data: string }[]; mode?: "steer" | "followUp" | "quiet"; cid?: string }
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
@@ -527,7 +527,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           const cid = typeof input.cid === "string" && /^[\w-]{8,64}$/.test(input.cid) ? input.cid : "";
           if (cid) { const seen = (session as any).cids as string[] ?? ((session as any).cids = []); if (seen.includes(cid)) return send(res, 202, { queued: true, duplicate: true }); seen.push(cid); if (seen.length > 200) seen.shift(); }
           const mode = input.mode === "followUp" ? "followUp" : input.mode === "steer" ? "steer" : undefined;
-          session.prompts.push(images.length || mode ? { text: text.slice(0, 100_000), images, ...(mode ? { mode } : {}) } : text.slice(0, 100_000));
+          // The id travels on to Pi too: the hub's memory of ids is lost when it hands over to a newer process, Pi's is not.
+          session.prompts.push(images.length || mode || cid ? { text: text.slice(0, 100_000), images, ...(mode ? { mode } : {}), ...(cid ? { cid } : {}) } : text.slice(0, 100_000));
           if (session.waiter) { const w = session.waiter; session.waiter = undefined; w(session.prompts.splice(0)); }
           return send(res, 202, { queued: true });
         }

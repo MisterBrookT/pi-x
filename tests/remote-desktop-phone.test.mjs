@@ -89,9 +89,9 @@ async function setup(t, securityTypes, { failReads = 0, keychain, native, auto =
   return { page, rfb, errors, logs, opens: () => opens };
 }
 
-test('Mac screen asks for explicit Connect, reaches noVNC sign-in, and clears it on Close', async t => {
+test('Mac screen with auto-connect off waits for Connect, reaches noVNC sign-in, and clears it on Close', async t => {
   const { page, rfb, errors, opens } = await setup(t, [30]);
-  await page.getByText('full control of your Mac', { exact: false }).waitFor();
+  await page.locator('#desktopConnect').waitFor();
   assert.equal(opens(), 0, 'nothing opens before Connect');
   await page.locator('#desktopConnect').click();
   await page.locator('#desktopCredentials').waitFor({ state: 'visible' });
@@ -551,14 +551,20 @@ test('Mac screen connects on open, stays connected after Close, and reconnects b
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: false, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
   await page.locator('#desktopKeys').waitFor({ state: 'visible' });
   assert.equal(opens(), 2, 'came back by itself');
-  // Disconnect (in ⋯) really ends it and turns auto-connect off.
+  // Disconnect (in ⋯) really ends it and stops the background reconnect while the view stays open.
   await page.locator('#desktopMore').click();
   await page.locator('#desktopDisconnect').click({ force: true });
   await page.locator('#desktopIntro').waitFor({ state: 'visible' });
+  await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); });
+  await page.waitForTimeout(300);
+  assert.equal(opens(), 2, 'no background reconnect after Disconnect');
+  // Opening the Mac screen again is a request to connect: it connects at once, no explainer, no extra tap.
   await page.locator('#desktopClose').click();
   await page.locator('#menu').click();
+  resetRfb(rfb);
   await page.locator('#desktopOpen').click();
-  await page.waitForTimeout(300);
-  assert.equal(opens(), 2, 'no auto-connect after Disconnect');
+  await page.locator('#desktopKeys').waitFor({ state: 'visible' });
+  assert.equal(opens(), 3, 'reopening connects directly');
+  assert.equal(await page.getByText('full control of your Mac', { exact: false }).count(), 0, 'no explainer paragraph');
   assert.deepEqual(errors, []);
 });

@@ -75,6 +75,18 @@ test("a real Pi session lists its / commands for the phone, and a typed /name fr
   await fetch(`${base}/api/sessions/${id}/prompt`, { method: "POST", headers, body: JSON.stringify({ cid: "c1", text: "/name news-infra", images: [] }) });
   await until(x => x.name === "news-infra", "the session is renamed, no model turn");
   assert.equal(runtime.session.sessionManager.getSessionName(), "news-infra");
+  // Exactly once: the same phone retry (same cid) reaching Pi twice, as when the hub moved to a new process and
+  // forgot the ids it had seen (brook saw messages sent 2-3 times ~20 s apart), runs once.
+  const body = JSON.stringify({ cid: "c2-retry-same", text: "/name once-only", images: [] });
+  await fetch(`${base}/api/sessions/${id}/prompt`, { method: "POST", headers, body });
+  await until(x => x.name === "once-only", "first try delivered");
+  await fetch(`${base}/agent/${id}`, { method: "DELETE", headers }).catch(() => {});
+  let named = 0; const orig = runtime.session.sessionManager.appendSessionInfo.bind(runtime.session.sessionManager);
+  runtime.session.sessionManager.appendSessionInfo = n => { if (n === "once-only") named++; return orig(n); };
+  await until(x => x.id === id, "Pi re-registers with the hub");
+  await fetch(`${base}/api/sessions/${id}/prompt`, { method: "POST", headers, body });
+  await new Promise(r => setTimeout(r, 800));
+  assert.equal(named, 0, "the retry was not delivered a second time");
 });
 
 test("the phone rewinds a real Pi session to an earlier message, only among offered ones", async t => {

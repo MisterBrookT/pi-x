@@ -292,6 +292,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     pushTimer = setTimeout(() => { pushTimer = undefined; void push(); }, delay);
   };
 
+  const deliveredCids: string[] = [];
   const deliver = (prompt: string | RemotePrompt | RemoteAbort | RemoteAction) => {
     if (!ctx) return;
     // A quiet note (a For you card decision) waits for the next turn; it never starts one or answers a question.
@@ -299,6 +300,9 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       pi.sendMessage({ customType: "pix-foryou-note", content: prompt.text, display: true }, { deliverAs: "nextTurn" });
       return;
     }
+    // Exactly once: a phone retry whose first try did arrive (reply lost while the hub moved to a new process) is dropped here.
+    const cid = typeof prompt === "object" && typeof (prompt as any).cid === "string" ? (prompt as any).cid : "";
+    if (cid) { if (deliveredCids.includes(cid)) return; deliveredCids.push(cid); if (deliveredCids.length > 200) deliveredCids.shift(); }
     origin = "phone";
     if (typeof prompt === "object" && "abort" in prompt) { if (!ctx.isIdle()) ctx.abort(); return; }
     // Reload and New chat need a command context, so phone actions run through a Pix command.
@@ -324,7 +328,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       return;
     }
     if (typeof prompt === "object" && "action" in prompt) { pi.sendUserMessage(`/rc ${prompt.action}`, { expandPromptTemplates: true }); return; }
-    const content = typeof prompt === "string" ? prompt : [
+    const content = typeof prompt === "string" ? prompt : !prompt.images?.length ? prompt.text : [
       // Pi always sends a text part, and Anthropic rejects an empty one, so a photo-only message gets a short label.
       { type: "text" as const, text: prompt.text || "(photo)" },
       ...prompt.images.map(image => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
