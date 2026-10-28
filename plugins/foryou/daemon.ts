@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
-import { firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
+import { saveState, firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
@@ -163,7 +163,7 @@ async function tick(cfg: Config) {
 			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
-			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; } };
+			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; if (!dry) saveState(P.state, state); } };
 			if (!state[key]) { // new chat: the first daemon run marks all seen; later, judge what came since the last check
 				const { cursor } = firstSeen(msgs, state["@tick"], -new Date().getTimezoneOffset() / 60);
 				if (cursor.id === last || !last) { mark(); log(`${src.name}: cursor set (${msgs.length} msgs)`); continue; }
@@ -277,10 +277,17 @@ async function tick(cfg: Config) {
 		const held = readQueue(P.dir);
 		if (held.length && await hubPrepare(heldPrompt(held))) { clearQueue(P.dir); log(`held: ${held.length} batches delivered`); }
 	}
+	// WeChat screen read (the path replies go out on): a read-only capture + OCR sanity check every 30 min, so a blind
+	// capture (privacy cover, wrong window: 10-28) shows on For you instead of every send being refused. Never types.
+	if (!dry && cfg.sources.some(x => /wechat/i.test(x.kind)) && Date.now() - Date.parse(state["@wxscreen"] ?? "0") > 30 * 60_000) {
+		state["@wxscreen"] = new Date().toISOString();
+		const r = await wechatScreenCheck();
+		if (r.ok) fine.push("WeChat screen"); else { failed.push({ source: "WeChat screen", error: r.why }); if (logOnce(`WeChat screen: ${r.why}`)) log(`WeChat screen: ${r.why}`); }
+	}
 	// Sources that keep failing show at the top of For you (phone and Mac) until they work again.
 	if (!dry) {
 		const old = readJson<{ state?: Record<string, Problem> }>(P.health, {}).state ?? {};
-		const next = trackHealth(old, failed.filter((f, i, a) => a.findIndex(x => x.source === f.source) === i), fine, new Date().toISOString());
+		const next = trackHealth(old, failed.filter((f, i, a) => a.findIndex(x => x.source === f.source) === i), fine, new Date().toISOString(), sources.map(s => s.name));
 		// Last good read per source kind; a kind silent for 6+ h is a problem even when failures look sporadic.
 		const prev = readJson<{ seen?: Record<string, string> }>(P.health, {}).seen ?? {}, at = new Date().toISOString();
 		const seen = { ...prev }; for (const n of fine) { const k = sourceKind(n); if (k) seen[k] = at; }
@@ -307,9 +314,20 @@ async function tick(cfg: Config) {
 	}
 	await housekeeping(cfg, state, work);
 	state["@tick"] = tickStarted;
-	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
+	if (!dry) saveState(P.state, state);
 	log(`checked ${sources.length} sources`);
 }
+
+/** `wechat.ts check`: exit 0 = OCR reads WeChat. A locked Mac or a closed WeChat is not a broken path. */
+const wechatScreenCheck = (): Promise<{ ok: boolean; why: string }> => new Promise(done => {
+	const script = join(dirname(fileURLToPath(import.meta.url)), "..", "computer", "wechat.ts");
+	execFile(process.execPath, [script, "check"], { timeout: 90_000 }, (e, out) => {
+		const text = String(out ?? "").trim().split("\n").at(-1) ?? "";
+		if (!e) return done({ ok: true, why: "" });
+		if (/locked|not running|did not come|Can’t get|Can't get|Invalid index/i.test(text + String(e.message))) return done({ ok: true, why: "" });
+		done({ ok: false, why: `screen read broken (${text.replace(/^\[BLOCKED\] /, "").slice(0, 120) || e.message.slice(0, 120)})` });
+	});
+});
 
 /** brook is talking with For you (last 10 min), or For you is still busy / waiting on a handoff for him. */
 async function forYouThreadActive(): Promise<boolean> {

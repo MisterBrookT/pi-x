@@ -1,6 +1,7 @@
 // Proactive loop core: receive -> judge -> notify -> act.
 // Pure helpers only. Channels live in proactive-sources.ts; IO in plugins/foryou/daemon.ts,
 // the one list in proactive-store.ts (shared by the Mac pill and Pix Remote "For you").
+import { renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -417,9 +418,12 @@ export function problemText(error: string): string {
  * Track failing sources across ticks. A source counts as a problem after it failed `after` checks in a row;
  * one success clears it. Returns the new state (keyed by source name).
  */
-export function trackHealth(old: Record<string, Problem>, failed: { source: string; error: string }[], ok: string[], now: string): Record<string, Problem> {
+export function trackHealth(old: Record<string, Problem>, failed: { source: string; error: string }[], ok: string[], now: string, current?: string[]): Record<string, Problem> {
 	const next: Record<string, Problem> = {};
-	for (const [k, p] of Object.entries(old)) if (!ok.includes(k)) next[k] = p;
+	// A WeChat/DingTalk chat that dropped out of the recent-chats list is never read again, so its old error never
+	// cleared (10-15..10-20 "get_message talker : … limit :", a since-fixed argument format, still shown 10-28).
+	const gone = (k: string) => !!current && /^(WeChat|DingTalk): /.test(k) && !current.includes(k);
+	for (const [k, p] of Object.entries(old)) if (!ok.includes(k) && !gone(k)) next[k] = p;
 	for (const f of failed) next[f.source] = { source: f.source, since: old[f.source]?.since ?? now, times: (old[f.source]?.times ?? 0) + 1, error: problemText(f.error) };
 	return next;
 }
@@ -504,4 +508,15 @@ After each step, decide brook's next move yourself (a short, specific button, no
   If you prepared something for brook to approve (a reply draft, a message), add it as a 4th argument: the exact text he would send. It becomes the newest comment on his post and the main button sends it.
 - the whole loop is finished (nothing left to do): ${cli} finished ${it.id} "<what was done, one line>"
   (brook gets it back once to check and close; never leave a finished loop "on it")`;
+}
+
+/**
+ * Write the cursor state now (atomic: temp file + rename). Called on every cursor move, not only at the end of a
+ * tick: a daemon stopped mid-tick (launchd respawn, 10-28 07:14) lost every cursor of that tick, so the next
+ * process judged the same chats again ("15 new" twice, 2 min apart).
+ */
+export function saveState(file: string, state: Record<string, string>): void {
+	const tmp = `${file}.${process.pid}.tmp`;
+	writeFileSync(tmp, JSON.stringify(state, null, 2));
+	renameSync(tmp, file);
 }

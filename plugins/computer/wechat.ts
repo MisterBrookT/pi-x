@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TargetMismatchError, createCuaRuntime, type ComputerOperations } from "./computer-script.ts";
-import { type ScreenOperations, draftVisible, macScreenOperations, normalizeName } from "./computer-screen.ts";
+import { type ScreenCapture, type ScreenOperations, draftVisible, macScreenOperations, normalizeName } from "./computer-screen.ts";
 import { APP, Refused, clearDraft as clear, openChat, signed } from "./recipes/wechat.ts";
 
 export { Refused, signed };
@@ -31,12 +31,27 @@ const noBackend = new Proxy({}, {
 const open = openChat;
 const clearDraft = (screen: ScreenOperations) => clear(screen);
 
+/** Why a WeChat capture is not WeChat (no sidebar Search box), or "" when it looks right. */
+export const ocrProblem = (c: ScreenCapture): string => {
+	if (!c.lines.length) return "OCR read nothing";
+	const search = c.lines.some((l) => /^(search|搜索)$/i.test(l.text.trim()) && l.x < c.window.w * 0.45 && l.y < 80);
+	return search ? "" : `no Search box in the WeChat window; OCR read: ${c.lines.slice(0, 4).map((l) => l.text).join(" / ").slice(0, 80)}`;
+};
+
 export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (line: string) => void): Promise<number> => {
 	const [mode, rawChat, text] = argv;
 	// The CLI is the confirmation: brook approved recipient + text before `send`.
 	const { cua } = createCuaRuntime({ operations: noBackend, screen, confirm: async () => mode === "send" || mode === "sendnow" });
 	mkdirSync(STATE, { recursive: true });
 	try {
+		if (mode === "check") {
+			// Read-only health check: one capture, no activate, no keys. Junk OCR (the privacy-cover wallpaper read,
+			// "StU/Font/eCrazU", 10-28) fails loudly instead of every exact-name search being refused.
+			const why = ocrProblem(await screen.capture(APP));
+			if (why) { out(`[BLOCKED] WeChat screen read is broken: ${why}`); return 2; }
+			out("[OK] WeChat screen read looks right");
+			return 0;
+		}
 		if (mode === "find") {
 			await cua.recipe("wechat-find", { to: rawChat });
 			out(`[FOUND] exact '${normalizeName(rawChat ?? "")}' (not opened)`);
@@ -92,7 +107,7 @@ export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (
 			out("[CANCELLED] draft cleared");
 			return 0;
 		}
-		out("usage: find <chat> | prepare <chat> <text> | send | cancel");
+		out("usage: check | find <chat> | prepare <chat> <text> | send | cancel");
 		return 1;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

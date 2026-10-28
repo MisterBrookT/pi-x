@@ -117,6 +117,22 @@ const osa = (...lines: string[]) => run("osascript", lines.flatMap((line) => ["-
 const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "native");
 const CACHE = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "pix-computer");
 
+/**
+ * The app's main window from System Events' flat "x,y,w,h,…" list of every window: the largest. Window 1 can be a
+ * small pop-up (10-28: WeChat's 84×77 float came first, so OCR read nothing).
+ */
+export const mainWindow = (flat: string): [number, number, number, number] => {
+	const n = flat.split(",").map(Number);
+	const count = Math.floor(n.length / 4);
+	// System Events lists all positions first, then all sizes, when asked for {position, size} of every window.
+	let best: [number, number, number, number] = [n[0], n[1], n[2 * count] ?? n[2], n[2 * count + 1] ?? n[3]];
+	for (let i = 0; i < count; i += 1) {
+		const c: [number, number, number, number] = [n[2 * i], n[2 * i + 1], n[2 * count + 2 * i], n[2 * count + 2 * i + 1]];
+		if (c[2] * c[3] > best[2] * best[3]) best = c;
+	}
+	return best;
+};
+
 /** Build a small Swift helper once (rebuilt when its source changes). */
 const helper = async (name: "ocr" | "click" | "keys" | "clip" | "appshot"): Promise<string> => {
 	const src = join(NATIVE, `${name}.swift`);
@@ -193,8 +209,8 @@ export const macScreenOperations = (): ScreenOperations => {
 		},
 		async capture(app) {
 			// A background window captures blank, so read the region while the app is frontmost.
-			const bounds = (await osa(`tell application "System Events" to tell process ${JSON.stringify(app)} to get {position, size} of window 1`)).replace(/\s/g, "");
-			const [x, y, w, h] = bounds.split(",").map(Number);
+			const all = (await osa(`tell application "System Events" to tell process ${JSON.stringify(app)} to get {position, size} of every window`)).replace(/\s/g, "");
+			const [x, y, w, h] = mainWindow(all);
 			shots += 1;
 			const image = join(dir, `shot-${shots}.png`);
 			// The app's own windows, so the Pix privacy cover (which hides the screen) cannot blank the picture; else the region.

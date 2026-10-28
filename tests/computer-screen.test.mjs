@@ -295,3 +295,20 @@ test("wechat find: when cmd+f does not focus search (WeChat in the background), 
 	assert.ok(log.includes("click search"), log.join("\n"));
 	assert.ok(!log.some((l) => /^(open|SENT)/.test(l)), "find opens nothing");
 });
+
+test("wechat check: real WeChat OCR passes; the privacy-cover wallpaper read (StU/Font/eCrazU) fails loudly; nothing typed", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const log = [];
+	const mk = (lines) => ({ activate: async () => log.push("activate"), capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1164, h: 866 }, lines }), click: async () => log.push("click"), keys: async () => log.push("keys"), paste: async () => log.push("paste"), background: true });
+	const out = [];
+	assert.equal(await runWeChat(["check"], mk([line("Search", 100, 22), line("浙大 wenzhen师兄", 300, 20)]), (l) => out.push(l)), 0);
+	assert.equal(await runWeChat(["check"], mk([line("StU", 500, 400), line("Font", 520, 430), line("eCrazU", 560, 460)]), (l) => out.push(l)), 2);
+	assert.match(out.at(-1), /BLOCKED.*StU/);
+	assert.deepEqual(log, []);
+});
+
+test("capture picks the app's largest window, not a small pop-up listed first", async () => {
+	const { mainWindow } = await import("../plugins/computer/computer-screen.ts");
+	assert.deepEqual(mainWindow("523,809,259,131,84,77,1164,866"), [259, 131, 1164, 866]);
+	assert.deepEqual(mainWindow("259,131,1164,866"), [259, 131, 1164, 866]);
+});
