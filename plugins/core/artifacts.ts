@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pinLabel } from "./pin-label.ts";
 
 export type ArtifactKind = "doc" | "link" | "file";
-export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number; /** Open loops the session held when it pinned this; when all are closed the pin's job has ended. */ loops?: string[]; /** A cached semantic label (core/pin-label.ts). */ label?: string };
+export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number; /** Open loops the session held when it pinned this; when all are closed the pin's job has ended. */ loops?: string[]; /** A cached semantic label (core/pin-label.ts). */ label?: string; /** Retired when a newer pin pushed it past the 3 live ones; it stays in the full list. */ retired?: boolean; /** The line (lines.json id) of the session that pinned it. */ line?: string };
 
 export const artifactsDir = () => process.env.PIX_ARTIFACTS_DIR ?? join(homedir(), ".pix", "artifacts");
 const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
@@ -32,13 +32,15 @@ function save(session: string, items: Artifact[], dir: string) {
 }
 
 /** Pin (or retitle) an item; the same URL is kept once. Newest last. Returns the list. */
-export function pinArtifact(session: string, item: { title?: string; url: string; kind?: ArtifactKind; loops?: string[] }, dir = artifactsDir(), now = Date.now()): Artifact[] {
+export function pinArtifact(session: string, item: { title?: string; url: string; kind?: ArtifactKind; loops?: string[]; line?: string }, dir = artifactsDir(), now = Date.now()): Artifact[] {
 	const url = item.url.trim();
 	if (!url) return loadArtifacts(session, dir);
 	const old = loadArtifacts(session, dir);
 	const prev = old.find(x => x.url === url);
 	const title = (item.title?.trim() || prev?.title || url.split(/[/?#]/).filter(Boolean).pop() || url).slice(0, 120);
-	const items = [...old.filter(x => x.url !== url), { title, url, kind: item.kind ?? artifactKind(url), at: prev?.at ?? now, ...((item.loops ?? prev?.loops)?.length ? { loops: item.loops ?? prev?.loops } : {}) }].slice(-50);
+	const all = [...old.filter(x => x.url !== url), { title, url, kind: item.kind ?? artifactKind(url), at: prev?.at ?? now, ...((item.line ?? prev?.line) ? { line: item.line ?? prev?.line } : {}), ...((item.loops ?? prev?.loops)?.length ? { loops: item.loops ?? prev?.loops } : {}) }].slice(-50);
+	// At most 3 live pins per session: a 4th retires the oldest live one.
+	const live = all.filter(x => !x.retired), items = all.map(x => x.retired || live.indexOf(x) >= live.length - 3 ? x : { ...x, retired: true });
 	save(session, items, dir);
 	return items;
 }
@@ -64,16 +66,18 @@ export function artifactEnded(a: Artifact, o: { isOpen?: (loop: string) => boole
 	return /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(a.url) && !!o.prDone?.(a.url);
 }
 
-/** Footer: the newest 2 live pins, then "+N" for the rest (older or ended). Items are oldest first. */
-export function footerPins<T extends Artifact>(items: T[], ended: (a: T) => boolean = () => false, show = 2): { shown: T[]; more: number } {
-	const live = items.filter(a => !ended(a)).slice(-show).reverse();
+/** Footer: the newest 3 live pins, then "+N" for the rest (older or ended). Items are oldest first. */
+export function footerPins<T extends Artifact>(items: T[], ended: (a: T) => boolean = () => false, show = 3, main?: string): { shown: T[]; more: number } {
+	const ok = items.filter(a => !a.retired && !ended(a)), rev = ok.slice().reverse();
+	// The main line's pins first (newest first), then the newest others.
+	const live = [...rev.filter(a => main && a.line === main), ...rev.filter(a => !main || a.line !== main)].slice(0, show);
 	return { shown: live, more: items.length - live.length };
 }
 
-/** Terminal links straight to the targets: the newest 2 live pins by short label, then "+N". Files open as file:// URLs. */
-export function artifactLinks(items: Artifact[], home = homedir(), ended: (a: Artifact) => boolean = () => false): { label: string; url: string }[] {
+/** Terminal links straight to the targets: the newest 3 live pins by short label, then "+N". Files open as file:// URLs. */
+export function artifactLinks(items: Artifact[], home = homedir(), ended: (a: Artifact) => boolean = () => false, main?: string): { label: string; url: string }[] {
 	const target = (a: Artifact) => a.kind === "file" ? "file://" + encodeURI(a.url.replace(/^~(?=\/|$)/, home)) : a.url;
-	const { shown, more } = footerPins(items, ended);
+	const { shown, more } = footerPins(items, ended, 3, main);
 	return [...shown.map(a => ({ label: artifactShort(a), url: target(a) })), ...(more ? [{ label: `+${more}`, url: "" }] : [])];
 }
 

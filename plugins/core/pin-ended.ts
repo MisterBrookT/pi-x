@@ -31,3 +31,11 @@ export function prDone(url: string, gh: Gh = ghState): boolean {
 	return prs.get(url)!.done;
 }
 export const pinEnded = (dir = proactiveDir(), gh?: Gh) => (a: Artifact) => artifactEnded(a, { isOpen: id => { const i = loopMap(dir).get(id); return !i || OPEN.has(i.status); }, prDone: u => prDone(u, gh) });
+
+/** The line a session belongs to (owner or member), and brook's main line now: the most recently updated visible line. */
+export function lineOf(session: string, dir = proactiveDir()): string | undefined {
+	try { const v = JSON.parse(readFileSync(join(dir, "lines.json"), "utf8")); return (Array.isArray(v) ? v : []).find((l: any) => l && !l.hidden && (l.owner?.id === session || l.members?.includes?.(session)))?.id; } catch { return undefined; }
+}
+export function mainLine(dir = proactiveDir()): string | undefined {
+	try { const v = JSON.parse(readFileSync(join(dir, "lines.json"), "utf8")); return (Array.isArray(v) ? v : []).filter((l: any) => l && !l.hidden && l.updated && l.id !== "pix").sort((a: any, b: any) => String(b.updated).localeCompare(String(a.updated)))[0]?.id; } catch { return undefined; }
+}

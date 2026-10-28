@@ -85,6 +85,7 @@ test("footer links go straight to targets: one item -> 'Docs 1'; several -> newe
   assert.deepEqual(artifactLinks(loadArtifacts("s", d), "/Users/b"), [
     { label: "Demo", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
     { label: "Cookbook leaderboard", url: "https://decision.brooktang.fun/leaderboard?token=x" },
-    { label: "+2", url: "" },
+    { label: "Cookbook", url: "https://decision.brooktang.fun" },
+    { label: "+1", url: "" },
   ]);
 });
