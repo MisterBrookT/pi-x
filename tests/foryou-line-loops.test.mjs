@@ -96,3 +96,19 @@ test("For you's lines list shows a loop run by another session with that session
 	assert.doesNotMatch(html, /data-loop-session="m1"/, "the owner's own loop is not repeated");
 	assert.match(html, /minara-1/);
 });
+
+test("explicit members: a session on a line with no open loop and not the owner still belongs to it; owner and loops untouched", async () => {
+	const { applyLineEdits, parseLineEdits, writeLines } = await import("../plugins/foryou/proactive-lines.ts");
+	const d = setup(loop("done1", { status: "done", session: "run" }), loop("docs", { session: "m2" }));
+	assert.equal(sessionLine("run", d), undefined, "before: no owner, no open loop → no line");
+	const r = applyLineEdits(readLines(d), parseLineEdits([{ id: "kairos", join: ["run", "../bad"] }]));
+	writeLines(r.lines, d);
+	assert.deepEqual(readLines(d)[0].members, ["run"]);
+	assert.equal(sessionLine("run", d)?.id, "kairos");
+	assert.equal(readLines(d)[0].owner.id, "m1", "owner kept");
+	assert.equal(inbox(d).find(i => i.id === "docs").session, "m2", "loops untouched");
+	assert.deepEqual(forYouView(d).lines[0].sessions, ["m1", "run", "m2"]);
+	writeLines(applyLineEdits(readLines(d), parseLineEdits([{ id: "kairos", leave: ["run"] }])).lines, d);
+	assert.equal(readLines(d)[0].members, undefined);
+	assert.equal(sessionLine("run", d), undefined);
+});

@@ -19,7 +19,9 @@ export interface Line { id: string; name: string; project?: string; state: strin
 	/** How much For you and the owner may do alone: do (act, report after), prepare (do read-only/draft work, put it on the card), discuss (talk first). */
 	autonomy?: Autonomy;
 	/** The Pi session working on this line, and what it last said (tracked on every turn end). */
-	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean } }
+	owner?: { id: string; name?: string; status: string; at: string; busy?: boolean };
+	/** Sessions that belong to this line besides the owner, even with no open loop (e.g. news-running on Kairos launch). Session ids. */
+	members?: string[] }
 /** A judge edit: a new line (no matching id), a state change, or retire (hidden). */
 /** The fixed categories every line falls into. Few and broad, so the feed's colours mean something. */
 export const KINDS = ["research", "launch", "phd", "personal", "admin"] as const;
@@ -33,7 +35,7 @@ export function guessKind(l: { id: string; name: string; project?: string }): Ki
 		: /bench|eval|train|data|backtest|model|research|experiment/.test(t) ? "research"
 		: /account|tool|admin|finance|visa|bill|setup|infra/.test(t) ? "admin" : "personal";
 }
-export interface LineEdit { kind?: Kind; id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string; autonomy?: Autonomy }
+export interface LineEdit { join?: string[]; leave?: string[]; kind?: Kind; id: string; name?: string; project?: string; state?: string; next?: string; retire?: boolean; avatar?: string; autonomy?: Autonomy }
 export type Autonomy = "do" | "prepare" | "discuss";
 export const AUTONOMY: Autonomy[] = ["do", "prepare", "discuss"];
 export const isAutonomy = (x: unknown): x is Autonomy => AUTONOMY.includes(x as Autonomy);
@@ -65,6 +67,9 @@ export function parseLineEdits(x: unknown): LineEdit[] {
 		else if (typeof e.avatar === "string" && FACE_NAMES.includes(e.avatar.trim().toLowerCase())) out.avatar = e.avatar.trim().toLowerCase();
 		if (isAutonomy(e.autonomy)) out.autonomy = e.autonomy;
 		if (isKind(e.kind)) out.kind = e.kind;
+		const ids = (v: unknown) => Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && /^[\w.-]{1,80}$/.test(x)).slice(0, 10) : [];
+		if (ids(e.join).length) out.join = ids(e.join);
+		if (ids(e.leave).length) out.leave = ids(e.leave);
 		return out;
 	});
 }
@@ -77,7 +82,7 @@ export function applyLineEdits(lines: Line[], edits: LineEdit[], now = new Date(
 		const l = out.find(x => x.id === e.id);
 		if (l) {
 			if (e.retire) l.hidden = true;
-			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; if (e.avatar) l.avatar = e.avatar; if (e.autonomy) l.autonomy = e.autonomy; if (e.kind) l.kind = e.kind; l.hidden = false; }
+			else { if (e.name) l.name = e.name; if (e.state) l.state = e.state; if (e.next !== undefined) l.next = e.next; if (e.project) l.project = e.project; if (e.avatar) l.avatar = e.avatar; if (e.autonomy) l.autonomy = e.autonomy; if (e.kind) l.kind = e.kind; if (e.join || e.leave) { const m = new Set([...(l.members ?? []), ...(e.join ?? [])]); for (const x of e.leave ?? []) m.delete(x); l.members = [...m]; if (!l.members.length) delete l.members; } l.hidden = false; }
 			l.updated = now; changed.push(e.id);
 		} else if (!e.retire && e.name && e.state) {
 			out.push({ id: e.id, name: e.name, state: e.state, ...(e.next ? { next: e.next } : {}), ...(e.project ? { project: e.project } : {}), ...(e.avatar ? { avatar: e.avatar } : {}), ...(e.autonomy ? { autonomy: e.autonomy } : {}), ...(e.kind ? { kind: e.kind } : {}), updated: now });
@@ -93,7 +98,7 @@ export function linesForPrompt(lines: Line[], loops: { id: string; title: string
 	if (!live.length) return "(none yet)";
 	return live.map(l => {
 		const mine = loops.filter(i => i.line === l.id);
-		return `- line=${l.id} "${l.name}" kind=${l.kind ?? guessKind(l)}${l.project ? ` (${l.project})` : ""}${l.autonomy ? ` [autonomy: ${l.autonomy}]` : ""}: ${l.state}${l.owner ? `; owner session ${l.owner.name ?? l.owner.id} (${l.owner.id}), last: ${l.owner.status}` : ""}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
+		return `- line=${l.id} "${l.name}" kind=${l.kind ?? guessKind(l)}${l.project ? ` (${l.project})` : ""}${l.autonomy ? ` [autonomy: ${l.autonomy}]` : ""}: ${l.state}${l.owner ? `; owner session ${l.owner.name ?? l.owner.id} (${l.owner.id}), last: ${l.owner.status}` : ""}${l.members?.length ? `; also on it: ${l.members.join(", ")}` : ""}${l.next ? `; next: ${l.next}` : ""}${mine.length ? `; open loops: ${mine.map(i => i.id).join(", ")}` : ""}`;
 	}).join("\n");
 }
 

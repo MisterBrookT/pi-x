@@ -206,6 +206,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 			autonomy: Type.Optional(StringEnum(AUTONOMY, { description: "line, rule, create: how much may happen without brook: do (just do it, report after), prepare (do read-only/draft work, put it on the card), discuss (ask first). Set when brook states a preference for this job." })),
 			scope: Type.Optional(StringEnum(["line", "person", "type"] as const, { description: "rule: what it matches: a line id, a person/source name, or a work-type word (e.g. replay)" })),
 			match: Type.Optional(Type.String({ description: "rule: the line id, person name, or work-type word" })),
+			join: Type.Optional(Type.Array(Type.String(), { description: "line: session ids to add to this line (they belong to it without owning it or holding a loop)" })),
+			leave: Type.Optional(Type.Array(Type.String(), { description: "line: session ids to remove from this line" })),
 			merge: Type.Optional(Type.Array(Type.String(), { description: "line: ids of lines to merge into this one (id, or name for a new line); their loops become tasks of one job card" })),
 			title: Type.Optional(Type.String({ description: "create: <=60 chars, the piece of work" })),
 			why: Type.Optional(Type.String({ description: "create: <=120 chars, why it needs brook" })),
@@ -244,7 +246,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 				return done(moved ? `Merged ${p.merge.join(", ")} into ${id}; ${moved.length} loop(s) moved. They now show as tasks of one job.` : "Nothing merged (name existing lines in merge, and an id or name for the target).");
 			}
 			if (p.action === "line") {
-				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, kind: p.kind, avatar: p.avatar, autonomy: p.autonomy }]);
+				const edits = parseLineEdits([{ id: p.id ?? p.name, name: p.name, state: p.state, next: p.step, project: p.project, retire: p.retire, kind: p.kind, avatar: p.avatar, autonomy: p.autonomy, join: p.join, leave: p.leave }]);
 				const r = applyLineEdits(readLines(deps.dir), edits);
 				if (r.changed.length) writeLines(r.lines, deps.dir);
 				return done(r.changed.length ? `Line ${r.changed[0]} updated.` : "No change (a new line needs name and state).");

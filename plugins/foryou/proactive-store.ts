@@ -100,12 +100,12 @@ export function forYouView(dir?: string, now = Date.now()) {
 		onit: parked.filter(i => i.status === "onit").sort(newest).map(publicItem),
 		later: parked.filter(i => i.status !== "onit").sort((a, b) => Date.parse(a.wakeAt ?? "") - Date.parse(b.wakeAt ?? "")).map(publicItem),
 		handled: handled.map(publicItem),
-		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, avatar, autonomy, kind }) => {
+		lines: liveLines(dir).map(({ id, name, project, state, next, updated, owner, members, avatar, autonomy, kind }) => {
 			const open = all.filter(i => i.line === id && isOpen(i));
 			const waitsOnYou = open.some(i => needsYou(i, now));
 			// What the line is waiting on, in words: its open loops (title + whether brook or a session holds it).
 			const loops = open.slice(0, 5).map(i => ({ id: i.id, title: i.title, you: needsYou(i, now), status: i.status, ...(i.session ? { session: i.session } : {}), ...(i.note ? { last: i.note.split("\n").at(-1)!.replace(/^- [\d-]+: /, "") } : {}) }));
-			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), sessions: [...new Set([owner?.id, ...open.map(i => i.session)].filter((x): x is string => !!x && x !== forYouSession.id))], open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
+			return { id, name, kind: kind ?? guessKind({ id, name, project }), autonomy: autonomy ?? "", ...(avatar ? { avatar } : {}), ...(project ? { project } : {}), state, next: next ?? "", updated, loops, ...(owner ? { owner } : {}), sessions: [...new Set([owner?.id, ...(members ?? []), ...open.map(i => i.session)].filter((x): x is string => !!x && x !== forYouSession.id))], open: open.length, mode: waitsOnYou ? "you" : open.some(i => i.status === "onit") ? "working" : open.length ? "waiting" : "quiet" };
 		}),
 		watching,
 		problems,
@@ -431,11 +431,11 @@ export function workOwner(it: Item, live: LiveSession[], dir?: string): { id: st
 	return undefined;
 }
 
-/** The line a session works on: the one it owns, else the line of an open loop it holds (on it or waiting on brook). */
+/** The line a session works on: the one it owns, else one it was added to (members), else the line of an open loop it holds. */
 export function sessionLine(id: string, dir?: string): Line | undefined {
 	const lines = liveLines(dir);
 	const loopLine = () => readAll(dir).find(i => i.session === id && isOpen(i) && i.line && lines.some(l => l.id === i.line))?.line;
-	return lines.find(l => l.owner?.id === id) ?? lines.find(l => l.id === loopLine());
+	return lines.find(l => l.owner?.id === id) ?? lines.find(l => l.members?.includes(id)) ?? lines.find(l => l.id === loopLine());
 }
 
 export const expandHome = (p: string, home = homedir()) => resolve(p.replace(/^~(?=\/|$)/, home));
