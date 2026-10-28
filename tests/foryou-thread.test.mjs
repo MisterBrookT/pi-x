@@ -12,7 +12,7 @@ test("loopThread: one oldest-first list of source, draft, notes, owner status, a
   const t = loopThread({ ...base, prepared: "EFC T9, 18:30", session: "s1", status: "done", at_status: "2026-10-22T09:00:00Z",
     note: "- 2026-10-21: minara: booked a table\n- 2026-10-20: brook said: ok go\n- Prepared: old draft\n- 2026-10-20: draft sent",
     suggest: { session: "s1", at: "2026-10-21T10:00:00Z", answer: "later", answeredAt: "2026-10-21T10:00:00Z" } },
-    [{ session: "s1", name: "minara", at: "2026-10-21T12:00:00Z", line: "waiting for the restaurant" }]);
+    [{ session: "s1", name: "minara", at: "2026-10-21T12:00:00Z", line: "Waiting for the restaurant" }]);
   assert.deepEqual(t.map(e => [e.kind, e.by, e.text]), [
     ["source", "千羽", "She waits for your OK"],
     ["prepared", "Pi", "EFC T9, 18:30"],
@@ -20,7 +20,7 @@ test("loopThread: one oldest-first list of source, draft, notes, owner status, a
     ["note", "Pi", "draft sent"],
     ["note", "minara", "booked a table"],
     ["you", "You", "Later"],
-    ["status", "minara", "waiting for the restaurant"],
+    ["status", "minara", "Waiting for the restaurant"],
     ["you", "You", "Done"],
   ]);
   for (let k = 1; k < t.length; k++) assert.ok(Date.parse(t[k - 1].at) <= Date.parse(t[k].at), "oldest first");

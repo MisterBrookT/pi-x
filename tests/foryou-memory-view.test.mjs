@@ -66,7 +66,7 @@ test("phone: Memory link shows +N, opens the view with recent changes, Remove wo
   await page.locator("#memoryLink").evaluate(el => el.scrollIntoView());
   await page.locator("#memoryLink").click();
   await page.locator(".mem-ch.new").waitFor();
-  assert.match(await page.locator(".mem-ch").first().textContent(), /Added, .*, index[\s\S]*Dislikes em dashes/);
+  assert.match(await page.locator(".mem-ch").first().textContent(), /Added · .* · index[\s\S]*Dislikes em dashes/);
   remember(d, "foryou", ["Finish the current thread first"], new Date());
   await page.evaluate(() => openMemory());
   await page.locator(".mem-fy .mem-ln").first().waitFor();

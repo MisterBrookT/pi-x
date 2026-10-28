@@ -17,16 +17,16 @@ test("waiting: ask/handoff start a wait, a reply ends it; notes and replies expe
   w = W.sentNote(w, { thread: "t2", to: "bench", kind: "handoff", at: 0 }, true);
   assert.equal(W.sentNote(empty, { thread: "t3", to: "pix", kind: "note" }, true), empty);
   assert.equal(W.sentNote(empty, { thread: "t3", to: "pix", kind: "reply" }, true), empty);
-  assert.equal(W.waitingText(w), "waiting for pix, bench");
+  assert.equal(W.waitingText(w), "Waiting for pix, bench");
   w = W.receivedNote(w, { thread: "t1" });
-  assert.equal(W.waitingText(w), "waiting for bench");
+  assert.equal(W.waitingText(w), "Waiting for bench");
   assert.equal(W.waitingText(W.receivedNote(w, { thread: "t2" })), undefined);
 });
 
 test("waiting: a running peer that exits shows 'X left' briefly, then clears", () => {
   let w = W.sentNote(empty, { thread: "t", to: "pix", kind: "ask", at: 0 }, true);
   w = W.tick(w, new Set(["pix"]), 60_000);
-  assert.equal(W.waitingText(w), "waiting for pix");
+  assert.equal(W.waitingText(w), "Waiting for pix");
   w = W.tick(w, new Set(), 120_000);
   assert.equal(W.waitingText(w), "pix left");
   assert.equal(W.waitingText(W.tick(w, new Set(), 120_000 + W.NOTICE_MS)), undefined);
@@ -36,7 +36,7 @@ test("waiting: after ~2h without a reply it says 'No reply from X' instead of va
   // Peer not running when sent: its mail waits, so it is not "left".
   let w = W.sentNote(empty, { thread: "t", to: "pix", kind: "ask", at: 0 }, false);
   w = W.tick(w, new Set(), H);
-  assert.equal(W.waitingText(w), "waiting for pix");
+  assert.equal(W.waitingText(w), "Waiting for pix");
   w = W.tick(w, new Set(), 2 * H);
   assert.equal(W.waitingText(w), "No reply from pix");
   assert.equal(W.waitingText(W.tick(w, new Set(), 2 * H + W.NOTICE_MS)), undefined);
@@ -73,7 +73,7 @@ test("chat plugin: sending an ask shows 'Waiting for pix', survives reload, clea
   assert.equal(s.status.get("pix-chat-waits"), undefined);
 });
 
-test("phone: a session waiting on another shows the same quiet 'waiting for pix' in the list and the status line", async (t) => {
+test("phone: a session waiting on another shows the same quiet 'Waiting for pix' in the list and the chat", async (t) => {
   const { chromium, devices } = await import("playwright");
   const { startRemoteHub } = await import("../plugins/remote/remote-hub.ts");
   const token = "chat-wait-token-1234567890";
@@ -81,20 +81,20 @@ test("phone: a session waiting on another shows the same quiet 'waiting for pix'
   const hub = await startRemoteHub({ token, port: 0, home });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: "/y", busy: false, peerWait: "waiting for pix", messages: [{ role: "user", text: "hi" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: "/y", busy: false, peerWait: "Waiting for pix", messages: [{ role: "user", text: "hi" }] }) });
   const list = await (await fetch(`${base}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json();
-  assert.equal(list.find((s) => s.id === "s1").peerWait, "waiting for pix");
+  assert.equal(list.find((s) => s.id === "s1").peerWait, "Waiting for pix");
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
-  await page.locator("#phoneStatus").waitFor();
-  assert.equal(await page.locator("#phoneStatus").textContent(), "waiting for pix", "in the status line under the input, not in the chat");
+  await page.locator(".peer-wait-line").waitFor();
+  assert.equal(await page.locator(".peer-wait-line").textContent(), "Waiting for pix");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await page.locator(".bubble.typing").count(), 0, "not shown as running");
   await page.locator("#menu").click();
-  assert.match(await page.locator(".peer-wait").first().textContent(), /waiting for pix/);
+  assert.match(await page.locator(".peer-wait").first().textContent(), /Waiting for pix/);
 });
 
 test("real Pi session: an ask sent with the chat tool reaches the phone as peerWait; the reply clears it", async (t) => {
@@ -131,7 +131,7 @@ test("real Pi session: an ask sent with the chat tool reaches the phone as peerW
   const tool = runtime.session.extensionRunner.getAllRegisteredTools().find(x => x.definition.name === "chat").definition;
   const me = chat.board(root).find(x => x.name !== "pix").name;
   await tool.execute("1", { action: "send", to: "pix", kind: "ask", message: "status?" }, undefined, undefined, { cwd: dir });
-  await until(s => s.peerWait === "waiting for pix", "the phone sees the wait");
+  await until(s => s.peerWait === "Waiting for pix", "the phone sees the wait");
   const thread = W.loadWaiting(W.waitingPath(root, me)).waits[0].thread;
   chat.send("pix", me, "reply", "done", { thread, hop: 1 }, root);
   await until(s => !s.peerWait, "the reply clears it on the phone");
@@ -141,7 +141,7 @@ test("footer: each pending ask/handoff on its own line with what was asked and h
   let w = { waits: [], notices: [] };
   w = W.sentNote(w, { thread: "t1", to: "minara-3", kind: "handoff", at: 0, message: "[For you] Please restyle leaderboard (DMind blue)\nmore detail" }, true);
   w = W.sentNote(w, { thread: "t2", to: "minara-2", kind: "ask", at: 60 * 60_000 }, true);
-  assert.equal(W.waitingLines(w, 72 * 60_000), "minara-3: restyle leaderboard (DMind blue), 1h12m   minara-2, 12m");
+  assert.equal(W.waitingLines(w, 72 * 60_000), "minara-3: restyle leaderboard (DMind blue) · 1h12m   minara-2 · 12m");
   assert.equal(W.noticeText(w), undefined, "waits are not squeezed beside remote/memory");
   assert.equal(W.waitingLines(W.receivedNote(W.receivedNote(w, { thread: "t1" }), { thread: "t2" })), undefined, "line hidden when nothing is pending");
   assert.equal(W.gist("x".repeat(80)).length, 40);
@@ -167,7 +167,7 @@ test("check schedule: a handoff checks exponentially from 15 min; a due check wa
   assert.match(r.wakes[0], /^Check on vLLM batching \(thread t, to minara-2\): no reply for 15 min\. It is busy/);
   assert.equal(r.waits[0].check.next, 45 * M, "next check 30 min later");
   assert.deepEqual(W.tick(r, peers, 16 * M).wakes, [], "one wake per due check");
-  assert.match(W.waitingLines(r, 15 * M), /^minara-2: vLLM batching, check \d\d:\d\d$/);
+  assert.match(W.waitingLines(r, 15 * M), /^minara-2: vLLM batching · check \d\d:\d\d$/);
   assert.equal(W.waitingLines(W.receivedNote(r, { thread: "t" })), undefined, "a reply ends the checks");
 });
 
@@ -196,7 +196,7 @@ test("chat plugin: a handoff carries a check schedule; when the receiver leaves 
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
   const r = await tools.chat.execute("1", { action: "send", to: "minara-2", kind: "handoff", message: "batch it", label: "vLLM batching", checkMinutes: 10 }, undefined, undefined, ctx);
   assert.match(r.content[0].text, /First check in 10 min \(exponential\)/);
-  assert.match(status.get("pix-chat-waits"), /^minara-2: vLLM batching, check \d\d:\d\d$/);
+  assert.match(status.get("pix-chat-waits"), /^minara-2: vLLM batching · check \d\d:\d\d$/);
   assert.equal(W.loadWaiting(W.waitingPath(root, "for-you")).waits[0].check.every, 600_000);
   peer.close();
   // The plugin's own tick (every 30 s) notices; trigger it the way a reload would.

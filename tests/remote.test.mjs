@@ -1070,7 +1070,7 @@ test("a message sent while Pi works shows as a dim 'Steering:' line, not a chat 
 
 test("phone footer's empty waits line is plain text, like the Mac: no ⏳ icon", async () => {
   const { remoteAppHtml: html } = await import("../plugins/remote/remote-web.ts");
-  assert.ok(html.includes("||'idle')+'</div>'"), "idle, not a waiting: none line");
+  assert.ok(html.includes("fs.waits||'waiting: none'"));
   assert.ok(!html.includes("⏳ waiting"));
 });
 

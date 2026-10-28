@@ -119,7 +119,7 @@ export function gist(message: string, label?: string): string {
 const ago = (ms: number) => ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h${Math.floor(ms % 3_600_000 / 60_000) ? Math.floor(ms % 3_600_000 / 60_000) + "m" : ""}`;
 /** The footer's own line: one entry per pending ask/handoff, "minara-3: restyle leaderboard · 12m". */
 export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
-	const parts = w.waits.map(x => `${x.to}${x.what ? `: ${x.what}` : ""}, ${x.check ? `check ${clock(x.check.next)}` : ago(now - x.at)}`);
+	const parts = w.waits.map(x => `${x.to}${x.what ? `: ${x.what}` : ""} · ${x.check ? `check ${clock(x.check.next)}` : ago(now - x.at)}`);
 	return parts.length ? parts.join("   ") : undefined;
 }
 
@@ -127,14 +127,14 @@ export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
 export function noticeText(w: Waiting): string | undefined {
 	// "No reply from X" is redundant while the waits line still lists X.
 	const parts = [...new Set(w.notices.filter(x => !w.waits.some(y => x.text.endsWith(` ${y.to}`) && x.text.startsWith("No reply"))).map(x => x.text))];
-	return parts.length ? parts.join(", ") : undefined;
+	return parts.length ? parts.join(" · ") : undefined;
 }
 
 /** The footer text, or undefined when there is nothing to say. */
 export function waitingText(w: Waiting): string | undefined {
 	const names = [...new Set(w.waits.map(x => x.to))];
-	const parts = [names.length ? `waiting for ${names.join(", ")}` : "", ...new Set(w.notices.map(x => x.text))].filter(Boolean);
-	return parts.length ? parts.join(", ") : undefined;
+	const parts = [names.length ? `Waiting for ${names.join(", ")}` : "", ...new Set(w.notices.map(x => x.text))].filter(Boolean);
+	return parts.length ? parts.join(" · ") : undefined;
 }
 
 export const sameWaiting = (a: Waiting, b: Waiting) => JSON.stringify(a) === JSON.stringify(b);

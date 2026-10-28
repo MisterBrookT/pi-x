@@ -35,7 +35,7 @@ test("⌘K, type, ⏎ switches session from the message box and keeps typing", a
   const box = page.getByRole("combobox");
   await box.waitFor();
   assert.equal(await page.evaluate(() => document.activeElement.id), "switcherInput");
-  assert.deepEqual((await options(page)).slice(-1), ["New session"], "the list ends with New session");
+  assert.deepEqual((await options(page)).slice(-1), ["New session…"], "the list ends with New session");
   await page.keyboard.type("writ");
   assert.equal((await options(page))[0], "chaos essay", "matches the folder, not only the name");
   await page.keyboard.press("Enter");
