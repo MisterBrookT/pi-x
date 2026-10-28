@@ -1,7 +1,7 @@
 // Proactive loop core: receive -> judge -> notify -> act.
 // Pure helpers only. Channels live in proactive-sources.ts; IO in plugins/foryou/daemon.ts,
 // the one list in proactive-store.ts (shared by the Mac pill and Pix Remote "For you").
-import { renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -515,8 +515,22 @@ After each step, decide brook's next move yourself (a short, specific button, no
  * tick: a daemon stopped mid-tick (launchd respawn, 10-28 07:14) lost every cursor of that tick, so the next
  * process judged the same chats again ("15 new" twice, 2 min apart).
  */
-export function saveState(file: string, state: Record<string, string>): void {
-	const tmp = `${file}.${process.pid}.tmp`;
-	writeFileSync(tmp, JSON.stringify(state, null, 2));
+export function saveState(file: string, state: Record<string, string>, base?: Record<string, string>): void {
+	// With `base` (the state as this tick read it), only keys this tick changed are written over the file as it is
+	// now, so a tick running alongside (the docs-comments watch during a long sweep) never undoes the other's cursors.
+	let out = state;
+	if (base) {
+		let disk: Record<string, string> = {};
+		try { disk = JSON.parse(readFileSync(file, "utf8")); } catch { disk = { ...base }; }
+		out = { ...disk };
+		for (const k of new Set([...Object.keys(state), ...Object.keys(base)])) {
+			if (state[k] === base[k]) continue;
+			if (k in state) out[k] = state[k]; else delete out[k];
+		}
+		for (const k of Object.keys(state)) base[k] = state[k];
+		for (const k of Object.keys(base)) if (!(k in state)) delete base[k];
+	}
+	const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+	writeFileSync(tmp, JSON.stringify(out, null, 2));
 	renameSync(tmp, file);
 }

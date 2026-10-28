@@ -28,6 +28,8 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
 import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
+import { watchDocs } from "./docs-watch.ts";
+import { docsCommentsFile } from "./proactive-sources.ts";
 import { addLive, clearLive, liveSourcesToCheck, readLive, repliedSince } from "./live-strip.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
@@ -147,15 +149,16 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 	}
 }
 
-async function tick(cfg: Config, fast = false) {
-	const state = readJson<Record<string, string>>(P.state, {});
+async function tick(cfg: Config, fast = false, only?: Source[]) {
+	const state = readJson<Record<string, string>>(P.state, {}), base = { ...state };
 	const tickStarted = new Date().toISOString();
 	const work = await workSessions();
 	const failed: { source: string; error: string }[] = [], fine: string[] = [];
 	let sources = cfg.sources;
 	const forwards: Forward[] = [];
 	const pendingMarks: (() => void)[] = [];
-	if (fast) sources = await fastSources(cfg, state, (w, e) => { if (logOnce(`fast ${w}: ${e.message}`)) log(`fast ${w}: ${e.message.slice(0, 160)}`); });
+	if (only) sources = only;
+	else if (fast) sources = await fastSources(cfg, state, (w, e) => { if (logOnce(`fast ${w}: ${e.message}`)) log(`fast ${w}: ${e.message.slice(0, 160)}`); });
 	// Each fast tick also looks at every chat with a live-strip row, so a reply as brook there (typed, or an agent
 	// answering as him) clears it within a minute even when that chat has no new ask.
 	if (fast) { for (const r of liveSourcesToCheck(readLive(P.dir), sources)) {
@@ -179,7 +182,7 @@ async function tick(cfg: Config, fast = false) {
 			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
-			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; if (!dry) saveState(P.state, state); } };
+			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; if (!dry) saveState(P.state, state, base); } };
 			if (!state[key] && !src.always) { // new chat (unfiltered sources send every open item the first time): the first daemon run marks all seen; later, judge what came since the last check
 				const { cursor } = firstSeen(msgs, state["@tick"], -new Date().getTimezoneOffset() / 60);
 				if (cursor.id === last || !last) { mark(); log(`${src.name}: cursor set (${msgs.length} msgs)`); continue; }
@@ -317,7 +320,7 @@ async function tick(cfg: Config, fast = false) {
 	}
 	// The fast lane stops here: health, housekeeping and the WeChat screen check belong to the full sweep
 	// (its source list is partial, so health would wrongly drop chats).
-	if (fast) { if (!dry) saveState(P.state, state); return; }
+	if (fast) { if (!dry) saveState(P.state, state, base); return; }
 	// WeChat screen read (the path replies go out on): a read-only capture + OCR sanity check every 30 min, so a blind
 	// capture (privacy cover, wrong window: 10-28) shows on For you instead of every send being refused. Never types.
 	// Off by default: from the launchd app, the capture needs Automation access to System Events, and asking for it
@@ -357,7 +360,7 @@ async function tick(cfg: Config, fast = false) {
 	}
 	await housekeeping(cfg, state, work);
 	state["@tick"] = tickStarted;
-	if (!dry) saveState(P.state, state);
+	if (!dry) saveState(P.state, state, base);
 	log(`checked ${sources.length} sources`);
 }
 
@@ -449,8 +452,18 @@ if (!cfg.sources.length) { log(`no sources; edit ${P.config}`); process.exit(onc
 const FAST_SEC = Number((cfg as { fastSec?: number }).fastSec ?? 60);
 // --fast --once: one fast-lane tick (measure it: node daemon.ts --fast --once --dry-run).
 if (process.argv.includes("--fast")) { const t = Date.now(); await tick(cfg, true); log(`fast tick: ${Date.now() - t} ms`); process.exit(0); }
+// Loop ticks run one at a time. The docs-comments watch runs alongside (a sweep can take minutes); saveState
+// merges by changed keys, and watchDocs never overlaps itself.
+let chain: Promise<unknown> = Promise.resolve();
+const serial = (f: () => Promise<unknown>) => (chain = chain.then(f, f).catch(e => log(`tick: ${(e as Error).message}`)));
+// Docs comments: a new line in the file runs that source at once (no model), so a Pinpoint comment reaches
+// For you within seconds; the 60 s fast tick stays as the backup.
+if (!once && !dry) for (const src of cfg.sources.filter(s => s.kind === "docs-comments")) {
+	const file = docsCommentsFile(src);
+	watchDocs(file, () => { log(`docs-comments: watch -> forward (${src.name})`); return tick(cfg, true, [src]).catch(e => log(`docs-comments: ${(e as Error).message}`)); });
+}
 do {
-	await tick(cfg);
+	await serial(() => tick(cfg));
 	if (once) break;
 	let nextFast = Date.now() + FAST_SEC * 1000;
 	// While WeChat/DingTalk is blocked, look again every 30 s (one cheap folder listing), so a fix in
@@ -458,7 +471,7 @@ do {
 	const until = Date.now() + cfg.intervalSec * 1000;
 	while (Date.now() < until) {
 		await new Promise(r => setTimeout(r, Math.min(30_000, Math.max(0, until - Date.now(), 0), Math.max(1000, nextFast - Date.now()))));
-		if (FAST_SEC > 0 && Date.now() >= nextFast && until - Date.now() > 20_000) { await tick(cfg, true).catch(e => log(`fast: ${(e as Error).message}`)); nextFast = Date.now() + FAST_SEC * 1000; }
+		if (FAST_SEC > 0 && Date.now() >= nextFast && until - Date.now() > 20_000) { await serial(() => tick(cfg, true)); nextFast = Date.now() + FAST_SEC * 1000; }
 		if (blockedApps.size && await accessBack()) { log(`access back: ${[...blockedApps].join(", ")}; checking now`); blockedApps.clear(); break; }
 	}
 } while (true);

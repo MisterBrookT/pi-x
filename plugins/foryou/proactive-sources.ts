@@ -99,9 +99,10 @@ const command: Adapter = {
  * Website review comments (news-docs writes one JSON line each: id, author, page, selector, text, note, status).
  * A source in the generic model: no filter (`always`), every new batch goes to For you; ones already resolved are not sent.
  */
+export const docsCommentsFile = (src: Source) => String(src.file ?? join(homedir(), "workspace/tools/kdocs/comments.jsonl"));
 export const docsComments: Adapter = {
 	async fetch(src) {
-		const file = String(src.file ?? join(homedir(), "workspace/tools/kdocs/comments.jsonl"));
+		const file = docsCommentsFile(src);
 		if (!existsSync(file)) return [];
 		return readFileSync(file, "utf8").split("\n").filter(l => l.trim()).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
 			.filter(c => c?.id) // resolved ones stay listed (the cursor is the last line); the daemon skips them

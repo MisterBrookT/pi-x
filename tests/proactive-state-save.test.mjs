@@ -15,7 +15,7 @@ test("saveState writes cursors at once and atomically (no temp file left)", () =
 
 test("daemon saves state on every cursor move, so a mid-tick restart does not judge the same batch twice (10-28 07:14)", () => {
 	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
-	assert.match(src, /const mark = \(\) => \{[^\n]*saveState\(P\.state, state\)/);
+	assert.match(src, /const mark = \(\) => \{[^\n]*saveState\(P\.state, state, base\)/);
 });
 
 test("health: an old error for a chat no longer in the recent list is dropped; one still listed stays", async () => {
