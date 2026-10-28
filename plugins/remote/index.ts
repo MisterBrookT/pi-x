@@ -235,6 +235,26 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       thinkingLevels: levels,
     };
   };
+  /** Ctrl+P / Shift+Ctrl+P from the phone: Pi's own cycle (AgentSession.cycleModel, not exposed to extensions).
+   *  Scoped models that have a key, in scope order, wrapping; else every available model. A scoped thinking level wins;
+   *  not saved as the default (Pi's interactive cycle does not persist either). */
+  const cycleModel = async (direction: "forward" | "backward") => {
+    if (!ctx?.isIdle()) return;
+    const available = ctx.modelRegistry.getAvailable();
+    const has = new Set(available.map(m => `${m.provider}\0${m.id}`));
+    const scoped = ctx.scopedModels.filter(s => has.has(`${s.model.provider}\0${s.model.id}`));
+    const list: { model: any; thinkingLevel?: string }[] = ctx.scopedModels.length ? scoped : available.map(model => ({ model }));
+    if (list.length <= 1) { ctx.ui.notify(ctx.scopedModels.length ? "Only one model in scope" : "Only one model available", "info"); schedulePush(); return; }
+    const cur = ctx.model;
+    let i = list.findIndex(x => cur && x.model.provider === cur.provider && x.model.id === cur.id);
+    if (i < 0) i = 0;
+    const next = list[(direction === "forward" ? i + 1 : i - 1 + list.length) % list.length];
+    try {
+      if (!(await pi.setModel(next.model))) ctx.ui.notify(`No API key for ${modelKey(next.model)}`, "warning");
+      else if (next.thinkingLevel) pi.setThinkingLevel(next.thinkingLevel as any);
+    } catch (e) { ctx.ui.notify(`Model switch failed: ${e instanceof Error ? e.message : String(e)}`, "warning"); }
+    schedulePush();
+  };
   const switchModel = async (value: string) => {
     const model = choices().find(m => modelKey(m) === value);
     if (!model || !ctx?.isIdle()) return;
@@ -313,6 +333,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       if (answerQuestion(text)) return;
     }
     if (typeof prompt === "object" && "action" in prompt && prompt.action === "model") { void switchModel(prompt.value ?? ""); return; }
+    if (typeof prompt === "object" && "action" in prompt && prompt.action === "cycleModel") { void cycleModel(prompt.value === "backward" ? "backward" : "forward"); return; }
     if (typeof prompt === "object" && "action" in prompt && prompt.action === "thinking") {
       if (ctx.isIdle() && modelChoices().thinkingLevels?.includes(prompt.value ?? "")) pi.setThinkingLevel(prompt.value as any);
       schedulePush(); return;

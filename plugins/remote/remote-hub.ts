@@ -68,7 +68,7 @@ export interface RemotePrompt { text: string; images: { mimeType: string; data: 
 /** A phone request to stop the current Pi turn, like pressing Escape in the terminal. */
 export interface RemoteAbort { abort: true }
 export type RemoteActionName = "reload" | "new" | "compact" | "close" | "delete";
-export interface RemoteAction { action: RemoteActionName | "model" | "thinking" | "answer" | "rewind"; value?: string }
+export interface RemoteAction { action: RemoteActionName | "model" | "cycleModel" | "thinking" | "answer" | "rewind"; value?: string }
 export interface RemoteQuestion { id: string; question: string; context?: string; options: { label: string; description?: string }[]; questions?: { header: string; question: string; context?: string; options: { label: string; description?: string }[] }[] }
 
 interface Registered extends RemoteSnapshot {
@@ -503,7 +503,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         }
         if (req.method === "POST" && sessionMatch[2] === "/action") {
           const input = await body(req), action = input.action, value = typeof input.value === "string" ? input.value : undefined;
-          if (!["reload", "new", "compact", "close", "delete", "model", "thinking", "answer", "rewind"].includes(action)) return send(res, 400, { error: "unknown action" });
+          if (!["reload", "new", "compact", "close", "delete", "model", "cycleModel", "thinking", "answer", "rewind"].includes(action)) return send(res, 400, { error: "unknown action" });
           // Only offer what this session listed, so the phone cannot pick arbitrary models.
           if (action === "answer" && (!session.question || !value?.trim())) return send(res, 400, { error: "no question is waiting" });
           if (action === "model" && !session.models?.some(m => m.id === value)) return send(res, 400, { error: "unknown model" });
