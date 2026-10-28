@@ -26,6 +26,7 @@ import { ensureUnlocked } from "./unlock.ts";
 import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
+import { readRules, ruleVerdict } from "./filtered.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
@@ -181,15 +182,18 @@ async function tick(cfg: Config) {
 				let raw = "";
 				// Meeting notes brook attended always go to For you: the summary and 待办 are his to sort, not the cheap filter's.
 				const forced = fresh.filter(m => mustPass(m, (cfg as { passList?: string[] }).passList));
+				// brook's per-chat rule from the Filtered view: always show / always mute, before the model.
+				const rule = ruleVerdict(readRules(P.dir)[key], fresh.map(m => m.id));
 				// His own reply in a chat with an open item is how that item gets closed: always forward it, never let the filter drop it.
 				const mine = mineClosing(fresh, String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length);
 				if (mine.length && !forced.length) raw = JSON.stringify({ pass: true, why: `brook replied here; ${items.filter(i => isOpen(i) && i.sourceKey === key).length} open item(s) here may be done`, ids: mine.map(m => m.id) });
 				else if (forced.length) raw = JSON.stringify({ pass: true, why: `pass list: ${forced.map(m => m.sender).slice(0, 3).join(", ")}`, ids: forced.map(m => m.id) });
+				else if (rule) raw = JSON.stringify(rule);
 				else if (src.kind === "feishu-meeting") raw = JSON.stringify({ pass: true, why: "meeting notes: summary and 待办", ids: fresh.map(m => m.id) });
 				else try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
 				fine.push("model");
 				const v = parseFilter(raw);
-				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), raw, verdict: v });
+				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender, time: m.time, text: m.text.slice(0, 1500) })), raw, verdict: v });
 				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
 				log(`${src.name}: ${fresh.length} new -> ${v.pass ? "PASS" : "drop"}: ${v.why}`);
 				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });

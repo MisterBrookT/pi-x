@@ -1,5 +1,6 @@
 import { hideLine, isAutonomy, readLines, setLineAutonomy } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
+import { bringBack, filteredView, isRule, setRule } from "./filtered.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
 import { avatarFile, readFileOrUndefined, sourceIconFile } from "../core/avatarkit.ts";
@@ -24,6 +25,7 @@ export function avatarRoute(path: string): { status: number; body: unknown } {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
+	method === "GET" && path === "/api/foryou/filtered" || method === "POST" && (path === "/api/foryou/filtered/rule" || /^\/api\/foryou\/filtered\/[A-Za-z0-9_-]{1,300}\/back$/.test(path)) ||
 	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory" || /^\/api\/foryou\/avatar\/[A-Za-z0-9_-]{1,400}$/.test(path)) || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/autonomy$/.test(path);
 
 export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
@@ -66,6 +68,20 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); unwatchFile(memLog, onProactive); clearInterval(wake); },
 		async route(method, path, body) {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
+			// Filtered: every judged batch, bring one back to For you, per-chat always show / always mute.
+			if (method === "GET" && path === "/api/foryou/filtered") return { status: 200, body: filteredView(dir) };
+			const backMatch = method === "POST" && path.match(/^\/api\/foryou\/filtered\/([A-Za-z0-9_-]{1,300})\/back$/);
+			if (backMatch) {
+				const r = bringBack(backMatch[1], dir);
+				if (!r) return { status: 404, body: { error: "no such batch" } };
+				const sent = hub.queue(forYouSession.id, r.prompt) || await (options.start ?? startForYou)(r.prompt).then(() => true, () => false);
+				return sent ? { status: 200, body: { ok: true } } : { status: 503, body: { error: "For you is not running" } };
+			}
+			if (method === "POST" && path === "/api/foryou/filtered/rule") {
+				const input = await body();
+				if (typeof input?.sourceKey !== "string" || !/^[a-z-]+:[^\s]{1,200}$/.test(input.sourceKey) || !isRule(input.rule)) return { status: 400, body: { error: "sourceKey and rule (show, mute, none) needed" } };
+				return { status: 200, body: { rules: setRule(input.sourceKey, input.rule, dir) } };
+			}
 			// A post's person photo or app badge, as JSON so it passes the relay. 404 = initials / no badge.
 			if (method === "GET" && /^\/api\/foryou\/avatar\/[A-Za-z0-9_-]{1,400}$/.test(path)) return avatarRoute(path);
 			// Memory: what For you learned, readable and removable by brook. Only the memory folder.
