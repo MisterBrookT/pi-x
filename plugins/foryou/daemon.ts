@@ -206,7 +206,7 @@ async function tick(cfg: Config, fast = false) {
 				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender, time: m.time, text: m.text.slice(0, 1500) })), raw, verdict: v });
 				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
 				log(`${src.name}: ${fresh.length} new -> ${v.pass ? "PASS" : "drop"}: ${v.why}`);
-				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
+				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, ...(mine.length && !forced.length ? { own: true } : {}), howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
 				else mark();
 				if (v.pass) pendingMarks.push(mark);
 				// Feishu has no mark-as-read: an @mention of brook or a DM he got shows a seen reaction once forwarded.
@@ -278,7 +278,8 @@ async function tick(cfg: Config, fast = false) {
 		const text = forwardPrompt(forwards, new Date(), cfg.me);
 		// Asks to brook (a DM, an @, urgent) go to For you now even mid-thread, so the reply task is routed at
 		// once and the page shows them as a live strip; only the rest waits for the thread to go quiet.
-		const now_ = forwards.filter(f => f.urgent || fast || f.source.chat === "private");
+		// brook's own reply (it may close a loop) is not an ask: it waits like any other batch.
+		const now_ = forwards.filter(f => !f.own && (f.urgent || fast || f.source.chat === "private"));
 		const later_ = forwards.filter(f => !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));

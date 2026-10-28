@@ -59,7 +59,7 @@ export function parseFilter(raw: string): FilterVerdict | undefined {
 	} catch { return undefined; }
 }
 
-export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean }
+export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean; /** Passed only because brook replied here (may close a loop); not an ask. */ own?: boolean }
 
 /** One chat message to For you for everything that passed this round. */
 export function forwardPrompt(batches: Forward[], now = new Date(), me = ""): string {
