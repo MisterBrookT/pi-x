@@ -17,16 +17,16 @@ test("waiting: ask/handoff start a wait, a reply ends it; notes and replies expe
   w = W.sentNote(w, { thread: "t2", to: "bench", kind: "handoff", at: 0 }, true);
   assert.equal(W.sentNote(empty, { thread: "t3", to: "pix", kind: "note" }, true), empty);
   assert.equal(W.sentNote(empty, { thread: "t3", to: "pix", kind: "reply" }, true), empty);
-  assert.equal(W.waitingText(w), "Waiting for pix, bench");
+  assert.equal(W.waitingText(w), "waiting for pix, bench");
   w = W.receivedNote(w, { thread: "t1" });
-  assert.equal(W.waitingText(w), "Waiting for bench");
+  assert.equal(W.waitingText(w), "waiting for bench");
   assert.equal(W.waitingText(W.receivedNote(w, { thread: "t2" })), undefined);
 });
 
 test("waiting: a running peer that exits shows 'X left' briefly, then clears", () => {
   let w = W.sentNote(empty, { thread: "t", to: "pix", kind: "ask", at: 0 }, true);
   w = W.tick(w, new Set(["pix"]), 60_000);
-  assert.equal(W.waitingText(w), "Waiting for pix");
+  assert.equal(W.waitingText(w), "waiting for pix");
   w = W.tick(w, new Set(), 120_000);
   assert.equal(W.waitingText(w), "pix left");
   assert.equal(W.waitingText(W.tick(w, new Set(), 120_000 + W.NOTICE_MS)), undefined);
@@ -36,7 +36,7 @@ test("waiting: after ~2h without a reply it says 'No reply from X' instead of va
   // Peer not running when sent: its mail waits, so it is not "left".
   let w = W.sentNote(empty, { thread: "t", to: "pix", kind: "ask", at: 0 }, false);
   w = W.tick(w, new Set(), H);
-  assert.equal(W.waitingText(w), "Waiting for pix");
+  assert.equal(W.waitingText(w), "waiting for pix");
   w = W.tick(w, new Set(), 2 * H);
   assert.equal(W.waitingText(w), "No reply from pix");
   assert.equal(W.waitingText(W.tick(w, new Set(), 2 * H + W.NOTICE_MS)), undefined);
@@ -81,20 +81,20 @@ test("phone: a session waiting on another shows the same quiet 'waiting for pix'
   const hub = await startRemoteHub({ token, port: 0, home });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: "/y", busy: false, peerWait: "Waiting for pix", messages: [{ role: "user", text: "hi" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: "/y", busy: false, peerWait: "waiting for pix", messages: [{ role: "user", text: "hi" }] }) });
   const list = await (await fetch(`${base}/api/sessions`, { headers: { authorization: `Bearer ${token}` } })).json();
-  assert.equal(list.find((s) => s.id === "s1").peerWait, "Waiting for pix");
+  assert.equal(list.find((s) => s.id === "s1").peerWait, "waiting for pix");
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#phoneStatus").waitFor();
-  assert.equal(await page.locator("#phoneStatus").textContent(), "Waiting for pix", "in the status line under the input, not in the chat");
+  assert.equal(await page.locator("#phoneStatus").textContent(), "waiting for pix", "in the status line under the input, not in the chat");
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await page.locator(".bubble.typing").count(), 0, "not shown as running");
   await page.locator("#menu").click();
-  assert.match(await page.locator(".peer-wait").first().textContent(), /Waiting for pix/);
+  assert.match(await page.locator(".peer-wait").first().textContent(), /waiting for pix/);
 });
 
 test("real Pi session: an ask sent with the chat tool reaches the phone as peerWait; the reply clears it", async (t) => {
@@ -131,7 +131,7 @@ test("real Pi session: an ask sent with the chat tool reaches the phone as peerW
   const tool = runtime.session.extensionRunner.getAllRegisteredTools().find(x => x.definition.name === "chat").definition;
   const me = chat.board(root).find(x => x.name !== "pix").name;
   await tool.execute("1", { action: "send", to: "pix", kind: "ask", message: "status?" }, undefined, undefined, { cwd: dir });
-  await until(s => s.peerWait === "Waiting for pix", "the phone sees the wait");
+  await until(s => s.peerWait === "waiting for pix", "the phone sees the wait");
   const thread = W.loadWaiting(W.waitingPath(root, me)).waits[0].thread;
   chat.send("pix", me, "reply", "done", { thread, hop: 1 }, root);
   await until(s => !s.peerWait, "the reply clears it on the phone");

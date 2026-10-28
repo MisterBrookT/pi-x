@@ -203,9 +203,9 @@ test("footer never exceeds a narrow pane, even with a background job label", asy
 
 test("footer shows a waiting chat as quiet text without the running spinner", async (t) => {
 	const h = await harness(t);
-	h.ctx.ui.setStatus("pix-chat", "Waiting for pix");
+	h.ctx.ui.setStatus("pix-chat", "waiting for pix");
 	const lines = h.render();
-	assert.match(lines[0], /Waiting for pix/);
+	assert.match(lines[0], /waiting for pix/);
 	assert.doesNotMatch(lines.join("\n"), /[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, "waiting is not running");
 	h.ctx.ui.setStatus("pix-chat", undefined);
 	assert.doesNotMatch(h.render().join("\n"), /Waiting/);

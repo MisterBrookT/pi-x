@@ -133,7 +133,7 @@ export function noticeText(w: Waiting): string | undefined {
 /** The footer text, or undefined when there is nothing to say. */
 export function waitingText(w: Waiting): string | undefined {
 	const names = [...new Set(w.waits.map(x => x.to))];
-	const parts = [names.length ? `Waiting for ${names.join(", ")}` : "", ...new Set(w.notices.map(x => x.text))].filter(Boolean);
+	const parts = [names.length ? `waiting for ${names.join(", ")}` : "", ...new Set(w.notices.map(x => x.text))].filter(Boolean);
 	return parts.length ? parts.join(", ") : undefined;
 }
 

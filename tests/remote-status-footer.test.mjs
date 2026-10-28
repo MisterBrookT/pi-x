@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { startRemoteHub } from "../plugins/remote/remote-hub.ts";
 
 for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
-	test(`waits in the footer (${layout}), Thinking and the todo pill stay; no dots`, async t => {
+	test(`status in the footer (${layout}): thinking, waiting on a session, todo; nothing in the chat column; no dots`, async t => {
 		const token = "s".repeat(32), hub = await startRemoteHub({ token, port: 0 }), browser = await chromium.launch();
 		t.after(async () => { await browser.close(); await hub.close(); });
 		const base = `http://127.0.0.1:${hub.port}`, h = { authorization: `Bearer ${token}` };
@@ -19,18 +19,17 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		await page.goto(`${base}/#token=${token}`);
 		await page.getByText("go", { exact: true }).waitFor();
 		const line = page.locator(layout === "iPhone" ? "#phoneStatus" : "#piFooter .pf-waits");
-		await page.waitForFunction(sel => /news-infra/.test(document.querySelector(sel)?.textContent || ""), layout === "iPhone" ? "#phoneStatus" : "#piFooter .pf-waits");
-		assert.equal(await line.textContent(), "Waiting for news-infra");
-		assert.equal(await page.locator("#messages .bubble.typing").textContent(), "Thinking", "Thinking stays in the chat");
-		assert.equal(await page.locator("#messages .peer-wait-line").count(), 0, "the wait is not in the chat");
-		assert.equal(await page.locator("#todoBar").isVisible(), true, "todo pill above the input");
+		await page.waitForFunction(sel => /thinking/.test(document.querySelector(sel)?.textContent || ""), layout === "iPhone" ? "#phoneStatus" : "#piFooter .pf-waits");
+		assert.equal(await line.textContent(), "thinking, waiting for news-infra, todo 2/5 Deploy relay");
+		assert.equal(await page.locator("#messages .typing, #messages .peer-wait-line, #messages .fy-status").count(), 0, "nothing floating in the chat column");
+		assert.equal(await page.locator("#todoBar").isVisible(), false, "todo pill gone");
 		const ib = await page.locator("#input").boundingBox(), lb = await line.boundingBox();
 		assert.ok(lb.y > ib.y, "below the input");
 		await page.screenshot({ path: `.shots/status-${layout}.png` });
 		// Background wait with a next check.
 		await put({ busy: false, peerWait: "", waiting: 1, nextLook: Date.parse("2026-10-28T09:58:00Z"), todos: [] });
 		await page.waitForFunction(sel => /background/.test(document.querySelector(sel)?.textContent || ""), layout === "iPhone" ? "#phoneStatus" : "#piFooter .pf-waits", { timeout: 5000 }).catch(async e => { console.log("LINE", await line.textContent()); throw e; });
-		assert.match(await line.textContent(), /^Waiting on a background task, next check \d\d:\d\d$/);
+		assert.match(await line.textContent(), /^waiting on a background task, next check \d\d:\d\d$/);
 		const text = await page.evaluate(() => document.body.innerText);
 		assert.ok(!/·|…|\.\.\./.test(text), `no dots: ${text.match(/.{0,20}(·|…|\.\.\.).{0,20}/)?.[0]}`);
 		// Idle: iPhone hides the line, the footer says idle.

@@ -84,16 +84,13 @@ test("session order survives shuffled polls, transient disappearance, reload and
   assert.deepEqual(ids(boot(), ["b", "a"]), ["b", "a"]);
 });
 
-test("todo bar reflects done, active and pending items and keeps the full list expandable", () => {
+test("todo moved to the status line: the todo pill stays hidden", () => {
   const els = {};
   const $ = id => (els[id] ||= { hidden: false, textContent: "", innerHTML: "" });
-  const current = { todos: [{ id: "1", text: "Read", status: "done" }, { id: "2", text: "Fix", status: "active" }, { id: "3", text: "Ship", status: "pending", parentId: "2" }] };
+  const current = { todos: [{ id: "1", text: "Read", status: "done" }, { id: "2", text: "Fix", status: "active" }] };
   const app = load(["function renderTodos("], { $, current, renderPhoneStatus: () => {} });
   app.renderTodos();
-  assert.equal(els.todoBar.hidden, false);
-  assert.equal(els.todoCount.textContent, "1/3");
-  assert.equal(els.todoNow.textContent, "Fix");
-  assert.equal(els.todoList.innerHTML, '<li class="done">Read</li><li class="active">Fix</li><li class="pending child">Ship</li>');
+  assert.equal(els.todoBar.hidden, true);
 });
 
 test("a workflow ended only by a Pi reload says its helpers kept working, not a bare 'stopped'", () => {
