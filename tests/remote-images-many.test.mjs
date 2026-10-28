@@ -10,7 +10,7 @@ const token = "images-many-token-1234567890";
 // Noisy photos (incompressible, like real camera shots), drawn in the page.
 const photo = (page, w, h, seed) => page.evaluate(async ([w, h, seed]) => { const c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d"); const d = x.createImageData(w, h); let s = seed; for (let i = 0; i < d.data.length; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; d.data[i] = i % 4 === 3 ? 255 : s & 255; } x.putImageData(d, 0, 0); return c.toDataURL("image/png").split(",")[1]; }, [w, h, seed]);
 
-for (const n of [1, 2, 3, 4]) test(`phone: ${n} large photo(s) arrive in one message, composer clears only after the Mac accepted`, async t => {
+for (const n of [1, 2, 3, 5, 9]) test(`phone: ${n} large photo(s) arrive in one message, composer clears only after the Mac accepted (up to 9, one shared 1.15 MB budget)`, async t => {
   const home = await mkdtemp(join(tmpdir(), "pix-imgn-")); t.after(() => rm(home, { recursive: true, force: true }));
   const hub = await startRemoteHub({ token, port: 0, home }); t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
@@ -25,6 +25,7 @@ for (const n of [1, 2, 3, 4]) test(`phone: ${n} large photo(s) arrive in one mes
   await page.locator("#file").setInputFiles(files);
   await page.locator("#attachment .att-th").nth(n - 1).waitFor({ timeout: 30000 });
   await page.locator("#input").fill(`${n} photos`);
+  if (n === 9) await page.screenshot({ path: ".shots/images-9-iPhone.png" });
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await page.locator("#send").click();
   const got = (await next).prompts[0];

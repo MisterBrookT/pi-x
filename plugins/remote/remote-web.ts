@@ -375,7 +375,7 @@ ${desktopCss}
 <script>
 const $=id=>document.getElementById(id);const paired=typeof remoteRelayMode!=="undefined"&&remoteRelayMode;const storageKey=paired?"pixRelayKey":"pixRemoteToken";
 let pendingPrompts=[],promptSequence=0,expandedSession='';const acknowledgedPrompts=new Set();
-let previousSession='';let token=localStorage[storageKey]||"",sessions=[],current=null,active=localStorage.pixRemoteSession||"",events,selectedImages=[],sending=false;const MAX_IMAGES=4,IMG_TOTAL=1150000,IMG_BUDGET=1000000;
+let previousSession='';let token=localStorage[storageKey]||"",sessions=[],current=null,active=localStorage.pixRemoteSession||"",events,selectedImages=[],sending=false;const MAX_IMAGES=9,IMG_TOTAL=1150000,IMG_BUDGET=1000000;
 const imageCache=new Map(),loadedImages=new Map();
 const hash=new URLSearchParams(location.hash.slice(1));const openOnLoad=hash.get("open");if(hash.get(paired?"key":"token")){token=hash.get(paired?"key":"token");localStorage[storageKey]=token;history.replaceState(null,"",location.pathname)}
 const api=(path,opts={})=>paired?relayApi(path,opts):fetch(path,{...opts,headers:{"authorization":"Bearer "+token,"content-type":"application/json",...(opts.headers||{})}}).then(async r=>{if(r.status===401){logout();throw new Error("unauthorized")}if(!r.ok){const b=await r.json();throw Object.assign(new Error(b.error),{status:r.status,body:b})}return r.json()});

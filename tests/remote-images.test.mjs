@@ -41,13 +41,14 @@ test("phone: attach several photos at once; each shows as a thumbnail, any can b
   assert.deepEqual(errors, []);
 });
 
-test("hub: up to 4 images per message; a fifth is refused", async t => {
+test("hub: up to 9 images per message; a tenth is refused", async t => {
   const home = await mkdtemp(join(tmpdir(), "pix-img-")); t.after(() => rm(home, { recursive: true, force: true }));
   const hub = await startRemoteHub({ token, port: 0, home }); t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`, auth = { authorization: `Bearer ${token}` };
   await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "w", named: true, cwd: home, busy: false, messages: [] }) });
   const img = { mimeType: "image/jpeg", data: "/9j/4AAQSkZJRgABAQ==" };
   const post = n => fetch(`${base}/api/sessions/s1/prompt`, { method: "POST", headers: auth, body: JSON.stringify({ text: "x", images: Array(n).fill(img) }) });
-  assert.ok((await post(4)).ok);
-  assert.equal((await post(5)).status, 400);
+  assert.ok((await post(5)).ok);
+  assert.ok((await post(9)).ok);
+  assert.equal((await post(10)).status, 400);
 });
