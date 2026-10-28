@@ -40,10 +40,17 @@ export class Room {
   constructor(state: any) { this.state = state; state.setWebSocketAutoResponse?.(new WebSocketRequestResponsePair("ping", "pong")); }
   fetch(request: Request) {
     const role = new URL(request.url).pathname.endsWith("/agent") ? "agent" : "phone";
-    if (role === "phone" && this.state.getWebSockets("phone").length >= 3) return new Response("Room full", { status: 429 });
+    // A phone that slept or lost signal leaves a socket the relay still counts. Refusing new phones ("Room full") then locked
+    // brook out until those died. Instead the newest phone wins: drop the least recently heard ones.
+    if (role === "phone") {
+      const phones = this.state.getWebSockets("phone");
+      const heard = (ws: WebSocket) => (ws as any).deserializeAttachment?.()?.heard ?? 0;
+      for (const old of phones.sort((a: WebSocket, b: WebSocket) => heard(a) - heard(b)).slice(0, Math.max(0, phones.length - 2))) { try { old.close(4000, "replaced by a newer phone"); } catch {} }
+    }
     if (role === "agent") for (const old of this.state.getWebSockets("agent")) old.close(1000, "replaced");
     const pair = new WebSocketPair();
     this.state.acceptWebSocket(pair[1], [role]);
+    try { (pair[1] as any).serializeAttachment?.({ heard: Date.now() }); } catch {}
     if (role === "agent") this.signal("agent-online");
     else pair[1].send(JSON.stringify({ signal: this.state.getWebSockets("agent").length ? "agent-online" : "agent-offline" }));
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -57,6 +64,7 @@ export class Room {
     if (this.state.getTags(socket).includes("agent") && !this.state.getWebSockets("agent").some((other: WebSocket) => other !== socket && other.readyState === WebSocket.OPEN)) this.signal("agent-offline");
   }
   webSocketMessage(socket: WebSocket, data: string | ArrayBuffer) {
+    try { (socket as any).serializeAttachment?.({ heard: Date.now() }); } catch {}
     if (typeof data !== "string" || data.length > 2_000_000) { socket.close(1009, "frame too large"); return; }
     const other = this.state.getWebSockets("agent").includes(socket) ? "phone" : "agent";
     for (const peer of this.state.getWebSockets(other)) {
