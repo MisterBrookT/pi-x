@@ -158,7 +158,7 @@ test("WeChat search: only an exact Contacts/Group/Most-used row is picked, never
 });
 
 /** A fuller fake WeChat for the CLI: cmd+f opens search; typing filters; clicking a row opens it. */
-const fakeWeChatApp = ({ opensAs, flipAfterPaste, dropDraft } = {}) => {
+const fakeWeChatApp = ({ opensAs, flipAfterPaste, dropDraft, cmdFDead } = {}) => {
 	const log = [];
 	let title = "brookkk", searching = false, query = "", draft = "";
 	const sentLines = [];
@@ -169,16 +169,17 @@ const fakeWeChatApp = ({ opensAs, flipAfterPaste, dropDraft } = {}) => {
 	].filter((l) => l.x === 40 || l.text.includes(query) || query.includes("报销") && l.text.includes("报销"));
 	const screen = {
 		activate: async () => {},
-		capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [line(title, 300, 20), ...rows(), ...sentLines.map((t, i) => line(t, 500, 400 + i * 30)), ...(draft ? [line(draft.split("\n")[0], 300, 700)] : [])] }),
+		capture: async () => ({ app: "WeChat", window: { x: 0, y: 0, w: 1000, h: 800 }, lines: [line("Search", 100, 22), line(title, 300, 20), ...rows(), ...sentLines.map((t, i) => line(t, 500, 400 + i * 30)), ...(draft ? [line(draft.split("\n")[0], 300, 700)] : [])] }),
 		click: async (x, y) => {
 			const hit = rows().find((r) => r.x !== 40 && Math.abs(r.x + r.w / 2 - x) < 2 && Math.abs(r.y + r.h / 2 - y) < 2);
 			if (hit) { title = opensAs?.(hit.text) ?? hit.text; searching = false; log.push(`open ${hit.text}`); }
+			if (!searching && x >= 100 && x <= 200 && y >= 15 && y <= 45) { searching = true; query = ""; log.push("click search"); }
 			if (draft === "" && y > 600) log.push("click box");
 		},
 		keys: async (k, app) => {
 			const c = k.join("+");
 			log.push(`key ${c}${app ? ` →${app}` : ""}`);
-			if (c === "cmd+f") { searching = true; query = ""; }
+			if (c === "cmd+f" && !cmdFDead) { searching = true; query = ""; }
 			else if (c === "escape") searching = false;
 			else if (c === "backspace") draft = "";
 			else if (c === "Enter" && draft) { log.push(`SENT ${title}: ${draft}`); sentLines.push(draft.split("\n")[0]); draft = ""; }
@@ -274,4 +275,23 @@ test("cua.recipe runs saved recipes inside the same runner; unknown names list w
 	const ok = createCuaRuntime({ operations: {}, screen, confirm: async () => true });
 	assert.deepEqual(await ok.cua.recipe("wechat-send", { to: "brookkk", text: "hi" }), { sent: true, readBack: true, chat: "brookkk" });
 	await assert.rejects(ok.cua.recipe("nope"), /No recipe "nope"[\s\S]*wechat-send/);
+});
+
+
+test("screen capture reads the app's own windows, so the Pix privacy cover cannot blank it (WeChat OCR read the wallpaper, 10-28)", async () => {
+	const { readFileSync } = await import("node:fs");
+	const src = readFileSync(new URL("../plugins/computer/computer-screen.ts", import.meta.url), "utf8");
+	assert.match(src, /helper\("appshot"\)/, "capture goes through the per-app helper first");
+	const swift = readFileSync(new URL("../plugins/computer/native/appshot.swift", import.meta.url), "utf8");
+	assert.match(swift, /kCGWindowOwnerPID/, "only the app's windows");
+	assert.match(swift, /"-l\\\(part\.id\)"/, "each captured by window id, pop-ups included");
+});
+
+test("wechat find: when cmd+f does not focus search (WeChat in the background), click the Search box and type again", async () => {
+	const { runWeChat } = await import("../plugins/computer/wechat.ts");
+	const { screen, log } = fakeWeChatApp({ cmdFDead: true });
+	const out = [];
+	assert.equal(await runWeChat(["find", "brookkk"], screen, (l) => out.push(l)), 0, out.join("\n"));
+	assert.ok(log.includes("click search"), log.join("\n"));
+	assert.ok(!log.some((l) => /^(open|SENT)/.test(l)), "find opens nothing");
 });

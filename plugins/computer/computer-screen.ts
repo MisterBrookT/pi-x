@@ -118,7 +118,7 @@ const NATIVE = join(dirname(fileURLToPath(import.meta.url)), "native");
 const CACHE = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "pix-computer");
 
 /** Build a small Swift helper once (rebuilt when its source changes). */
-const helper = async (name: "ocr" | "click" | "keys" | "clip"): Promise<string> => {
+const helper = async (name: "ocr" | "click" | "keys" | "clip" | "appshot"): Promise<string> => {
 	const src = join(NATIVE, `${name}.swift`);
 	const bin = join(CACHE, name);
 	if (!existsSync(bin) || statSync(src).mtimeMs > statSync(bin).mtimeMs) {
@@ -197,7 +197,9 @@ export const macScreenOperations = (): ScreenOperations => {
 			const [x, y, w, h] = bounds.split(",").map(Number);
 			shots += 1;
 			const image = join(dir, `shot-${shots}.png`);
-			await run("screencapture", ["-x", `-R${x},${y},${w},${h}`, image]);
+			// The app's own windows, so the Pix privacy cover (which hides the screen) cannot blank the picture; else the region.
+			const own = await run(await helper("appshot"), [await pidOf(app), String(x), String(y), String(w), String(h), image]).then(() => true, () => false);
+			if (!own) await run("screencapture", ["-x", `-R${x},${y},${w},${h}`, image]);
 			const scale = pngWidth(image) / w;
 			const ocr = await helper("ocr");
 			const lines = (await run(ocr, [image]))

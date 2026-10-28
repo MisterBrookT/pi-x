@@ -3,7 +3,7 @@
  * wechat-send: open the exact chat → type → check title + input box → Enter → read back, in one call.
  */
 import { TargetMismatchError, type CuaApi } from "../computer-script.ts";
-import { type ScreenOperations, draftVisible, nearMisses, normalizeName, pickExactResult, titleMatches } from "../computer-screen.ts";
+import { type ScreenCapture, type ScreenOperations, draftVisible, headerLines, nearMisses, normalizeName, pickExactResult, titleMatches } from "../computer-screen.ts";
 import type { Recipe } from "./index.ts";
 
 export const APP = "WeChat";
@@ -25,6 +25,8 @@ export const clearDraft = async (screen: ScreenOperations) => {
 	await screen.keys(["backspace"], APP);
 };
 
+const hasResultSections = (c: ScreenCapture) => c.lines.some((l) => /^(most used|contacts|group chats|chat history|联系人|群聊|最常使用|聊天记录)$/i.test(l.text.trim()));
+
 /** Search, and open only a result whose name reads exactly `chat`. */
 export const openChat = async (cua: CuaApi, screen: ScreenOperations, chat: string, findOnly = false) => {
 	let s = await cua.observe({ app: APP, mode: "screen" });
@@ -33,6 +35,20 @@ export const openChat = async (cua: CuaApi, screen: ScreenOperations, chat: stri
 	await screen.sleep?.(1200);
 	s = await cua.observe({ app: APP, mode: "screen" });
 	let results = await screen.capture(APP);
+	// ⌘F does not always focus WeChat's search (10-28: the query never appeared and every name was refused).
+	// No result sections means the search box is not open: click the "Search" box in the sidebar header and type again.
+	if (!hasResultSections(results)) {
+		const box = headerLines(results, 80).find((l) => /^(search|搜索)$/i.test(l.text.trim()));
+		if (box) {
+			await screen.click(results.window.x + box.x + box.w / 2, results.window.y + box.y + box.h / 2);
+			await screen.sleep?.(400);
+			s = await cua.observe({ app: APP, mode: "screen" });
+			s = await s.act({ action: "typeText", text: chat });
+			await screen.sleep?.(1200);
+			s = await cua.observe({ app: APP, mode: "screen" });
+			results = await screen.capture(APP);
+		}
+	}
 	let hit = pickExactResult(results, chat);
 	// Search results can lag behind the first capture; look once more before refusing.
 	if (!hit) {
