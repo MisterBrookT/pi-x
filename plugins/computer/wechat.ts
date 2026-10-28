@@ -4,8 +4,8 @@
  *
  *   node wechat.ts find "<chat>"              exact contact/group match? opens nothing
  *   node wechat.ts prepare "<chat>" "<text>"  open the exact chat, check title, paste; does NOT send
- *   node wechat.ts send                       check title again, then Enter (brook confirmed already)
- *   node wechat.ts sendnow "<chat>" "<text>"  all in one (brook confirmed): open, type, check title + box, Enter, read back
+ *   node wechat.ts send                       check title again, then Enter (routine reply or brook confirmed)
+ *   node wechat.ts sendnow "<chat>" "<text>"  all in one (routine reply or brook confirmed): open, type, check title + box, Enter, read back
  *   node wechat.ts cancel                     clear the draft
  *
  * Exit: 0 ok, 2 blocked (locked / no window), 3 refused (no exact match / wrong chat).
