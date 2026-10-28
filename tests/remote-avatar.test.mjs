@@ -47,7 +47,7 @@ test("avatar CSS defines moods, blink, and a reduced-motion override", () => {
 test("running subagents are read from pi-subagents status files for this session only", () => {
   const dir = join(import.meta.dirname, "fixtures", "subagent-runs");
   const helpers = runningHelpers("/parent/session.jsonl", dir, 10_000);
-  assert.deepEqual(helpers, [{ id: "run-a", agent: "worker", task: "Fix the relay reconnect", tools: 22, activityAt: 9000, idleMs: 1000, state: "running" }]);
+  assert.deepEqual(helpers, [{ id: "run-a", agent: "worker", task: "Fix the relay reconnect", tools: 22, activityAt: 9000, idleMs: 1000, state: "running", startedAt: undefined }]);
   assert.deepEqual(runningHelpers(undefined, dir), []);
   assert.deepEqual(runningHelpers("/parent/session.jsonl", join(dir, "missing")), []);
 });

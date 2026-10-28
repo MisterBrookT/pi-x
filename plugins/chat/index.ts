@@ -5,6 +5,7 @@
  * - note: arrives on the receiver's next turn, never wakes it. ask / handoff / reply: wake it (until the hop limit).
  * - Claims are enforced: edit / write on a file another live session claims is blocked with "ask <owner> first".
  */
+import { HELPER_STUCK } from "../core/helper-stuck.ts";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -119,6 +120,14 @@ export default function (pi: ExtensionAPI) {
       if (!r.startsWith("Renamed") && ctx.hasUI && !r.startsWith("Already")) ctx.ui.notify(r, "warning");
     }
     setTimeout(() => title(ctx), 0);
+  });
+  // A stuck helper shows on the board's doing line ("worker stuck: …"); status stays exactly busy/idle for waiters.
+  let doingBefore: string | undefined;
+  pi.events.on(HELPER_STUCK, (text: unknown) => {
+    const t = typeof text === "string" ? text : "";
+    const cur = board().find(x => x.name === me?.name)?.doing;
+    if (t) { if (!cur?.startsWith("stuck: ")) doingBefore = cur; room?.update({ doing: `stuck: ${t}` }); }
+    else if (cur?.startsWith("stuck: ")) room?.update({ doing: doingBefore ?? "" });
   });
   pi.on("agent_start", (_e, ctx) => { room?.update({ status: "busy" }); title(ctx); });
   pi.on("agent_end", () => room?.update({ status: "idle" }));

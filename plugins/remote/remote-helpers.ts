@@ -12,6 +12,9 @@ export interface RemoteHelper {
   /** Milliseconds since last activity when the snapshot was taken, so phone clock skew does not matter. */
   idleMs: number;
   state: string;
+  startedAt?: number;
+  /** Why the helper looks stuck (see stuckReason), else absent. */
+  stuck?: string;
 }
 
 /** Same root pi-subagents uses: PI_SUBAGENTS_TEMP_ROOT, else <tmpdir>/pi-subagents-uid-<uid>/async-subagent-runs. */
@@ -53,8 +56,29 @@ export function runningHelpers(sessionFile: string | undefined, dir = subagentRu
         activityAt,
         idleMs: activityAt ? Math.max(0, now - activityAt) : 0,
         state: String(step.activityState || status.activityState || "running"),
+        startedAt: Number(step.startedAt || status.startedAt) || undefined,
       });
+      const h = helpers[helpers.length - 1], why = stuckReason(h, now);
+      if (why) h.stuck = why;
     } catch {}
   }
   return helpers.sort((a, b) => b.activityAt - a.activityAt).slice(0, 8);
+}
+
+/** A helper that never started (0 tools after 3 min) or sits in needs_attention with no activity for 5 min. */
+export const STUCK_NO_START_MS = 3 * 60_000, STUCK_ATTENTION_MS = 5 * 60_000;
+export function stuckReason(h: Pick<RemoteHelper, "tools" | "state" | "activityAt" | "startedAt">, now = Date.now()): string | undefined {
+  const quiet = h.activityAt ? now - h.activityAt : 0;
+  if (h.tools === 0 && h.startedAt && now - h.startedAt >= STUCK_NO_START_MS && quiet >= STUCK_NO_START_MS) return `no tool call ${Math.round((now - h.startedAt) / 60_000)} min after start`;
+  if (h.state === "needs_attention" && quiet >= STUCK_ATTENTION_MS) return `needs attention, no activity for ${Math.round(quiet / 60_000)} min`;
+  return undefined;
+}
+
+/** The wake-up prompt for an idle parent, once per stuck helper (ids in `told`). */
+export function stuckHelperPrompt(helpers: RemoteHelper[], told: Set<string>): string | undefined {
+  const fresh = helpers.filter(h => h.stuck && !told.has(h.id));
+  if (!fresh.length) return undefined;
+  for (const h of fresh) told.add(h.id);
+  return `Helper stuck: ${fresh.map(h => `${h.agent} ${h.id.slice(0, 8)} "${h.task.slice(0, 80)}" (${h.stuck})`).join("; ")}. ` +
+    "It will not finish on its own. Check it (subagent status), then steer it, or stop it and redo the step yourself or with a new helper.";
 }

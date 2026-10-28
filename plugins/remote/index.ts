@@ -12,8 +12,9 @@ import { branchMessages, remoteMedia, remoteMessages } from "./remote-state.ts";
 import { createPushSender } from "./remote-push.ts";
 import { BACKGROUND_CHANGED, backgroundState } from "../core/background-state.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
+import { HELPER_STUCK } from "../core/helper-stuck.ts";
 import { loadArtifacts } from "../core/artifacts.ts";
-import { runningHelpers } from "./remote-helpers.ts";
+import { runningHelpers, stuckHelperPrompt } from "./remote-helpers.ts";
 import { autoCloseHours, keepOpen, linesHeldBy, openLoopsHeldBy, recordAutoClose } from "../core/auto-close.ts";
 import { footerStatus } from "../core/footer-status.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "./remote-autoreload.ts";
@@ -409,13 +410,25 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     busy = !next.isIdle();
     connected = true;
     await push();
-    heartbeat = setInterval(() => { void push(); autoReload?.tick(); autoClose(); void replaceStaleHub().then(stale => { if (stale) return ensureHub(!!relayKey).then(() => push()); }).catch(() => {}); }, heartbeatMs);
+    heartbeat = setInterval(() => { void push(); autoReload?.tick(); wakeForStuckHelpers(); autoClose(); void replaceStaleHub().then(stale => { if (stale) return ensureHub(!!relayKey).then(() => push()); }).catch(() => {}); }, heartbeatMs);
     heartbeat.unref?.();
     void poll();
     next.ui.setStatus("pix-remote", "remote on");
   };
 
   const track = (_event: unknown, next: ExtensionContext) => { ctx = next; };
+  // A dead helper (never started, or stuck in needs_attention) leaves an idle parent waiting forever: wake it once per helper.
+  const toldStuck = new Set<string>();
+  let lastStuck = "";
+  const wakeForStuckHelpers = () => {
+    if (!ctx) return;
+    const helpers = runningHelpers(ctx.sessionManager?.getSessionFile?.());
+    const stuck = helpers.filter(h => h.stuck).map(h => `${h.agent} ${h.stuck}`).join(", ");
+    if (stuck !== lastStuck) { lastStuck = stuck; pi.events.emit(HELPER_STUCK, stuck); }
+    if (!ctx.isIdle() || busy || hasDraft(ctx)) return;
+    const prompt = stuckHelperPrompt(helpers, toldStuck);
+    if (prompt) { logRelay(`helper stuck: waking ${sessionId}`); pi.sendUserMessage(prompt); }
+  };
   // Auto-close (remote-autoclose.ts): idle for PIX_AUTOCLOSE_HOURS (24) with nothing in flight → quit like /quit; history stays in Resume.
   let idleSince = Date.now();
   const autoClose = () => {
