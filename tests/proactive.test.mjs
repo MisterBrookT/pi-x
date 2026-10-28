@@ -188,3 +188,21 @@ test("health: DingTalk permission shows at once with its own label and clears on
   assert.deepEqual(healthSummary(s), []);
   assert.deepEqual(s, {});
 });
+
+test("firstSeen: a chat first seen mid-run judges messages since the last check, not none (Amber 10-28)", async () => {
+  const { firstSeen } = await import("../plugins/foryou/proactive.ts");
+  const msgs = [
+    { id: "910", time: "2026-09-25 12:56", sender: "Amber", text: "old" },
+    { id: "921", time: "2026-10-28 11:44", sender: "Amber", text: "new 1" },
+    { id: "923", time: "2026-10-28 11:44", sender: "Amber", text: "new 2" },
+  ];
+  // Daemon already ran before (it knows when it last checked): new messages since then are judged.
+  assert.deepEqual(firstSeen(msgs, "2026-10-28T03:38:06.322Z", 8).cursor, { id: "910", time: "2026-09-25 12:56" });
+  // Very first daemon run (no last check): keep "don't flood", everything counts as seen.
+  assert.deepEqual(firstSeen(msgs, undefined, 8).cursor, { id: "923", time: "2026-10-28 11:44" });
+  // Nothing new since the last check: cursor at the end, nothing judged.
+  assert.deepEqual(firstSeen(msgs.slice(0, 1), "2026-10-28T03:38:06.322Z", 8).cursor, { id: "910", time: "2026-09-25 12:56" });
+  // Only a recent window counts, so a long-stopped daemon does not flood: older than the window is seen.
+  assert.equal(firstSeen(msgs, "2026-10-01T00:00:00Z", 8, Date.parse("2026-10-28T04:00:00Z")).cursor.id, "910");
+  assert.equal(firstSeen(msgs, "2026-10-01T00:00:00Z", 8, Date.parse("2026-10-29T04:00:00Z")).cursor.id, "923");
+});

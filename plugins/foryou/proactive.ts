@@ -114,6 +114,22 @@ export function newSince(msgs: Msg[], lastId?: string, lastTime?: string): Msg[]
 }
 
 /**
+ * Cursor for a chat seen for the first time. The very first daemon run marks everything seen (no flood).
+ * Later, a new chat (e.g. a private chat that just entered the recent list) is not history: messages after
+ * the previous check, within the last day, are judged. Message times are local "YYYY-MM-DD HH:MM" (tzHours).
+ */
+export function firstSeen(msgs: Msg[], lastCheck: string | undefined, tzHours: number, now = Date.now()): { cursor: { id: string; time: string } } {
+	const end = msgs.at(-1), all = { cursor: { id: end?.id ?? "0", time: end?.time ?? "" } };
+	if (!lastCheck || !end) return all;
+	const local = (ms: number) => new Date(ms + tzHours * 3_600_000).toISOString().slice(0, 16).replace("T", " ");
+	const from = local(Math.max(Date.parse(lastCheck), now - 86_400_000));
+	const fresh = msgs.findIndex(m => m.time >= from);
+	if (fresh < 0) return all;
+	const before = msgs[fresh - 1];
+	return { cursor: before ? { id: before.id, time: before.time } : { id: "0", time: "0000" } };
+}
+
+/**
  * What to judge for one source. New messages include the user's own replies: they are what
  * resolves an alert. Judge when someone else wrote, or when the user wrote and this source
  * still has pending alerts (so his reply can close them). His own chatter alone costs nothing.

@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
-import { preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
+import { firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
@@ -142,6 +142,7 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 
 async function tick(cfg: Config) {
 	const state = readJson<Record<string, string>>(P.state, {});
+	const tickStarted = new Date().toISOString();
 	const work = await workSessions();
 	const failed: { source: string; error: string }[] = [], fine: string[] = [];
 	let sources = cfg.sources;
@@ -162,9 +163,11 @@ async function tick(cfg: Config) {
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
 			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; } };
-			if (!state[key]) { // first run: set cursor, don't flood
-				mark();
-				log(`${src.name}: cursor set (${msgs.length} msgs)`); continue;
+			if (!state[key]) { // new chat: the first daemon run marks all seen; later, judge what came since the last check
+				const { cursor } = firstSeen(msgs, state["@tick"], -new Date().getTimezoneOffset() / 60);
+				if (cursor.id === last || !last) { mark(); log(`${src.name}: cursor set (${msgs.length} msgs)`); continue; }
+				state[key] = cursor.id; state[`${key}@t`] = cursor.time;
+				log(`${src.name}: new chat, judging ${msgs.length - 1 - msgs.findIndex(m => m.id === cursor.id)} recent msgs`);
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
@@ -295,6 +298,7 @@ async function tick(cfg: Config) {
 		log(`stale: ${it.id} back to brook`);
 	}
 	await housekeeping(cfg, state, work);
+	state["@tick"] = tickStarted;
 	if (!dry) writeFileSync(P.state, JSON.stringify(state, null, 2));
 	log(`checked ${sources.length} sources`);
 }
