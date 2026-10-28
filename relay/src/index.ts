@@ -43,9 +43,13 @@ export class Room {
     // A phone that slept or lost signal leaves a socket the relay still counts. Refusing new phones ("Room full") then locked
     // brook out until those died. Instead the newest phone wins: drop the least recently heard ones.
     if (role === "phone") {
-      const phones = this.state.getWebSockets("phone");
+      // Phones ping every 15 s. One silent for 45 s is dead (slept, lost signal): drop it. Never drop live phones for a
+      // newcomer (that made open pages kick each other off in a loop); allow up to 8 live ones.
       const heard = (ws: WebSocket) => (ws as any).deserializeAttachment?.()?.heard ?? 0;
-      for (const old of phones.sort((a: WebSocket, b: WebSocket) => heard(a) - heard(b)).slice(0, Math.max(0, phones.length - 2))) { try { old.close(4000, "replaced by a newer phone"); } catch {} }
+      let phones = this.state.getWebSockets("phone");
+      for (const old of phones) if (Date.now() - heard(old) > 45_000) { try { old.close(4000, "silent"); } catch {} }
+      phones = phones.filter((ws: WebSocket) => Date.now() - heard(ws) <= 45_000);
+      if (phones.length >= 8) return new Response("Room full", { status: 429 });
     }
     if (role === "agent") for (const old of this.state.getWebSockets("agent")) old.close(1000, "replaced");
     const pair = new WebSocketPair();

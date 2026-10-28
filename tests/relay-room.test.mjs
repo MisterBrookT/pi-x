@@ -16,19 +16,18 @@ function fakeRoom() {
   return { state, sockets };
 }
 
-test("a fourth phone gets in (the least recently heard one is dropped) instead of 'Room full' locking brook out", async () => {
+test("a dead phone socket (silent 45 s) makes room; live phones are never kicked off by a newcomer", async () => {
   const { Room } = await import("../relay/src/index.ts");
   const { state } = fakeRoom();
   const room = new Room(state);
   const req = role => ({ url: `https://rc/socket/${"a".repeat(64)}/${role}` });
-  for (let i = 0; i < 3; i++) { room.fetch(req("phone")); await new Promise(r => setTimeout(r, 5)); }
-  const [oldest, mid, newest] = state.getWebSockets("phone");
-  room.webSocketMessage(oldest, "ping"); // oldest spoke recently: the silent middle one goes
-  await new Promise(r => setTimeout(r, 5));
-  room.webSocketMessage(newest, "ping");
-  const res = room.fetch(req("phone"));
-  assert.equal(res.status, 101, "new phone accepted");
-  assert.equal(state.getWebSockets("phone").length, 3);
-  assert.ok(mid.closed, "the stalest phone socket is closed");
-  assert.ok(!oldest.closed && !newest.closed);
+  for (let i = 0; i < 3; i++) room.fetch(req("phone"));
+  const [dead, a, b] = state.getWebSockets("phone");
+  dead.att = { heard: Date.now() - 60_000 };
+  assert.equal(room.fetch(req("phone")).status, 101, "4th phone accepted (no more 'Room full' at 3)");
+  assert.ok(dead.closed, "the silent socket is closed");
+  assert.ok(!a.closed && !b.closed, "live phones stay");
+  for (let i = 0; i < 5; i++) room.fetch(req("phone"));
+  assert.ok(state.getWebSockets("phone").every(w => !w.closed), "no live phone is ever kicked");
+  assert.equal(room.fetch(req("phone")).status, 429, "only 8 live phones is full");
 });
