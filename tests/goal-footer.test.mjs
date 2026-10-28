@@ -184,11 +184,11 @@ test("footer repaints periodically only while background work runs", async (t) =
 test("footer: waits are always the last line; one entry per pending session, else a dim 'waiting: none'", async (t) => {
 	const h = await harness(t);
 	const idle = h.render();
-	assert.match(idle.at(-1), /⏳ waiting: none/);
-	h.ctx.ui.setStatus("pix-chat-waits", "⏳ minara-3: restyle leaderboard · 12m   ⏳ minara-2 · 3m");
+	assert.match(idle.at(-1), /waiting: none/);
+	h.ctx.ui.setStatus("pix-chat-waits", "minara-3: restyle leaderboard · 12m   minara-2 · 3m");
 	const lines = h.render();
 	assert.equal(lines.length, idle.length, "the layout never jumps");
-	assert.match(lines.at(-1), /⏳ minara-3: restyle leaderboard · 12m/);
+	assert.match(lines.at(-1), /minara-3: restyle leaderboard · 12m/);
 	assert.doesNotMatch(lines.slice(0, -1).join("\n"), /minara/);
 	for (const line of h.render(30)) assert.ok(visibleWidth(line) <= 30);
 	h.ctx.ui.setStatus("pix-chat-waits", undefined);

@@ -117,9 +117,9 @@ export function gist(message: string, label?: string): string {
 }
 
 const ago = (ms: number) => ms < 60_000 ? "now" : ms < 3_600_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 3_600_000)}h${Math.floor(ms % 3_600_000 / 60_000) ? Math.floor(ms % 3_600_000 / 60_000) + "m" : ""}`;
-/** The footer's own line: one entry per pending ask/handoff, "⏳ minara-3: restyle leaderboard · 12m". */
+/** The footer's own line: one entry per pending ask/handoff, "minara-3: restyle leaderboard · 12m". */
 export function waitingLines(w: Waiting, now = Date.now()): string | undefined {
-	const parts = w.waits.map(x => `⏳ ${x.to}${x.what ? `: ${x.what}` : ""} · ${x.check ? `check ${clock(x.check.next)}` : ago(now - x.at)}`);
+	const parts = w.waits.map(x => `${x.to}${x.what ? `: ${x.what}` : ""} · ${x.check ? `check ${clock(x.check.next)}` : ago(now - x.at)}`);
 	return parts.length ? parts.join("   ") : undefined;
 }
 

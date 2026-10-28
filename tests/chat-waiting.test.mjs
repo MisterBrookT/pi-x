@@ -60,13 +60,13 @@ test("chat plugin: sending an ask shows 'Waiting for pix', survives reload, clea
   };
   let s = start();
   await s.tools.chat.execute("1", { action: "send", to: "pix", kind: "ask", message: "status?" }, undefined, undefined, s.ctx);
-  assert.match(s.status.get("pix-chat-waits"), /^⏳ pix: status\? · now$/);
+  assert.match(s.status.get("pix-chat-waits"), /^pix: status\? · now$/);
   assert.equal(s.status.get("pix-chat"), undefined, "not squeezed beside remote/memory");
   const file = W.waitingPath(root, "for-you");
   assert.ok(existsSync(file));
   // /reload: a fresh plugin instance reads the file back.
   s.stop(); s = start(); t.after(() => s.stop());
-  assert.match(s.status.get("pix-chat-waits"), /^⏳ pix: status\?/);
+  assert.match(s.status.get("pix-chat-waits"), /^pix: status\?/);
   const thread = W.loadWaiting(file).waits[0].thread;
   chat.send("pix", "for-you", "reply", "all good", { thread, hop: 1 }, root);
   for (let i = 0; i < 100 && s.status.has("pix-chat-waits"); i++) await new Promise((r) => setTimeout(r, 20));
@@ -141,7 +141,7 @@ test("footer: each pending ask/handoff on its own line with what was asked and h
   let w = { waits: [], notices: [] };
   w = W.sentNote(w, { thread: "t1", to: "minara-3", kind: "handoff", at: 0, message: "[For you] Please restyle leaderboard (DMind blue)\nmore detail" }, true);
   w = W.sentNote(w, { thread: "t2", to: "minara-2", kind: "ask", at: 60 * 60_000 }, true);
-  assert.equal(W.waitingLines(w, 72 * 60_000), "⏳ minara-3: restyle leaderboard (DMind blue) · 1h12m   ⏳ minara-2 · 12m");
+  assert.equal(W.waitingLines(w, 72 * 60_000), "minara-3: restyle leaderboard (DMind blue) · 1h12m   minara-2 · 12m");
   assert.equal(W.noticeText(w), undefined, "waits are not squeezed beside remote/memory");
   assert.equal(W.waitingLines(W.receivedNote(W.receivedNote(w, { thread: "t1" }), { thread: "t2" })), undefined, "line hidden when nothing is pending");
   assert.equal(W.gist("x".repeat(80)).length, 40);
@@ -167,7 +167,7 @@ test("check schedule: a handoff checks exponentially from 15 min; a due check wa
   assert.match(r.wakes[0], /^Check on vLLM batching \(thread t, to minara-2\): no reply for 15 min\. It is busy/);
   assert.equal(r.waits[0].check.next, 45 * M, "next check 30 min later");
   assert.deepEqual(W.tick(r, peers, 16 * M).wakes, [], "one wake per due check");
-  assert.match(W.waitingLines(r, 15 * M), /^⏳ minara-2: vLLM batching · check \d\d:\d\d$/);
+  assert.match(W.waitingLines(r, 15 * M), /^minara-2: vLLM batching · check \d\d:\d\d$/);
   assert.equal(W.waitingLines(W.receivedNote(r, { thread: "t" })), undefined, "a reply ends the checks");
 });
 
@@ -196,7 +196,7 @@ test("chat plugin: a handoff carries a check schedule; when the receiver leaves 
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
   const r = await tools.chat.execute("1", { action: "send", to: "minara-2", kind: "handoff", message: "batch it", label: "vLLM batching", checkMinutes: 10 }, undefined, undefined, ctx);
   assert.match(r.content[0].text, /First check in 10 min \(exponential\)/);
-  assert.match(status.get("pix-chat-waits"), /^⏳ minara-2: vLLM batching · check \d\d:\d\d$/);
+  assert.match(status.get("pix-chat-waits"), /^minara-2: vLLM batching · check \d\d:\d\d$/);
   assert.equal(W.loadWaiting(W.waitingPath(root, "for-you")).waits[0].check.every, 600_000);
   peer.close();
   // The plugin's own tick (every 30 s) notices; trigger it the way a reload would.

@@ -141,8 +141,8 @@ export default function (pi: ExtensionAPI) {
         // Who this session waits on (chat asks/handoffs) gets its own line.
         const waits = statuses.get("pix-chat-waits");
         shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ") || undefined, waits: waits || undefined };
-        // Always the last line, so the footer never jumps: "⏳ waiting: none" when nothing is pending.
-        return [truncateToWidth(theme.fg("dim", location), width), stats, truncateToWidth(theme.fg("dim", waits || "⏳ waiting: none"), width)];
+        // Always the last line, so the footer never jumps: "waiting: none" when nothing is pending.
+        return [truncateToWidth(theme.fg("dim", location), width), stats, truncateToWidth(theme.fg("dim", waits || "waiting: none"), width)];
       },
     };
   });
