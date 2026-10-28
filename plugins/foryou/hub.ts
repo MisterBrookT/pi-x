@@ -1,5 +1,6 @@
 import { hideLine, isAutonomy, readLines, setLineAutonomy } from "./proactive-lines.ts";
 // For you's side of the phone hub: its list event, card fields on the For you session, and /api/foryou routes.
+import { livePrompt, readLive, takeLive } from "./live-strip.ts";
 import { bringBack, filteredView, isRule, setRule } from "./filtered.ts";
 import { watchFile, unwatchFile } from "node:fs";
 import type { HubPlugin } from "../core/hub-plugin.ts";
@@ -25,6 +26,7 @@ export function avatarRoute(path: string): { status: number; body: unknown } {
 
 /** Phone requests the relay may forward for For you. */
 export const forYouRelayAllowed = (path: string, method: string) =>
+	method === "POST" && /^\/api\/foryou\/live\/[A-Za-z0-9_-]{1,40}\/(reply|show|later)$/.test(path) ||
 	method === "GET" && path === "/api/foryou/filtered" || method === "POST" && (path === "/api/foryou/filtered/rule" || /^\/api\/foryou\/filtered\/[A-Za-z0-9_-]{1,300}\/back$/.test(path)) ||
 	method === "GET" && (path === "/api/foryou" || path === "/api/foryou/memory" || /^\/api\/foryou\/avatar\/[A-Za-z0-9_-]{1,400}$/.test(path)) || method === "POST" && (path === "/api/foryou/memory/seen" || path === "/api/foryou/memory/remove" || path === "/api/foryou/memory/edit") || method === "POST" && path === "/api/foryou/chat" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/(act|dismiss|later|done|now|card)$/.test(path) || method === "POST" && /^\/api\/foryou\/line\/[A-Za-z0-9_-]{1,60}\/(hide|autonomy)$/.test(path) || method === "GET" && path === "/api/foryou/context" || method === "POST" && /^\/api\/foryou\/[A-Za-z0-9_-]{1,40}\/autonomy$/.test(path);
 
@@ -33,7 +35,7 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	const live = () => hub.liveSessions();
 	// The page shows each loop with its real buttons and where each one goes (same as the card).
 	const pdir = proactivePaths(dir).dir;
-	const forYou = () => ({ ...forYouView(dir), cards: waitingCards(dir, live(), Date.now(), 50), memoryNew: memoryUnseen(pdir) });
+	const forYou = () => ({ ...forYouView(dir), live: readLive(dir), cards: waitingCards(dir, live(), Date.now(), 50), memoryNew: memoryUnseen(pdir) });
 	// The card: the oldest loop that needs brook, shown in the For you session (one at a time).
 	let card: Card | undefined = currentCard(dir, live());
 	let cards: Card[] = waitingCards(dir, live());
@@ -50,6 +52,8 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 	watchFile(inbox, { interval: 2000 }, onProactive);
 	watchFile(health, { interval: 5000 }, onProactive);
 	watchFile(memLog, { interval: 3000 }, onProactive);
+	const liveFile = `${pdir}/live.json`;
+	watchFile(liveFile, { interval: 2000 }, onProactive);
 	// Parked loops come back by time, not by a file change: re-check every minute.
 	const wake = setInterval(() => { if (forYou().pending.some(i => !knownItems.has(i.id))) onProactive(); }, 60_000);
 	wake.unref();
@@ -65,9 +69,18 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 		session: id => id === forYouSession.id && card ? { card, cards } : undefined,
 		// A session joining can add a "Send to" button to the card.
 		sessionJoined: id => { if (id !== forYouSession.id) onProactive(); },
-		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); unwatchFile(memLog, onProactive); clearInterval(wake); },
+		close: () => { unwatchFile(inbox, onProactive); unwatchFile(health, onProactive); unwatchFile(memLog, onProactive); unwatchFile(liveFile, onProactive); clearInterval(wake); },
 		async route(method, path, body) {
 			if (method === "GET" && path === "/api/foryou") return { status: 200, body: forYou() };
+			// Live strip: asks that came in mid-thread. reply/show tell For you; later only clears it.
+			const liveMatch = method === "POST" && path.match(/^\/api\/foryou\/live\/([A-Za-z0-9_-]{1,40})\/(reply|show|later)$/);
+			if (liveMatch) {
+				const a = takeLive(liveMatch[1], dir);
+				if (!a) return { status: 404, body: { error: "no such ask" } };
+				if (liveMatch[2] !== "later") { const text = livePrompt(a, liveMatch[2] as "reply" | "show"); if (!hub.queue(forYouSession.id, text)) await (options.start ?? startForYou)(text).catch(() => {}); }
+				hub.publish("foryou", forYou());
+				return { status: 200, body: { ok: true } };
+			}
 			// Filtered: every judged batch, bring one back to For you, per-chat always show / always mute.
 			if (method === "GET" && path === "/api/foryou/filtered") return { status: 200, body: filteredView(dir) };
 			const backMatch = method === "POST" && path.match(/^\/api\/foryou\/filtered\/([A-Za-z0-9_-]{1,300})\/back$/);

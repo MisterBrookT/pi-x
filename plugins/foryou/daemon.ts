@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
-import { saveState, firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
+import { newSince, saveState, firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
@@ -27,6 +27,8 @@ import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
+import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
+import { addLive } from "./live-strip.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
@@ -43,6 +45,9 @@ const lastErr = new Map<string, string>();
 /** Apps whose data was blocked last round (lost Full Disk Access); rechecked every 30 s until readable. */
 // Gmail login: checked at most hourly; a failure is one stable health entry.
 let gmail = { at: 0, state: "ok" as Awaited<ReturnType<typeof checkGmailAuth>>, since: "" };
+/** Fast-lane judge budget: batches per rolling hour (PIX_FAST_BUDGET). */
+const FAST_BUDGET = Number(process.env.PIX_FAST_BUDGET ?? 20);
+const fastJudged: number[] = [];
 const blockedApps = new Set<"wechat" | "dingtalk">();
 const accessBack = async () => { for (const a of blockedApps) if (await probeApp(a) !== "ok") return false; return true; };
 const logOnce = (s: string) => { const k = s.split(":")[0]; if (lastErr.get(k) === s) return false; lastErr.set(k, s); return true; };
@@ -142,7 +147,7 @@ async function housekeeping(cfg: Config, state: Record<string, string>, work: Wo
 	}
 }
 
-async function tick(cfg: Config) {
+async function tick(cfg: Config, fast = false) {
 	const state = readJson<Record<string, string>>(P.state, {});
 	const tickStarted = new Date().toISOString();
 	const work = await workSessions();
@@ -150,7 +155,8 @@ async function tick(cfg: Config) {
 	let sources = cfg.sources;
 	const forwards: Forward[] = [];
 	const pendingMarks: (() => void)[] = [];
-	try {
+	if (fast) sources = await fastSources(cfg, state, (w, e) => { if (logOnce(`fast ${w}: ${e.message}`)) log(`fast ${w}: ${e.message.slice(0, 160)}`); });
+	else try {
 		if (!dry && cfg.sources.some(x => /wechat|dingtalk/i.test(x.kind))) { const u = await ensureUnlocked(); if (u !== "open") log(`mac: ${u}`); }
 		sources = await expandSources(cfg.sources, {
 			onSuccess: src => fine.push(src.name),
@@ -160,7 +166,10 @@ async function tick(cfg: Config) {
 	for (const src of sources) {
 		try {
 			const adapter = adapterFor(src);
-			const msgs = await adapter.fetch(src);
+			let msgs = await adapter.fetch(src);
+			// Fast lane: Gmail only from people For you knows; the rest waits for the full sweep (cursor not moved).
+			if (fast && src.fastKnownOnly) { const known = fromKnown(newSince(msgs, state[sourceKey(src)], state[`${sourceKey(src)}@t`]), knownPeople(memoryDir(P.dir))); if (!known.length) continue; }
+			if (fast && !underBudget(fastJudged, Date.now(), FAST_BUDGET)) { if (logOnce("fast: budget")) log(`fast: judge budget (${FAST_BUDGET}/h) used; the rest waits for the full sweep`); break; }
 			fine.push(src.name);
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
@@ -192,6 +201,7 @@ async function tick(cfg: Config) {
 				else if (src.kind === "feishu-meeting") raw = JSON.stringify({ pass: true, why: "meeting notes: summary and 待办", ids: fresh.map(m => m.id) });
 				else try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
 				fine.push("model");
+				if (fast) fastJudged.push(Date.now());
 				const v = parseFilter(raw);
 				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender, time: m.time, text: m.text.slice(0, 1500) })), raw, verdict: v });
 				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
@@ -266,11 +276,21 @@ async function tick(cfg: Config) {
 	const active = !dry && await forYouThreadActive();
 	if (forwards.length && !dry) {
 		const text = forwardPrompt(forwards, new Date(), cfg.me);
-		if (active) {
-			holdBatch(text, P.dir);
+		// Asks to brook (a DM, an @, urgent) go to For you now even mid-thread, so the reply task is routed at
+		// once and the page shows them as a live strip; only the rest waits for the thread to go quiet.
+		const now_ = forwards.filter(f => f.urgent || fast || f.source.chat === "private");
+		const later_ = forwards.filter(f => !now_.includes(f));
+		if (active && now_.length) {
+			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
+			if (sent) { for (const f of now_) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why }); }
+			log(`forward: ${now_.map(f => f.source.name).join(", ")} -> ${sent ? "For you now (ask, mid-thread)" : "not delivered; held"}`);
+			if (!sent) later_.push(...now_);
+		}
+		if (active && !later_.length) { for (const m of pendingMarks) m(); }
+		else if (active) {
+			holdBatch(forwardPrompt(later_, new Date(), cfg.me), P.dir);
 			for (const m of pendingMarks) m();
-			for (const f of forwards.filter(f => f.urgent)) await hubPrepare(urgentLine(f.source.name, f.why));
-			log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> held (brook is in a thread with For you)${forwards.some(f => f.urgent) ? "; urgent line sent" : ""}`);
+			log(`forward: ${later_.map(f => f.source.name).join(", ")} -> held (brook is in a thread with For you)`);
 		} else {
 			const sent = await hubPrepare(text) || await startForYou(text).then(() => true, () => false);
 			log(`forward: ${forwards.map(f => f.source.name).join(", ")} -> ${sent ? "For you" : "not delivered; retry next round"}`);
@@ -281,6 +301,9 @@ async function tick(cfg: Config) {
 		const held = readQueue(P.dir);
 		if (held.length && await hubPrepare(heldPrompt(held))) { clearQueue(P.dir); log(`held: ${held.length} batches delivered`); }
 	}
+	// The fast lane stops here: health, housekeeping and the WeChat screen check belong to the full sweep
+	// (its source list is partial, so health would wrongly drop chats).
+	if (fast) { if (!dry) saveState(P.state, state); return; }
 	// WeChat screen read (the path replies go out on): a read-only capture + OCR sanity check every 30 min, so a blind
 	// capture (privacy cover, wrong window: 10-28) shows on For you instead of every send being refused. Never types.
 	if (!dry && cfg.sources.some(x => /wechat/i.test(x.kind)) && Date.now() - Date.parse(state["@wxscreen"] ?? "0") > 30 * 60_000) {
@@ -407,14 +430,19 @@ if (verb && !verb.startsWith("--")) { console.error(`unknown command: ${verb} (s
 
 const cfg = setup();
 if (!cfg.sources.length) { log(`no sources; edit ${P.config}`); process.exit(once ? 0 : 1); }
+const FAST_SEC = Number((cfg as { fastSec?: number }).fastSec ?? 60);
+// --fast --once: one fast-lane tick (measure it: node daemon.ts --fast --once --dry-run).
+if (process.argv.includes("--fast")) { const t = Date.now(); await tick(cfg, true); log(`fast tick: ${Date.now() - t} ms`); process.exit(0); }
 do {
 	await tick(cfg);
 	if (once) break;
+	let nextFast = Date.now() + FAST_SEC * 1000;
 	// While WeChat/DingTalk is blocked, look again every 30 s (one cheap folder listing), so a fix in
 	// System Settings takes effect within a minute, with no restart.
 	const until = Date.now() + cfg.intervalSec * 1000;
 	while (Date.now() < until) {
-		await new Promise(r => setTimeout(r, Math.min(30_000, Math.max(0, until - Date.now()))));
+		await new Promise(r => setTimeout(r, Math.min(30_000, Math.max(0, until - Date.now(), 0), Math.max(1000, nextFast - Date.now()))));
+		if (FAST_SEC > 0 && Date.now() >= nextFast && until - Date.now() > 20_000) { await tick(cfg, true).catch(e => log(`fast: ${(e as Error).message}`)); nextFast = Date.now() + FAST_SEC * 1000; }
 		if (blockedApps.size && await accessBack()) { log(`access back: ${[...blockedApps].join(", ")}; checking now`); blockedApps.clear(); break; }
 	}
 } while (true);
