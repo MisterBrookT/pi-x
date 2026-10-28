@@ -25,6 +25,11 @@ import { bypassProxyForLoopback } from "./remote-loopback.ts";
 import { startPrivacyCover } from "./privacy-cover.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "./remote-relay-agent.ts";
 
+/** True when brook has typed something not yet sent in the Mac input box (a reload would lose it). */
+export function hasDraft(ctx: { hasUI?: boolean; ui?: { getEditorText?: () => string } } | undefined) {
+  try { return !!ctx?.hasUI && !!ctx.ui?.getEditorText?.().trim(); } catch { return false; }
+}
+
 const messageLimit = 200;
 const heartbeatMs = 8_000;
 
@@ -121,7 +126,8 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   const autoReload = !autoReloadEnabled() ? undefined : createAutoReload({
     version: () => pixCodeVersion(pixRoot),
     // Async subagent runs count too: a reload kills their parent workflow tracker even though the children live on.
-    ready: () => !!ctx?.isIdle() && !pendingQuestion && backgroundState(pi).running === 0 && runningHelpers(ctx?.sessionManager?.getSessionFile?.()).length === 0,
+    // A draft in the Mac input box would be wiped by the reload: wait until it is sent or cleared.
+    ready: () => !!ctx?.isIdle() && !pendingQuestion && !hasDraft(ctx) && backgroundState(pi).running === 0 && runningHelpers(ctx?.sessionManager?.getSessionFile?.()).length === 0,
     reload: () => pi.sendUserMessage("/rc reload", { expandPromptTemplates: true }),
     log: logRelay,
   });

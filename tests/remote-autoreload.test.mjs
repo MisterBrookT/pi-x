@@ -83,3 +83,16 @@ test("auto-reload waits while this session has async subagent runs (a reload kil
   const src = readFileSync(new URL("../plugins/remote/index.ts", import.meta.url), "utf8");
   assert.match(src.match(/ready: \(\) =>[^\n]*/)[0], /runningHelpers\(/);
 });
+
+test("auto-reload waits while brook has an unsent draft in the Mac input box (a reload wiped it)", async () => {
+  const { hasDraft } = await import("../plugins/remote/index.ts");
+  const ui = text => ({ hasUI: true, ui: { getEditorText: () => text } });
+  assert.equal(hasDraft(ui("half a message")), true);
+  assert.equal(hasDraft(ui("  \n")), false, "whitespace is not a draft");
+  assert.equal(hasDraft(ui("")), false);
+  assert.equal(hasDraft({ hasUI: false, ui: { getEditorText: () => "x" } }), false, "no TUI (print/RPC): nothing to lose");
+  assert.equal(hasDraft({ hasUI: true, ui: { getEditorText: () => { throw new Error("gone"); } } }), false);
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../plugins/remote/index.ts", import.meta.url), "utf8");
+  assert.match(src.match(/ready: \(\) =>[^\n]*/)[0], /!hasDraft\(ctx\)/);
+});
