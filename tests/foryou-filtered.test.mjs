@@ -56,3 +56,43 @@ test("daemon applies the chat rule before the model and keeps message text for t
 	assert.match(src, /else if \(rule\) raw = JSON\.stringify\(rule\)/);
 	assert.match(src, /kind: "filter"[^\n]*text: m\.text\.slice\(0, 1500\)/);
 });
+
+for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
+	test(`phone page (${layout}): Filtered next to Memory lists batches, a row opens its messages, Bring back once, chat rules`, async t => {
+		const { chromium } = await import("playwright");
+		const d = tmp(), token = "t".repeat(32), told = [];
+		const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d, start: async m => { told.push(m); } })] });
+		const browser = await chromium.launch();
+		t.after(async () => { await browser.close(); await hub.close(); });
+		registerHubPlugin("foryou", forYouHub({ dir: d }), forYouRelayAllowed);
+		const page = await browser.newPage({ viewport, hasTouch: layout !== "monitor" });
+		const errors = []; page.on("pageerror", e => errors.push(e.message));
+		await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
+		const link = page.locator("#filteredLink");
+		await link.waitFor({ state: "attached" });
+		await link.evaluate(el => el.scrollIntoView());
+		await link.evaluate(el => el.click());
+		const rows = page.locator(".filt");
+		await rows.first().waitFor();
+		assert.deepEqual(await rows.locator("summary b").allTextContents(), ["Feishu: G", "WeChat: 盟军四人帮"], "newest first");
+		const dropped = rows.nth(1);
+		assert.match(await dropped.locator("summary").textContent(), /1 message, .*dropped闲聊|1 message, .*dropped/);
+		assert.equal(await rows.first().locator("[data-filt-back]").count(), 0, "no Bring back on a passed batch");
+		await dropped.locator("summary").click();
+		await dropped.getByText("hello").waitFor();
+		const back = dropped.locator("[data-filt-back]");
+		await back.click();
+		await page.waitForFunction(() => document.querySelector(".filt:nth-of-type(2) [data-filt-back]")?.textContent === "Brought back");
+		assert.equal(await back.isDisabled(), true);
+		assert.match(told.join("\n"), /brought back a batch[\s\S]*hello/);
+		await dropped.getByRole("button", { name: "Always mute" }).click();
+		await page.waitForFunction(() => document.querySelector('.filt:nth-of-type(2) [data-filt-rule="mute"]')?.getAttribute("aria-pressed") === "true");
+		assert.deepEqual(readRules(d), { "wechat:25038175876@chatroom": "mute" });
+		await dropped.getByRole("button", { name: "Default" }).click();
+		await page.waitForFunction(() => document.querySelector('.filt:nth-of-type(2) [data-filt-rule="none"]')?.getAttribute("aria-pressed") === "true");
+		const box = await dropped.boundingBox();
+		assert.ok(box.x >= 0 && box.x + box.width <= viewport.width + 1, "fits the width");
+		await page.screenshot({ path: `.shots/filtered-${layout}.png` });
+		assert.deepEqual(errors, []);
+	});
+}
