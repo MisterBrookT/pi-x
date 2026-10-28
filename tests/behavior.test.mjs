@@ -1,5 +1,5 @@
 // Pix behavior settings: ~/.pix/behavior.json read live, env var fallback, defaults (question 5 min);
-// risky questions never auto-pick; phone Settings > Behavior changes them.
+// phone Settings > Behavior changes them.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "pix-bh-"));
 process.env.PIX_BEHAVIOR_FILE = join(dir, "behavior.json");
 const { behavior, setBehavior } = await import("../plugins/core/behavior.ts");
-const { questionTimeoutMs, riskyQuestion } = await import("../plugins/core/ask-timeout.ts");
+const { questionTimeoutMs } = await import("../plugins/core/ask-timeout.ts");
 const { autoCloseHours } = await import("../plugins/core/auto-close.ts");
 
 test("defaults: questions auto-pick after 5 min; idle close 24 h; For you 20 checks an hour", () => {
@@ -29,13 +29,6 @@ test("env var is the fallback; the settings file wins and is read live", () => {
 	assert.equal(JSON.parse(readFileSync(process.env.PIX_BEHAVIOR_FILE, "utf8")).questionTimeoutMin, 1440, "clamped");
 	assert.throws(() => setBehavior("nope", 1));
 	writeFileSync(process.env.PIX_BEHAVIOR_FILE, "{}");
-});
-
-test("money, sending, credentials, destructive or global changes never auto-pick", () => {
-	for (const q of ["Pay the $40 invoice?", "Send this reply to Knight on WeChat?", "Use this API key?", "Delete the old checkout?", "Force-push main?", "Apply this to all sessions?", "Deploy to production?"])
-		assert.equal(questionTimeoutMs({}, q), 0, q);
-	assert.equal(questionTimeoutMs({}, "Which chart style?", "Bars or lines", "Bars", "Lines"), 5 * 60_000);
-	assert.equal(riskyQuestion("Which layout?", undefined, "Option A"), false);
 });
 
 for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }]]) {
@@ -62,7 +55,7 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		const q = page.locator('[data-behavior="questionTimeoutMin"]');
 		await q.first().waitFor();
 		assert.equal(await page.locator('[data-behavior="questionTimeoutMin"][aria-checked="true"]').textContent(), "5 min");
-		assert.match(await page.locator("#set-behavior").innerText(), /Money, sending, credentials/);
+		assert.doesNotMatch(await page.locator("#set-behavior").innerText(), /always wait/);
 		await page.locator('#set-behavior').scrollIntoViewIfNeeded();
 		await page.screenshot({ path: `.shots/behavior-${layout}.png` });
 		await page.locator('[data-behavior="questionTimeoutMin"][data-value="0"]').click();

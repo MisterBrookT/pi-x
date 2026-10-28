@@ -9,7 +9,7 @@ export interface Knob { key: string; label: string; help: string; unit: string; 
 
 /** The knobs brook can change. Order = order in Settings. */
 export const KNOBS: Knob[] = [
-	{ key: "questionTimeoutMin", label: "Questions auto-pick after", help: "If you don't answer, Pi takes the first option. Money, sending, credentials and destructive or global changes always wait.", unit: "min", env: "PIX_QUESTION_TIMEOUT_MIN", def: 5, min: 0, max: 1440, off: 0, choices: [0, 2, 5, 15, 30] },
+	{ key: "questionTimeoutMin", label: "Questions auto-pick after", help: "If you don't answer, Pi takes the first option.", unit: "min", env: "PIX_QUESTION_TIMEOUT_MIN", def: 5, min: 0, max: 1440, off: 0, choices: [0, 2, 5, 15, 30] },
 	{ key: "autoCloseHours", label: "Close idle sessions after", help: "A session with nothing open quits on its own; its history stays in Resume.", unit: "h", env: "PIX_AUTOCLOSE_HOURS", def: 24, min: 0, max: 720, off: 0, choices: [0, 6, 12, 24, 48, 168] },
 	{ key: "fastBudget", label: "For you quick checks per hour", help: "How many times an hour For you may judge new messages right away.", unit: "", env: "PIX_FAST_BUDGET", def: 20, min: 0, max: 200, off: 0, choices: [0, 5, 10, 20, 40] },
 ];

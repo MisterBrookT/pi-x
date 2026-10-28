@@ -202,9 +202,8 @@ export default function question(pi: ExtensionAPI) {
 				finish?.(remoteAnswer);
 			});
 			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, context: params.context, options: params.options });
-			// Away from the Mac: never leave the session stuck. After the timeout the first option wins,
-			// except for money, sending, credentials and destructive or global changes: those wait.
-			const waitMs = questionTimeoutMs(process.env, params.question, params.context, ...params.options.map((o: any) => `${o.label} ${o.description ?? ""}`));
+			// Away from the Mac: never leave the session stuck. After the timeout the first option wins.
+			const waitMs = questionTimeoutMs();
 			let timedOut = false;
 			const timer = waitMs ? setTimeout(() => { timedOut = true; remoteAnswer = { answer: params.options[0].label, wasCustom: false, index: 1 }; finish?.(remoteAnswer); }, waitMs) : undefined;
 
@@ -406,7 +405,7 @@ async function askMany(pi: ExtensionAPI, id: string, qs: Asked[], ctx: any) {
 		remote = v; finish?.(v);
 	});
 	pi.events.emit(QUESTION_OPEN, { id, question: qs[0].question, context: qs[0].context, options: qs[0].options, questions: qs });
-	const waitMs = questionTimeoutMs(process.env, ...qs.flatMap((q: any) => [q.question, q.context, ...q.options.map((o: any) => `${o.label} ${o.description ?? ""}`)]));
+	const waitMs = questionTimeoutMs();
 	let timedOut = false;
 	const timer = waitMs ? setTimeout(() => { timedOut = true; remote = qs.map(q => q.options[0].label); finish?.(remote); }, waitMs) : undefined;
 	const quiet = hideSpinner(ctx);
