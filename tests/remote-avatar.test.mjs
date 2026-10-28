@@ -54,8 +54,15 @@ test("running subagents are read from pi-subagents status files for this session
 
 test("helper line shows tools and activity, and turns amber after two idle minutes", () => {
   const line = app.helperLine({ id: "r", agent: "worker", task: "Fix <it>", tools: 22, idleMs: 8000 });
-  assert.match(line, /<b>worker<\/b><span>· 22 tools · active 8s ago/);
+  assert.match(line, /<b>worker<\/b><span>, 22 tools, active 8s ago/);
   assert.match(line, /Fix &lt;it&gt;/);
   assert.doesNotMatch(line, /stale/);
-  assert.match(app.helperLine({ id: "r", agent: "w", tools: 1, idleMs: 180_000 }), /helper stale.*1 tool ·/);
+  assert.match(app.helperLine({ id: "r", agent: "w", tools: 1, idleMs: 180_000 }), /helper stale.*1 tool,/);
+});
+
+test("a stuck helper says why plainly, in amber, instead of when it was last active", () => {
+  const line = app.helperLine({ id: "r", agent: "worker", tools: 0, idleMs: 5000, stuck: "no tool call 12 min after start" });
+  assert.match(line, /helper stale/);
+  assert.match(line, /0 tools, stuck: no tool call 12 min after start</);
+  assert.doesNotMatch(line, /active|<svg|·/);
 });

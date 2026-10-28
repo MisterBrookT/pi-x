@@ -769,7 +769,7 @@ test("two helpers show as one row ('2 workers'), tap to see each", async (t) => 
   const row = page.locator("#helpers > details");
   await row.first().waitFor();
   assert.equal(await row.count(), 1);
-  assert.match(await row.locator("summary").first().textContent(), /2 workers\s*· 25 tools · active 33s ago/);
+  assert.match(await row.locator("summary").first().textContent(), /2 workers\s*, 25 tools, active 33s ago/);
   await row.locator("summary").first().click();
   assert.equal(await page.locator("#helpers .helper-list .helper").count(), 2);
 });
@@ -1073,3 +1073,23 @@ test("phone footer's empty waits line is plain text, like the Mac: no ⏳ icon",
   assert.ok(html.includes("fs.waits||'waiting: none'"));
   assert.ok(!html.includes("⏳ waiting"));
 });
+
+for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
+  test(`a stuck helper reads plainly in amber and fits (${layout})`, async (t) => {
+    const { chromium } = await import("playwright");
+    const hub = await startRemoteHub({ token, port: 0 });
+    t.after(() => hub.close());
+    const base = `http://127.0.0.1:${hub.port}`;
+    await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", busy: true, messages: [{ id: "a", role: "user", text: "hi" }], helpers: [{ id: "h1", agent: "worker", tools: 0, idleMs: 4000, task: "x", stuck: "no tool call 12 min after start" }] }) });
+    const browser = await chromium.launch({ headless: true });
+    t.after(() => browser.close());
+    const page = await browser.newPage({ viewport, hasTouch: layout !== "monitor" });
+    await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+    await page.goto(`${base}/#token=${token}`);
+    const row = page.locator("#helpers > details.helper.stale");
+    await row.waitFor();
+    assert.match(await row.locator("summary").textContent(), /worker, 0 tools, stuck: no tool call 12 min after start/);
+    const r = await row.locator("summary").boundingBox();
+    assert.ok(r.x >= 0 && r.x + r.width <= viewport.width + 1);
+  });
+}
