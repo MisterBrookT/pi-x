@@ -66,7 +66,7 @@ test("hub: GET /api/accounts, POST a session's account (unknown refused), sessio
 });
 
 for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
-	test(`phone (${layout}): Settings shows each account's ring and % left; the model sheet moves this session; footer names the account`, async t => {
+	test(`phone (${layout}): Settings shows each account's ring and % left; the model sheet moves this session; footer keeps model and context only`, async t => {
 		const { chromium } = await import("playwright");
 		const { startRemoteHub } = await jiti.import("../plugins/remote/remote-hub.ts");
 		const tk = "a".repeat(32), hub = await startRemoteHub({ token: tk, port: 0, plugins: [accountsHub()] }), browser = await chromium.launch();
@@ -78,7 +78,7 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		const errors = []; page.on("pageerror", e => errors.push(e.message));
 		await page.goto(`${base}/#token=${tk}`);
 		await page.waitForSelector("#messages .msg");
-		await page.waitForFunction(() => /brook/.test(document.getElementById("piFooter")?.textContent || ""));
+		await page.waitForFunction(() => /Opus/.test(document.getElementById("piFooter")?.textContent || ""));
 		await page.evaluate(() => document.querySelector("[data-pf-model]").click());
 		await page.locator("#accountList [data-account=minarabench]").waitFor();
 		assert.equal(await page.locator("#accountList [data-account=auto]").getAttribute("aria-checked"), "true");
@@ -86,7 +86,7 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		await page.locator("#accountList [data-account=minarabench]").click();
 		await page.waitForFunction(() => document.querySelector("#accountList [data-account=minarabench]")?.getAttribute("aria-checked") === "true");
 		assert.equal(k.sessionAccounts().s1.pin, "minarabench");
-		await page.waitForFunction(() => /minarabench/.test(document.getElementById("piFooter").textContent));
+		await page.waitForFunction(() => document.querySelector("#accountList [data-account=minarabench]")?.getAttribute("aria-checked") === "true");
 		await page.keyboard.press("Escape");
 		await page.evaluate(() => { document.getElementById("modelShade").click(); showAppearance(); });
 		await page.evaluate(() => document.querySelector('[data-set-nav="accounts"]').click());
@@ -95,7 +95,7 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		assert.match(text, /brookUsage 70% resets in 3 h/);
 		assert.match(text, /codex \(Codex\)Usage 1% resets/);
 		assert.doesNotMatch(text, /left/, "usage, not % left");
-		assert.match(await page.locator("#piFooter").textContent(), /minarabench 60%/, "footer: account and its usage");
+		assert.doesNotMatch(await page.locator("#piFooter").textContent(), /minarabench|60%/, "footer: model and context only; usage lives in Settings > Accounts");
 		assert.equal(await page.locator("#accountsRows .acct-ring").count(), 3);
 		await page.locator("#set-accounts").scrollIntoViewIfNeeded();
 		await page.screenshot({ path: `.shots/accounts-${layout}.png` });
