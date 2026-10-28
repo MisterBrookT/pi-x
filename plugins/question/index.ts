@@ -33,6 +33,8 @@ interface QuestionDetails {
 
 export { questionTimeoutMs } from "../core/ask-timeout.ts";
 import { questionTimeoutMs } from "../core/ask-timeout.ts";
+import { KNOBS, behaviorHub, behaviorLabel, behaviorRelayAllowed, behaviorRows, setBehavior } from "../core/behavior.ts";
+import { registerHubPlugin } from "../core/hub-plugin.ts";
 
 // Options with labels and optional descriptions
 const OptionSchema = Type.Object({
@@ -136,6 +138,23 @@ export function renderQuestion(state: { question: string; context?: string; opti
 }
 
 export default function question(pi: ExtensionAPI) {
+	// Pix behavior settings (question auto-pick, idle close, For you checks): phone Settings and /behavior here.
+	registerHubPlugin("behavior", behaviorHub(), behaviorRelayAllowed);
+	pi.registerCommand?.("behavior", {
+		description: "Pix behavior: /behavior lists, /behavior <setting> <value> changes (0 = off)",
+		getArgumentCompletions: (prefix: string) => { const r = KNOBS.map(k => ({ value: k.key + " ", label: k.key })).filter(x => x.value.startsWith(prefix)); return r.length ? r : null; },
+		handler: async (args: string, ctx: any) => {
+			const [key, raw] = args.trim().split(/\s+/);
+			if (key) {
+				const k = KNOBS.find(x => x.key.toLowerCase() === key.toLowerCase());
+				if (!k || raw === undefined || !Number.isFinite(Number(raw))) { ctx.ui.notify(`Usage: /behavior <${KNOBS.map(x => x.key).join("|")}> <number>`, "warning"); return; }
+				const v = setBehavior(k.key, Number(raw));
+				ctx.ui.notify(`${k.label}: ${behaviorLabel(k, v)}`, "info");
+				return;
+			}
+			ctx.ui.notify(behaviorRows().map(r => `${r.label}: ${behaviorLabel(r, r.value)}   (/behavior ${r.key} <n>)`).join("\n"), "info");
+		},
+	});
 	pi.registerTool({
 		name: "question",
 		label: "Question",
@@ -183,8 +202,9 @@ export default function question(pi: ExtensionAPI) {
 				finish?.(remoteAnswer);
 			});
 			pi.events.emit(QUESTION_OPEN, { id: _toolCallId, question: params.question, context: params.context, options: params.options });
-			// Away from the Mac: never leave the session stuck. After the timeout the first option wins.
-			const waitMs = questionTimeoutMs();
+			// Away from the Mac: never leave the session stuck. After the timeout the first option wins,
+			// except for money, sending, credentials and destructive or global changes: those wait.
+			const waitMs = questionTimeoutMs(process.env, params.question, params.context, ...params.options.map((o: any) => `${o.label} ${o.description ?? ""}`));
 			let timedOut = false;
 			const timer = waitMs ? setTimeout(() => { timedOut = true; remoteAnswer = { answer: params.options[0].label, wasCustom: false, index: 1 }; finish?.(remoteAnswer); }, waitMs) : undefined;
 
@@ -386,7 +406,7 @@ async function askMany(pi: ExtensionAPI, id: string, qs: Asked[], ctx: any) {
 		remote = v; finish?.(v);
 	});
 	pi.events.emit(QUESTION_OPEN, { id, question: qs[0].question, context: qs[0].context, options: qs[0].options, questions: qs });
-	const waitMs = questionTimeoutMs();
+	const waitMs = questionTimeoutMs(process.env, ...qs.flatMap((q: any) => [q.question, q.context, ...q.options.map((o: any) => `${o.label} ${o.description ?? ""}`)]));
 	let timedOut = false;
 	const timer = waitMs ? setTimeout(() => { timedOut = true; remote = qs.map(q => q.options[0].label); finish?.(remote); }, waitMs) : undefined;
 	const quiet = hideSpinner(ctx);

@@ -4,12 +4,10 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { behavior } from "./behavior.ts";
 
-/** Hours of idleness before a session closes itself. PIX_AUTOCLOSE_HOURS=0 turns it off. */
-export const autoCloseHours = (env = process.env): number => {
-	const v = Number(env.PIX_AUTOCLOSE_HOURS ?? 24);
-	return Number.isFinite(v) && v >= 0 ? v : 24;
-};
+/** Hours of idleness before a session closes itself. Settings > Behavior, else PIX_AUTOCLOSE_HOURS; 0 turns it off. */
+export const autoCloseHours = (env = process.env): number => behavior("autoCloseHours", env);
 
 export interface CloseState {
 	id: string;

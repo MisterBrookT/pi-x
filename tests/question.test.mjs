@@ -1,3 +1,4 @@
+process.env.PIX_BEHAVIOR_FILE ??= "/nonexistent/pix-behavior.json";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -44,7 +45,7 @@ test("the question tool tells the model to ask decisions as choices", async () =
 
 test("a question nobody answers takes the first option after the timeout, says so to the agent, and shows it", async () => {
   const { default: register, questionTimeoutMs } = await import("../plugins/question/index.ts");
-  assert.equal(questionTimeoutMs({}), 15 * 60_000, "default 15 min");
+  assert.equal(questionTimeoutMs({}), 5 * 60_000, "default 5 min");
   assert.equal(questionTimeoutMs({ PIX_QUESTION_TIMEOUT_MIN: "2" }), 120_000);
   assert.equal(questionTimeoutMs({ PIX_QUESTION_TIMEOUT_MIN: "0" }), 0, "0 waits forever");
   let tool; const emitted = [];
