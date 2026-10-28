@@ -71,6 +71,12 @@ export function createPushSender(path: string, options: { subject?: string; fetc
       s.subscriptions = [...s.subscriptions.filter(x => x.endpoint !== sub.endpoint), { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } }].slice(-10);
       await save();
     },
+    unsubscribe: async (endpoint: string) => {
+      if (!store && !existsSync(path)) return;
+      const s = await load(), before = s.subscriptions.length;
+      s.subscriptions = s.subscriptions.filter(x => x.endpoint !== endpoint);
+      if (s.subscriptions.length !== before) await save();
+    },
     count: async () => store || existsSync(path) ? (await load()).subscriptions.length : 0,
     /** Send to every phone. Subscriptions the push service reports as gone are removed. */
     notify: async (message: { title: string; body: string; session?: string; tag?: string; foryou?: boolean }, skip: (endpoint: string) => boolean = () => false) => {

@@ -81,3 +81,33 @@ test("phone Settings: one scrolling list, every section shown", async (t) => {
 	const n = await page.evaluate(() => [...document.querySelectorAll("#sheet .set-sec")].filter(s => s.offsetParent).length);
 	assert.ok(n >= 3, `all sections visible, got ${n}`);
 });
+
+test("notifications are one switch: on subscribes, off unsubscribes this device on the Mac too", async (t) => {
+	const { mkdtemp } = await import("node:fs/promises"), { tmpdir } = await import("node:os"), { join } = await import("node:path");
+	const { createPushSender } = await import("../plugins/remote/remote-push.ts");
+	const push = createPushSender(join(await mkdtemp(join(tmpdir(), "pix-push-")), "push.json"));
+	const sub = { endpoint: "https://push.example/abc", keys: { p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" } };
+	await push.subscribe(sub);
+	assert.equal(await push.count(), 1);
+	await push.unsubscribe(sub.endpoint);
+	assert.equal(await push.count(), 0);
+
+	const { page } = await open(t, { ua: IPAD });
+	await page.evaluate(() => {
+		let sub = null; const fake = { endpoint: "https://push.example/abc", toJSON() { return { endpoint: this.endpoint, keys: { p256dh: "x", auth: "y" } }; }, unsubscribe: async () => { sub = null; return true; } };
+		window.__posts = [];
+		const reg = { pushManager: { getSubscription: async () => sub, subscribe: async () => (sub = fake) } };
+		Object.defineProperty(navigator, "serviceWorker", { value: { register: async () => reg }, configurable: true });
+		window.PushManager = function () {}; window.Notification = { permission: "granted", requestPermission: async () => "granted" };
+		const real = window.fetch; window.fetch = (u, o) => { if (String(u).includes("/api/push")) { window.__posts.push(o?.body ? JSON.parse(o.body) : "GET"); return Promise.resolve(new Response('{"publicKey":"AAAA"}', { headers: { "content-type": "application/json" } })); } return real(u, o); };
+	});
+	await page.evaluate(() => setupNotify());
+	const btn = page.locator("#notify");
+	assert.equal(await btn.getAttribute("role"), "switch");
+	assert.equal(await btn.getAttribute("aria-checked"), "false");
+	await btn.evaluate(b => b.click()); await page.waitForFunction(() => document.getElementById("notify").getAttribute("aria-checked") === "true");
+	await btn.evaluate(b => b.click()); await page.waitForFunction(() => document.getElementById("notify").getAttribute("aria-checked") === "false");
+	const posts = await page.evaluate(() => window.__posts);
+	assert.ok(posts.some(p => p.test && p.subscription), "turning on subscribes and sends a test");
+	assert.ok(posts.some(p => p.unsubscribe === "https://push.example/abc"), "turning off tells the Mac");
+});

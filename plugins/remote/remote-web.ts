@@ -211,6 +211,7 @@ body.cmd-held [data-num]{position:relative}body.cmd-held [data-num]::after{conte
 #sheet.appearance-sheet .set-nav{display:flex;flex-direction:column;gap:2px;grid-column:1;grid-row:1/3;padding:48px 10px 10px;background:color-mix(in srgb,var(--text) 4.5%,var(--bg));box-shadow:inset -.5px 0 0 var(--set-sep)}
 #sheet.appearance-sheet .set-nav button{display:flex;align-items:center;gap:10px;height:34px;padding:0 8px;border:0;border-radius:9px;background:none;color:var(--text);font-size:calc(13px * var(--ts,1));text-align:left}
 #sheet.appearance-sheet .set-sec.set-off{display:none}
+#notify.notify-switch{display:flex;align-items:center;justify-content:space-between;width:100%}#notify .sw{flex:none;width:44px;height:26px;border-radius:13px;background:color-mix(in srgb,var(--text) 18%,transparent);position:relative;transition:background .2s}#notify .sw::after{content:'';position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:var(--bg);box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}#notify[aria-checked="true"] .sw{background:var(--text)}#notify[aria-checked="true"] .sw::after{transform:translateX(18px)}#notify small{margin-left:auto;margin-right:12px;color:var(--muted)}
 #sheet.appearance-sheet .set-nav button[aria-current="true"]{background:color-mix(in srgb,var(--text) 8%,transparent)}
 #sheet.appearance-sheet .set-nav svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;opacity:.8}
 #sheet.appearance-sheet .set-main{grid-column:2;grid-row:2;padding:0 28px 28px}
@@ -666,7 +667,10 @@ const b64u=s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/").padEnd(
 async function setupNotify(){const btn=$("notify");if(!("serviceWorker" in navigator))return;
   const reg=await navigator.serviceWorker.register("/sw.js").catch(()=>null);if(!reg)return;btn.hidden=false;
   const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
-  const ready=async()=>{const sub=await reg.pushManager?.getSubscription();if(sub&&Notification.permission==="granted"){try{await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON()})});btn.textContent="Notifications on · send test"}catch{}}};
+  // One switch: tap to turn notifications on (subscribes, sends a test), tap again to turn them off on this device.
+  const show=on=>{btn.disabled=false;btn.setAttribute("role","switch");btn.setAttribute("aria-checked",String(on));btn.classList.add("notify-switch");btn.innerHTML='Notifications<span class="sw" aria-hidden="true"></span>'};
+  show(false);
+  const ready=async()=>{const sub=await reg.pushManager?.getSubscription();if(sub&&Notification.permission==="granted"){show(true);try{await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON()})})}catch{}}};
   if(!("PushManager" in window)){btn.textContent=standalone?"Notifications need iOS 16.4 or later":"Notifications: add Pix to the Home Screen first";btn.disabled=true;return}
   void ready();
   // Tell the Mac when Pix is on screen, so it does not notify this phone while you are reading.
@@ -675,9 +679,11 @@ async function setupNotify(){const btn=$("notify");if(!("serviceWorker" in navig
   document.addEventListener("visibilitychange",()=>void presence());
   // Coming back to the page: the direct event stream may have missed updates while iOS froze it, so fetch the shown session now.
   document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!paired&&active)void open(active,expandedSession===active)});setInterval(()=>{if(document.visibilityState==="visible")void presence()},10000);void presence();
-  btn.onclick=async()=>{try{if(await Notification.requestPermission()!=="granted"){btn.textContent="Notifications blocked in Settings";return}
+  btn.onclick=async()=>{const on=btn.getAttribute("aria-checked")==="true";btn.disabled=true;
+    if(on){try{const sub=await reg.pushManager.getSubscription();if(sub){await api("/api/push",{method:"POST",body:JSON.stringify({unsubscribe:sub.endpoint})}).catch(()=>{});await sub.unsubscribe()}endpoint="";show(false)}catch(e){show(true);btn.title="Could not turn off: "+(e.message||e)}return}
+    try{if(await Notification.requestPermission()!=="granted"){show(false);btn.innerHTML='Notifications<small>Blocked in iOS Settings</small>';return}
     const {publicKey}=await api("/api/push");const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(publicKey)});
-    await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON(),test:true})});btn.textContent="Notifications on · send test"}catch(e){btn.textContent="Could not turn on: "+(e.message||e)}}}
+    await api("/api/push",{method:"POST",body:JSON.stringify({subscription:sub.toJSON(),test:true})});endpoint=sub.endpoint;show(true)}catch(e){show(false);btn.title="Could not turn on: "+(e.message||e)}}}
 navigator.serviceWorker?.addEventListener("message",e=>{if(e.data?.pixOpenForYou)return openForYou();const id=e.data?.pixOpenSession;if(id)void open(id)});
 {if(new URLSearchParams(location.search).has("foryou")){history.replaceState(null,"","/"+location.hash);setTimeout(openForYou,800)}}{const q=new URLSearchParams(location.search).get("session");if(q){active=q;localStorage.pixRemoteSession=q;history.replaceState(null,"","/"+location.hash)}}
 setTimeout(()=>void setupNotify(),0);

@@ -331,6 +331,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
           if (onScreen.size > 20) onScreen.delete(onScreen.keys().next().value!);
           return send(res, 200, { ok: true });
         }
+        if (typeof input?.unsubscribe === "string" && input.unsubscribe.length < 1000) { await push.unsubscribe(input.unsubscribe); onScreen.delete(input.unsubscribe); return send(res, 200, { ok: true }); }
         if (!validSubscription(input?.subscription)) return send(res, 400, { error: "invalid subscription" });
         await push.subscribe(input.subscription);
         if (input.test) await push.notify({ title: "Pix", body: "Notifications are on", tag: "pix-test" });
