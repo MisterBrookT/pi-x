@@ -13,6 +13,8 @@
 
 - Every user-visible change must reach the iPhone too. When a feature changes what brook sees or can do on the Mac (cards, buttons, lists, states), make the phone page show and do the same, allow the route through the relay (`relayAllowed`), and test it in the phone browser test. A change is not delivered until it works on the phone through https://rc.brooktang.fun.
 
+- Every phone-page change must work in all three layouts brook uses: iPhone (narrow, about 402px), iPad (about 1180px, touch, maybe a hardware keyboard), and iPad with an external monitor (1920px and wider). Watch CSS inside `@media(min-width:761px)`: it never reaches the iPhone. Check each layout yourself (a screenshot of each), and give tests that depend on layout one case per layout.
+
 - The phone page is served by the relay Worker (`relay/`), not the Mac, so the Mac's autoreload never updates it. A post-commit hook (`scripts/git-hooks/post-commit`, enabled by `npm install` via `core.hooksPath`) deploys the relay whenever a commit touches `relay/` or `src/remote-{web,relay-web,sw}.ts`. Deploy by hand with `npm run deploy:relay`; skip once with `PIX_SKIP_RELAY_DEPLOY=1`.
 
 ## Design

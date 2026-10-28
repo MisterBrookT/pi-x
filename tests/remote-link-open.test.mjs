@@ -111,3 +111,13 @@ test("notifications are one switch: on subscribes, off unsubscribes this device 
 	assert.ok(posts.some(p => p.test && p.subscription), "turning on subscribes and sends a test");
 	assert.ok(posts.some(p => p.unsubscribe === "https://push.example/abc"), "turning off tells the Mac");
 });
+
+for (const [name, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["iPad + monitor", { width: 1920, height: 1080 }]]) {
+	test(`${name}: the notification switch is drawn and the Links setting is reachable`, async (t) => {
+		const { page } = await open(t, { ua: IPAD, viewport });
+		await page.evaluate(() => { const n = document.getElementById("notify"); n.hidden = false; n.setAttribute("role", "switch"); n.setAttribute("aria-checked", "true"); n.classList.add("notify-switch"); n.innerHTML = 'Notifications<span class="sw"></span>'; showAppearance(); document.querySelector('[data-set-nav="device"]')?.click(); });
+		const sw = await page.evaluate(() => { const r = document.querySelector("#notify .sw").getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; });
+		assert.deepEqual(sw, [44, 26], "switch track visible");
+		assert.equal(await page.locator('[data-link-open="chrome"]').count(), 1);
+	});
+}
