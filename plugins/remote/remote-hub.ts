@@ -50,6 +50,8 @@ export interface RemoteSnapshot {
   /** Context window use, and the latest Pix todo plan. */
   context?: { tokens: number | null; window: number; percent: number | null };
   todos?: { id: string; text: string; status: string; parentId?: string }[];
+  /** The slash commands this Pi offers (name, one-line description), for the phone's / menu. */
+  commands?: { name: string; description?: string }[];
   /** Running pi-subagents helpers launched by this session. */
   helpers?: RemoteHelper[];
   footer?: { work?: string; core?: string; waits?: string };

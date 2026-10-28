@@ -184,9 +184,18 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     const messages = remoteMessages(branch, { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }).slice(-messageLimit);
     const visibleStream = streaming.slice(-12_000);
     const named = pi.getSessionName?.() || manager.getSessionName();
-    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); const n = bg.running + (bg.waits ?? 0); return { waiting: busy ? 0 : n, nextLook: n ? bg.nextLook : undefined }; })(), ...(chatWaiting ? { peerWait: chatWaiting } : {}), ...(() => { const p = loadArtifacts(sessionId).map(x => ({ title: x.title, url: x.kind === "file" ? x.url.replace(/^~(?=\/|$)/, options.home ?? process.env.HOME ?? "") : x.url, kind: x.kind })); return p.length ? { pinned: p.reverse() } : {}; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), helpers: runningHelpers(manager.getSessionFile?.()), footer: footerStatus(pi), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
+    return fitRemoteSnapshot({ id: sessionId, name: named || basename(ctx.cwd) || "Pi session", named: !!named, cwd: ctx.cwd, busy, origin, ...(() => { const bg = backgroundState(pi); const n = bg.running + (bg.waits ?? 0); return { waiting: busy ? 0 : n, nextLook: n ? bg.nextLook : undefined }; })(), ...(chatWaiting ? { peerWait: chatWaiting } : {}), ...(() => { const p = loadArtifacts(sessionId).map(x => ({ title: x.title, url: x.kind === "file" ? x.url.replace(/^~(?=\/|$)/, options.home ?? process.env.HOME ?? "") : x.url, kind: x.kind })); return p.length ? { pinned: p.reverse() } : {}; })(), question: pendingQuestion, rewinds: rewindPoints(manager.getBranch()), messages, ...modelChoices(), context: contextUsage(), todos: latestTodos(branch), commands: slashCommands(), helpers: runningHelpers(manager.getSessionFile?.()), footer: footerStatus(pi), streaming: visibleStream || undefined, streamingHtml: visibleStream ? renderRemoteMarkdown(remend(visibleStream), { cwd: ctx.cwd, home: options.home, hubRoot: options.memoryRoot }) : undefined });
   };
 
+  // The same / list Pi shows on the Mac: built-ins the phone can run, plus extension commands, prompts and skills.
+  const phoneBuiltins: [string, string][] = [["new", "Start a new session"], ["compact", "Manually compact the session context"], ["reload", "Reload keybindings, extensions, skills, prompts, themes, and context files"], ["name", "Set session display name"]];
+  const slashCommands = () => {
+    let extra: { name: string; description?: string }[] = [];
+    try { extra = (pi as any).getCommands?.() ?? []; } catch {}
+    const seen = new Set<string>();
+    return [...phoneBuiltins.map(([name, description]) => ({ name, description })), ...extra.map(c => ({ name: String(c.name), description: String(c.description ?? "").slice(0, 120) }))]
+      .filter(c => c.name && !seen.has(c.name) && (seen.add(c.name), true)).slice(0, 120);
+  };
   const contextUsage = () => {
     const u = ctx?.getContextUsage();
     return u ? { tokens: u.tokens, window: u.contextWindow, percent: u.percent } : undefined;
@@ -316,6 +325,12 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     ];
     if (typeof prompt === "object") for (const image of prompt.images) phoneImages.add(image.data);
     // While Pi works, a phone message steers the current turn by default, like Enter in the terminal.
+    // "/name x", "/skill:…", "/todo …": run like the Mac's editor does (extension commands, skills, prompt templates).
+    const slash = typeof content !== "string" && prompt && typeof prompt === "object" && !prompt.images?.length && /^\/\S/.test(prompt.text ?? "") ? prompt.text : typeof content === "string" && /^\/\S/.test(content) ? content : "";
+    const nameCmd = /^\/name\s+(.+)$/.exec(slash);
+    if (nameCmd) { (pi as any).setSessionName?.(nameCmd[1].trim()); schedulePush(); return; }
+    if (slash && ctx.isIdle()) { pi.sendUserMessage(slash, { expandPromptTemplates: true }); return; }
+    if (slash) { pi.sendUserMessage(slash, { expandPromptTemplates: true, deliverAs: typeof prompt === "object" && (prompt as any).mode === "followUp" ? "followUp" : "steer" }); return; }
     if (ctx.isIdle()) pi.sendUserMessage(content);
     else pi.sendUserMessage(content, { deliverAs: typeof prompt === "object" && prompt.mode === "followUp" ? "followUp" : "steer" });
   };
