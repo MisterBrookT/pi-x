@@ -10,7 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Text } from "@earendil-works/pi-tui";
 import { basename, resolve } from "node:path";
 import { Type } from "typebox";
-import { board, chatRoot, claimName, nameBase, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
+import { board, chatRoot, claimName, nameBase, nameFree, slug, find, KINDS, MAX_HOPS, owner, send, wakes, join_, type Kind, type Note, type Peer } from "./chat.ts";
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
 import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../core/background-state.ts";
 import { checkFor, closeWaits, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
@@ -90,7 +90,8 @@ export default function (pi: ExtensionAPI) {
     // Keep Pi's own session name (Remote list, /resume) in step; the id and routing stay the same.
     const named = pi.getSessionName();
     if (named && named !== name) (pi as { setSessionName?: (n: string) => void }).setSessionName?.(name);
-    me = { name, cwd: ctx.cwd, pid: process.pid, session: ctx.sessionManager?.getSessionId?.(), at: Date.now(), status: "idle", doing: "", claims: [] };
+    const fam = new RegExp(`^${slug(base).replace(/[.]/g, "\\.")}(-\\d+)?$`);
+    me = { name, cwd: ctx.cwd, pid: process.pid, session: ctx.sessionManager?.getSessionId?.(), at: Date.now(), status: "idle", doing: "", claims: [], ...(fam.test(name) ? {} : { chosen: true }) };
     room = join_(me, receive);
     ui = ctx.hasUI ? ctx.ui : undefined;
     title(ctx);
@@ -100,7 +101,25 @@ export default function (pi: ExtensionAPI) {
   // The terminal tab/pane title is the board name ("minara-2"), so Otty tabs match the board.
   // Pi rewrites the title on session_info_changed and some redraws; re-apply ours after it.
   const title = (ctx: ExtensionContext) => { if (me && ctx.hasUI) (ctx.ui as { setTitle?: (t: string) => void }).setTitle?.(me.name); };
-  pi.on("session_info_changed" as any, (_e: unknown, ctx: ExtensionContext) => { setTimeout(() => title(ctx), 0); });
+  // A name set with /name (or chat set name=) becomes this session's board name: news-infra instead of minara-1.
+  // Same session id, same history; the old name forwards so threads and mail still arrive.
+  const rename = (wanted: string): string => {
+    if (!me || !room) return "chat is not ready";
+    const name = slug(wanted);
+    if (name === me.name) return `Already "${name}".`;
+    if (name === "for-you" || !nameFree(name, me.session)) return `"${name}" is taken by another live session.`;
+    const old = me.name;
+    room = (room as any).rename(name);
+    me = { ...me, name, chosen: true };
+    return `Renamed "${old}" to "${name}". Messages to "${old}" still reach you.`;
+  };
+  pi.on("session_info_changed" as any, (e: { name?: string }, ctx: ExtensionContext) => {
+    if (e?.name && me && slug(e.name) !== me.name && me.session !== "pix-foryou") {
+      const r = rename(e.name);
+      if (!r.startsWith("Renamed") && ctx.hasUI && !r.startsWith("Already")) ctx.ui.notify(r, "warning");
+    }
+    setTimeout(() => title(ctx), 0);
+  });
   pi.on("agent_start", (_e, ctx) => { room?.update({ status: "busy" }); title(ctx); });
   pi.on("agent_end", () => room?.update({ status: "idle" }));
   pi.on("session_shutdown", () => { clearInterval(timer); timer = undefined; room?.close(); room = undefined; });
@@ -147,6 +166,7 @@ export default function (pi: ExtensionAPI) {
       label: Type.Optional(Type.String({ maxLength: 60, description: "ask/handoff: a short task summary (≤40 chars) shown in your footer while you wait, e.g. 'restyle leaderboard'" })),
       thread: Type.Optional(Type.String({ description: "Thread id when replying; close: the wait to stop (or to= a session to close all waits on it, or thread=\"all\")" })),
       doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
+      name: Type.Optional(Type.String({ description: "set: give this session a task name (news-infra) instead of the folder name; the old name keeps forwarding" })),
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
       grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
       check: Type.Optional(StringEnum(["off", "fixed", "exponential"], { description: "ask/handoff: when to wake you to check on it if no reply came (like a background job). Default: exponential for handoff, off for ask. You are also woken at once if the receiver exits or stops working without replying." })),
@@ -171,6 +191,12 @@ export default function (pi: ExtensionAPI) {
           let closed: { what?: string; to: string }[] = [];
           setWaiting(w => { const r = closeWaits(w, which); closed = r.closed; return r.w; });
           return closed.length ? `Stopped waiting on: ${closed.map(x => `${x.to}${x.what ? ` (${x.what})` : ""}`).join("; ")}.` : "No open wait matches.";
+        }
+        if (p.action === "set" && (p as any).name) {
+          const r = rename((p as any).name);
+          if (r.startsWith("Renamed")) (pi as { setSessionName?: (n: string) => void }).setSessionName?.(me!.name);
+          if (p.doing === undefined && !p.claims) return r;
+          if (!r.startsWith("Renamed") && !r.startsWith("Already")) return r;
         }
         if (p.action === "set") {
           const claims = p.claims?.map((c) => (c.includes("/") ? resolve(ctx.cwd, c) : c));

@@ -20,7 +20,11 @@ export const MAX_HOPS = 3;
 export const KINDS = ["note", "ask", "handoff", "reply"] as const;
 export type Kind = (typeof KINDS)[number];
 
-export type Peer = { name: string; cwd: string; pid: number; session?: string; at: number; status?: string; doing?: string; claims?: string[] };
+export type Peer = { name: string; cwd: string; pid: number; session?: string; at: number; status?: string; doing?: string; claims?: string[];
+  /** A task name brook or the session chose (news-infra), kept across restarts instead of the folder name. */
+  chosen?: boolean;
+  /** Set on an old name after a rename: mail and lookups go to this name. */
+  movedTo?: string };
 export type Note = { id: string; from: string; kind: Kind; text: string; thread: string; hop: number; at: number; grant?: string[] };
 
 const alive = (pid: number) => { if (!(pid > 0)) return false; try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; } };
@@ -34,7 +38,7 @@ function entries(root: string): Array<Peer & { live: boolean }> {
   try { names = readdirSync(root); } catch { return []; }
   return names.flatMap((n) => {
     const p = readJson<Peer>(join(root, n, "me.json"));
-    return p?.name ? [{ ...p, live: alive(p.pid) }] : [];  // skips old-format entries
+    return p?.name && !p.movedTo ? [{ ...p, live: alive(p.pid) }] : [];  // skips old-format entries and renamed-away names
   });
 }
 
@@ -51,6 +55,7 @@ export function claimName(base: string, pid: number, root = chatRoot(), session?
   // The same Pi session gets its old name back (so a rename like minara -> minara-1 sticks across restarts).
   // Only if it is still in this folder's family: old task-title names (polish-kaji-…) are replaced by the folder name.
   const mine = session && all.find((p) => p.session === session && (!p.live || p.pid === pid));
+  if (mine && mine.chosen) return mine.name;
   if (mine && (mine.name === slug(base) || new RegExp(`^${slug(base).replace(/[.]/g, "\\.")}-\\d+$`).test(mine.name))) return mine.name;
   // Once a family is numbered (minara-1, minara-2), new members are numbered too: no bare "minara".
   const numbered = taken.has(`${slug(base)}-1`);
@@ -63,6 +68,8 @@ export function claimName(base: string, pid: number, root = chatRoot(), session?
 
 /** Resolve a target by exact name or a unique prefix; dead names still resolve so mail can wait for them. */
 export function find(to: string, root = chatRoot(), self?: string): string | { error: string } {
+  const moved = forward(to, root);
+  if (moved !== to) return moved === self ? { error: `"${to}" is now you (${moved})` } : moved;
   const all = entries(root).filter((p) => p.name !== self);
   const exact = all.find((p) => p.name === to);
   if (exact) return exact.name;
@@ -79,7 +86,22 @@ export function owner(item: string, self: string, root = chatRoot()): Peer | und
   return board(root).find((p) => p.name !== self && (p.claims ?? []).some((c) => c.toLowerCase() === k));
 }
 
+/** Follow renames: an old name (minara-1) points at the new one (news-infra). */
+export function forward(name: string, root = chatRoot()): string {
+  for (let i = 0, n = name; i < 5; i++) { const m = readJson<Peer>(join(root, n, "me.json"))?.movedTo; if (!m) return n; n = m; }
+  return name;
+}
+
+/** Can this session take the name? Free, dead, an alias of itself, or already its own. */
+export function nameFree(name: string, session: string | undefined, root = chatRoot()): boolean {
+  const p = readJson<Peer>(join(root, name, "me.json"));
+  if (!p) return true;
+  if (p.movedTo) return true;
+  return p.session === session || !alive(p.pid);
+}
+
 export function send(from: string, to: string, kind: Kind, text: string, opts: { thread?: string; hop?: number; grant?: string[] } = {}, root = chatRoot()): Note {
+  to = forward(to, root);
   const id = randomUUID().slice(0, 8);
   const note: Note = { id, from, kind, text, thread: opts.thread ?? id, hop: opts.hop ?? 0, at: Date.now(), ...(opts.grant?.length && { grant: opts.grant }) };
   const dir = join(root, to, "inbox");
@@ -121,6 +143,15 @@ export function join_(me: Peer, onNote: (n: Note) => void, root = chatRoot()) {
   drain();
   return {
     update(patch: Partial<Peer>) { Object.assign(me, patch); publish(); },
+    /** Take a new name: the old one forwards (mail, lookups), and mail waiting under it moves along. Returns the new room. */
+    rename(name: string) {
+      w?.close(); clearInterval(poll);
+      const oldDir = dir, oldInbox = inbox;
+      const next = join_({ ...me, name, chosen: true }, onNote, root);
+      writeAtomic(join(oldDir, "me.json"), { name: me.name, cwd: me.cwd, pid: 0, session: me.session, at: Date.now(), status: "gone", movedTo: name });
+      try { for (const f of readdirSync(oldInbox)) renameSync(join(oldInbox, f), join(root, name, "inbox", f)); } catch {}
+      return next;
+    },
     // Leave the board but keep the inbox: mail sent while we are gone waits for the name.
     close() { w?.close(); clearInterval(poll); writeAtomic(join(dir, "me.json"), { ...me, pid: 0, claims: [], status: "gone", at: Date.now() }); },
   };

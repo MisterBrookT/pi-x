@@ -88,3 +88,24 @@ test("names: folder name only; an old task-title name is replaced; For you stays
   assert.equal(chat.claimName("kaji", 5152, root, "L2"), "kaji-2");
   live.close();
 });
+
+test("task names: a session renamed to news-infra keeps it across restarts, and its old name forwards mail and lookups", async () => {
+  const root = mkdtempSync(join(tmpdir(), "chat-rename-"));
+  const got = [];
+  let room = chat.join_(peer("minara-1", { session: "S1" }), (n) => got.push(n), root);
+  const other = chat.join_(peer("for-you", { session: "F" }), () => {}, root);
+  room = room.rename("news-infra");
+  assert.deepEqual(chat.board(root).map((p) => p.name), ["for-you", "news-infra"], "old name leaves the board");
+  assert.equal(chat.find("minara-1", root, "for-you"), "news-infra", "old name resolves to the new one");
+  assert.equal(chat.find("news", root, "for-you"), "news-infra", "prefix works");
+  chat.send("for-you", "minara-1", "ask", "ping", {}, root);
+  await wait(() => got.length);
+  assert.equal(got[0]?.text, "ping", "mail to the old name arrives");
+  room.close();
+  assert.equal(chat.claimName("minara", 4242, root, "S1"), "news-infra", "restart keeps the task name, not minara-N");
+  assert.equal(chat.nameFree("news-infra", "S9", root), true, "a dead holder frees the name");
+  const back = chat.join_(peer("news-infra", { session: "S1", chosen: true }), () => {}, root);
+  assert.equal(chat.nameFree("news-infra", "S9", root), false, "a live one does not");
+  assert.equal(chat.claimName("minara", 4243, root, "S7"), "minara", "the folder family is untouched");
+  back.close(); other.close();
+});
