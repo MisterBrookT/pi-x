@@ -325,8 +325,8 @@ async function tick(cfg: Config) {
 /** `wechat.ts check`: exit 0 = OCR reads WeChat. A locked Mac or a closed WeChat is not a broken path. */
 const wechatScreenCheck = (): Promise<{ ok: boolean; why: string }> => new Promise(done => {
 	const script = join(dirname(fileURLToPath(import.meta.url)), "..", "computer", "wechat.ts");
-	execFile(process.execPath, [script, "check"], { timeout: 90_000 }, (e, out) => {
-		const text = String(out ?? "").trim().split("\n").at(-1) ?? "";
+	execFile(process.execPath, [script, "check"], { timeout: 90_000 }, (e, out, err) => {
+		const text = (String(out ?? "").trim() || String(err ?? "").trim()).split("\n").filter(Boolean).at(-1) ?? "";
 		if (!e) return done({ ok: true, why: "" });
 		if (/locked|not running|did not come|Can’t get|Can't get|Invalid index/i.test(text + String(e.message))) return done({ ok: true, why: "" });
 		done({ ok: false, why: `screen read broken (${text.replace(/^\[BLOCKED\] /, "").slice(0, 120) || e.message.slice(0, 120)})` });

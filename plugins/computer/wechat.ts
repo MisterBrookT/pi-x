@@ -47,7 +47,10 @@ export const runWeChat = async (argv: string[], screen: ScreenOperations, out: (
 		if (mode === "check") {
 			// Read-only health check: one capture, no activate, no keys. Junk OCR (the privacy-cover wallpaper read,
 			// "StU/Font/eCrazU", 10-28) fails loudly instead of every exact-name search being refused.
-			const why = ocrProblem(await screen.capture(APP));
+			const shot = await screen.capture(APP);
+			// WeChat behind another app draws blank: nothing to judge, and the check never pulls it to the front.
+			if (!shot.lines.length) { out("[SKIP] WeChat is in the background; screen read not checked"); return 0; }
+			const why = ocrProblem(shot);
 			if (why) { out(`[BLOCKED] WeChat screen read is broken: ${why}`); return 2; }
 			out("[OK] WeChat screen read looks right");
 			return 0;

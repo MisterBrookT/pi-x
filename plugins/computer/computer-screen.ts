@@ -105,7 +105,9 @@ export const COMMIT_KEYS = /^(enter|return|kp_enter)$/i;
 
 const run = (file: string, args: string[], input?: string): Promise<string> =>
 	new Promise((resolve, reject) => {
-		const child = execFile(file, args, { timeout: 30_000, maxBuffer: 8 << 20 }, (error, stdout, stderr) => {
+		// launchd daemons (For you's WeChat check) get a bare PATH; macOS tools live in /usr/sbin and /usr/bin.
+		const env = { ...process.env, PATH: `${process.env.PATH ?? ""}:/usr/bin:/bin:/usr/sbin:/sbin` };
+		const child = execFile(file, args, { timeout: 30_000, maxBuffer: 8 << 20, env }, (error, stdout, stderr) => {
 			if (error) reject(new Error(`${file} failed: ${String(stderr || error.message).trim()}`));
 			else resolve(stdout);
 		});

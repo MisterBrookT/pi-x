@@ -304,6 +304,8 @@ test("wechat check: real WeChat OCR passes; the privacy-cover wallpaper read (St
 	assert.equal(await runWeChat(["check"], mk([line("Search", 100, 22), line("浙大 wenzhen师兄", 300, 20)]), (l) => out.push(l)), 0);
 	assert.equal(await runWeChat(["check"], mk([line("StU", 500, 400), line("Font", 520, 430), line("eCrazU", 560, 460)]), (l) => out.push(l)), 2);
 	assert.match(out.at(-1), /BLOCKED.*StU/);
+	assert.equal(await runWeChat(["check"], mk([]), (l) => out.push(l)), 0, "blank = WeChat in the background: skip, not an alarm");
+	assert.match(out.at(-1), /SKIP/);
 	assert.deepEqual(log, []);
 });
 
@@ -311,4 +313,10 @@ test("capture picks the app's largest window, not a small pop-up listed first", 
 	const { mainWindow } = await import("../plugins/computer/computer-screen.ts");
 	assert.deepEqual(mainWindow("523,809,259,131,84,77,1164,866"), [259, 131, 1164, 866]);
 	assert.deepEqual(mainWindow("259,131,1164,866"), [259, 131, 1164, 866]);
+});
+
+test("screen tools run under a bare launchd PATH (screencapture lives in /usr/sbin)", async () => {
+	const { readFileSync } = await import("node:fs");
+	const src = readFileSync(new URL("../plugins/computer/computer-screen.ts", import.meta.url), "utf8");
+	assert.match(src, /PATH: `\$\{process\.env\.PATH \?\? ""\}:\/usr\/bin:\/bin:\/usr\/sbin:\/sbin`/);
 });
