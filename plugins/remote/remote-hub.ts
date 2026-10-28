@@ -94,8 +94,8 @@ export function tailSession<T extends { messages: unknown[] }>(session: T, turns
   if (start === 0) return session;
   return { ...session, messages: session.messages.slice(start), older: start };
 }
-/** For the phone's first view: tool input/output cut to a short preview (the row is closed anyway); the full text loads on tap. */
-export const toolPreviewChars = 400;
+/** For the phone's first view: tool input/output left out (the row is closed anyway); the full text loads on tap. */
+export const toolPreviewChars = 0;
 export function lightSession<T extends { messages: any[] }>(session: T, chars = toolPreviewChars): T {
   let changed = false;
   const messages = session.messages.map(m => {

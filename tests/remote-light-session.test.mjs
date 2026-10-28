@@ -15,7 +15,7 @@ test("first load is light (tool text cut), a tapped tool row shows the full outp
 	await fetch(`${base}/agent/s1`, { method: "PUT", headers, body: JSON.stringify({ name: "s", cwd: "/tmp", busy: false, messages }) });
 	const light = await (await fetch(`${base}/api/sessions/s1?tail=5&light=1`, { headers })).json();
 	const lt = light.messages[1].tools[0];
-	assert.ok(lt.cut && lt.output.length <= 400, "tool output is a short preview");
+	assert.ok(lt.cut && lt.output.length === 0, "tool output is a short preview");
 	assert.ok(JSON.stringify(light).length < 3000);
 	assert.ok(relayAllowed("/api/sessions/s1/tool/toolu_1", "GET"), "the relay lets the phone fetch it");
 	const page = await browser.newPage({ viewport: { width: 402, height: 874 }, hasTouch: true });
