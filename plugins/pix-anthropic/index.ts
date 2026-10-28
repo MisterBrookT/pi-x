@@ -29,6 +29,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPixAnthropicStream } from "./stream.ts";
 import { claudeAuth, readClaudeToken } from "./claude-auth.ts";
 import { accounts, leftFromUsage, ready, recordUsage, usage } from "./accountkit.ts";
+import { accountsHub, accountsRelayAllowed } from "./accounts-hub.ts";
+import { registerHubPlugin } from "../core/hub-plugin.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = process.env.PIX_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
@@ -185,6 +187,9 @@ export default async function (pi: ExtensionAPI) {
 			compat: m.compat as any,
 		})),
 	});
+
+	// Accounts on the phone page (usage, which account each session runs on, move a session).
+	registerHubPlugin("accounts", accountsHub(), accountsRelayAllowed);
 
 	// accountkit: % left of brook's own login (5-hour / weekly window), shared via ~/.pix/accounts-usage.json.
 	// One poll per 5 min across sessions (skip when another session checked recently).

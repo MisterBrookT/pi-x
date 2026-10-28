@@ -55,16 +55,44 @@ const resting = (a: Account, now: number) => { const u = usage()[a.id]; return !
  * Band rule (auto): keep the current account unless another ready, not-resting one is in a strictly
  * higher band of % left; ties stay. Resting (after quota/429) accounts go last.
  */
-export function plan(now = Date.now()): Account[] {
+export function plan(now = Date.now(), session?: string): Account[] {
 	const all = accounts().filter(ready), c = choice();
 	if (c !== "auto") return accounts().filter(a => a.id === c);
 	const u = usage(), b = (a: Account) => band(u[a.id]?.left);
 	const awake = all.filter(a => !resting(a, now)), tired = all.filter(a => resting(a, now));
-	let pick = awake.find(a => a.id === u._active?.id) ?? awake[0];
+	// A session brook moved to an account runs there first (others stay as quota fallback).
+	const mine = session ? sessionAccounts()[session] : undefined;
+	const pinned = mine?.pin ? awake.find(a => a.id === mine.pin) : undefined;
+	if (pinned) return [pinned, ...awake.filter(a => a !== pinned).sort((x, y) => b(y) - b(x)), ...tired];
+	// Auto, per session: a new session starts on the account with the most % left, then keeps it (warm cache)
+	// unless another is in a strictly higher band. Without a session id: the shared current account, as before.
+	const current = session ? mine?.active : u._active?.id;
+	let pick = current ? awake.find(a => a.id === current) : session ? [...awake].sort((x, y) => (u[y.id]?.left ?? -1) - (u[x.id]?.left ?? -1))[0] : undefined;
+	pick ??= awake[0];
 	for (const a of awake) if (pick && b(a) > b(pick)) pick = a;
-	if (pick && pick.id !== u._active?.id) recordActive(pick.id);
+	if (pick && pick.id !== current) session ? setSessionAccount(session, { active: pick.id }) : recordActive(pick.id);
 	const rest = awake.filter(a => a !== pick).sort((x, y) => b(y) - b(x));
 	return [...(pick ? [pick] : []), ...rest, ...tired];
+}
+
+/** Per-session account: pin = brook moved this session there; active = what auto picked for it. ~/.pix/session-accounts.json */
+export interface SessionAccount { pin?: string; active?: string; at?: number }
+export const sessionAccounts = (): Record<string, SessionAccount> => read("session-accounts.json", {});
+export function setSessionAccount(session: string, v: SessionAccount): void {
+	const all = sessionAccounts(), cur = { ...all[session], ...v, at: Date.now() };
+	if (!cur.pin) delete cur.pin;
+	all[session] = cur;
+	// Keep the file small: newest 300 sessions.
+	const keep = Object.entries(all).sort((x, y) => (y[1].at ?? 0) - (x[1].at ?? 0)).slice(0, 300);
+	write("session-accounts.json", Object.fromEntries(keep));
+}
+/** The account a session's next request goes to (its pin, else auto's pick), without changing anything. */
+export function sessionAccount(session: string, now = Date.now()): { id?: string; pinned: boolean } {
+	const c = choice();
+	if (c !== "auto") return { id: c, pinned: true };
+	const m = sessionAccounts()[session];
+	if (m?.pin && accounts().some(a => a.id === m.pin)) return { id: m.pin, pinned: true };
+	return { id: m?.active ?? usage()._active?.id, pinned: false };
 }
 
 /** Make an account the current one in auto mode (it stays until another is in a strictly higher band). */

@@ -17,7 +17,9 @@ test("file-based Pi session reload refreshes pix-anthropic's changed auth module
 	const stream = fileURLToPath(new URL("../plugins/pix-anthropic/stream.ts", import.meta.url));
 	const source = (await readFile(new URL("../plugins/pix-anthropic/index.ts", import.meta.url), "utf8"))
 		.replace('"./stream.ts"', JSON.stringify(stream))
-		.replace('"./accountkit.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/pix-anthropic/accountkit.ts", import.meta.url))));
+		.replace('"./accountkit.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/pix-anthropic/accountkit.ts", import.meta.url))))
+		.replace('"./accounts-hub.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/pix-anthropic/accounts-hub.ts", import.meta.url))))
+		.replace('"../core/hub-plugin.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/core/hub-plugin.ts", import.meta.url))));
 	await writeFile(entry, source);
 	const writeAuth = marker => writeFile(auth, `export const claudeAuth = { name: "Claude Code", async resolve() { return { auth: { apiKey: "${marker}" }, source: "test" }; }, async check() { return { type: "api_key", source: "test" }; } };\n`);
 	await writeAuth("before-reload");

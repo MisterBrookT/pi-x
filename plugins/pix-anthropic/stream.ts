@@ -661,7 +661,7 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 					h.Authorization = `Bearer ${fresh}`;
 					return doFetch(url, { method: "POST", headers: h, body: serialized, signal: options?.signal });
 				};
-				const order = plan();
+				const order = plan(Date.now(), options?.sessionId);
 				if (!order.length) throw new Error("pix-anthropic: no Claude account ready (see claude-route)");
 				const sendAll = async () => {
 					let res!: Response;
