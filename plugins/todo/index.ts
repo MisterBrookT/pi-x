@@ -99,16 +99,15 @@ const Params = Type.Object({
   })),
 });
 
-export const TODO_STALE_CALLS = 20;
+export const TODO_STALE_TURNS = 3;
 
 export default function (pi: ExtensionAPI) {
   let state: State = { items: [], nextId: 1 };
   let enabled = true;
   let hasTodoHistory = false;
   const reminder = createStateReminder(pi, "pix-todo-state");
-  let idleCalls = 0;  // tool calls since the plan last changed
+  let idleTurns = 0;  // working turns (with non-todo tool calls) since the last todo call
   const publishState = (beforeNextResponse = false) => {
-    idleCalls = 0;
     if (!hasTodoHistory) return;
     const content = !enabled ? "Todo tracking is off. Earlier todo-state reminders are no longer current."
       : state.items.length ? formatPlan(state.items) : "No todos. The previous plan has been cleared.";
@@ -166,12 +165,15 @@ export default function (pi: ExtensionAPI) {
     if (!enabled || !waiting.length) return;
     reminder.publish(`[CURRENT TODO STATE]\nJob ${end.id} ${end.state}: update ${waiting.map(i => `#${i.id}`).join(", ")}.\n${formatPlan(state.items)}`, true);
   });
-  // A plan the agent stopped updating goes stale silently; re-show it once in a while.
-  pi.on("tool_execution_end", (e) => {
-    if (e.toolName === "todo" || !enabled || !state.items.some(i => i.status !== "done")) return;
-    if (++idleCalls % TODO_STALE_CALLS) return;
-    // The count keeps each reminder distinct, so the reminder's dedup never swallows a repeat.
-    reminder.publish(`[CURRENT TODO STATE]\nUnchanged for ${idleCalls} tool calls. Update it if it no longer matches your work.\n${formatPlan(state.items)}`, true);
+  // A plan the agent stopped updating goes stale silently. Count agent turns that did work (used a tool other than
+  // todo); chat-only turns don't count, and any todo call resets the count. After 3 such turns, re-show the plan.
+  pi.on("turn_end", (e) => {
+    const tools = (e.toolResults ?? []).map(r => r.toolName);
+    if (tools.includes("todo")) { idleTurns = 0; return; }
+    if (!tools.length || !enabled || !state.items.some(i => i.status !== "done")) return;
+    if (++idleTurns < TODO_STALE_TURNS) return;
+    idleTurns = 0;
+    reminder.publish(`[CURRENT TODO STATE]\nPlan unchanged for ${TODO_STALE_TURNS} working turns. Mark what's done or active, or rewrite it.\n${formatPlan(state.items)}`, true);
   });
   pi.on("session_compact", (_event, ctx) => {
     reminder.restore(ctx);

@@ -4,7 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { SessionManager, Theme, createEventBus } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import registerTodo, { TODO_STALE_CALLS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../plugins/todo/index.ts";
+import registerTodo, { TODO_STALE_TURNS, hasTodoDependencyCycle, readyTodos, unmetTodoDependencies } from "../plugins/todo/index.ts";
 
 const createTodoHarness = (sessionManager = SessionManager.inMemory()) => {
   let tool;
@@ -531,21 +531,25 @@ test("a planned agent is carried through plan output, ready set, and restore", a
   assert.equal((await restored.call({ action: "list" })).details.items[0].agent, "scout");
 });
 
-test("an open plan left unchanged for many tool calls is re-shown every 20 tool calls until it changes", async () => {
+test("an open plan untouched for 3 working turns is re-shown; chat-only turns don't count; a todo call resets", async () => {
+  assert.equal(TODO_STALE_TURNS, 3);
   const h = createTodoHarness();
   await h.call({ action: "add", text: "Open step" });
+  const turn = (...tools) => h.event("turn_end", { type: "turn_end", turnIndex: 0, message: { role: "assistant", content: [] }, toolResults: tools.map(toolName => ({ role: "toolResult", toolName, content: [] })) });
   const base = h.reminders().length;
-  for (let i = 0; i < TODO_STALE_CALLS - 1; i++) h.event("tool_execution_end", { toolName: "bash" });
-  assert.equal(h.reminders().length, base);
-  h.event("tool_execution_end", { toolName: "bash" });
+  for (let i = 0; i < 40; i++) h.event("tool_execution_end", { toolName: "bash" });
+  assert.equal(h.reminders().length, base, "no per-tool-call reminder any more");
+  turn("bash", "read"); turn(); turn(); turn("bash");
+  assert.equal(h.reminders().length, base, "2 working turns plus chat-only turns: not yet");
+  turn("todo"); turn("bash"); turn("bash");
+  assert.equal(h.reminders().length, base, "a todo call resets the count");
+  turn("bash");
   assert.equal(h.reminders().length, base + 1);
-  assert.match(h.reminders().at(-1).content, /Unchanged for 20 tool calls[\s\S]*Open step/);
-  for (let i = 0; i < TODO_STALE_CALLS; i++) h.event("tool_execution_end", { toolName: "bash" });
-  assert.equal(h.reminders().length, base + 2, "a still-stale plan is re-shown again");
-  assert.match(h.reminders().at(-1).content, /Unchanged for 40 tool calls/);
+  assert.equal(h.reminders().at(-1).content, "[CURRENT TODO STATE]\nPlan unchanged for 3 working turns. Mark what's done or active, or rewrite it.\n" + h.reminders().at(-1).content.split("\n").slice(2).join("\n"));
+  assert.match(h.reminders().at(-1).content, /Open step/);
   await h.call({ action: "set", id: "1", status: "done" });
   const done = h.reminders().length;
-  for (let i = 0; i < TODO_STALE_CALLS * 2; i++) h.event("tool_execution_end", { toolName: "bash" });
+  for (let i = 0; i < 6; i++) turn("bash");
   assert.equal(h.reminders().length, done, "a finished plan is not nagged");
 });
 
