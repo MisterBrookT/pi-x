@@ -4,9 +4,10 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pinLabel } from "./pin-label.ts";
 
 export type ArtifactKind = "doc" | "link" | "file";
-export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number; /** Open loops the session held when it pinned this; when all are closed the pin's job has ended. */ loops?: string[] };
+export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number; /** Open loops the session held when it pinned this; when all are closed the pin's job has ended. */ loops?: string[]; /** A cached semantic label (core/pin-label.ts). */ label?: string };
 
 export const artifactsDir = () => process.env.PIX_ARTIFACTS_DIR ?? join(homedir(), ".pix", "artifacts");
 const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
@@ -54,16 +55,8 @@ export function artifactsLabel(items: Artifact[]): string {
 	return ([["Docs", n("doc")], ["Links", n("link")], ["Files", n("file")]] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}`).join(" · ");
 }
 
-/** A short footer label: "PR #10", "Issue #4", otherwise the title cut at a word to about 16 characters. */
-export function artifactShort(a: Pick<Artifact, "title" | "url">): string {
-	const gh = a.url.match(/^https?:\/\/github\.com\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/);
-	if (gh) return `${gh[1] === "pull" ? "PR" : "Issue"} #${gh[2]}`;
-	const t = a.title.replace(/\s+/g, " ").trim();
-	if (t.length <= 16) return t;
-	const words = t.split(" "); let out = "";
-	for (const w of words) { if ((out + " " + w).trim().length > 16) break; out = (out + " " + w).trim(); }
-	return out || t.slice(0, 15) + "…";
-}
+/** A short semantic footer label (core/pin-label.ts): never a hash or a random host part. */
+export function artifactShort(a: Pick<Artifact, "title" | "url"> & Partial<Artifact>): string { return pinLabel({ kind: artifactKind(a.url), at: 0, ...a } as Artifact); }
 
 /** Pins whose job ended (all their loops closed, or a PR merged/closed) drop behind "+N". `isOpen(loopId)` and `prDone(url)` are injected. */
 export function artifactEnded(a: Artifact, o: { isOpen?: (loop: string) => boolean; prDone?: (url: string) => boolean } = {}): boolean {

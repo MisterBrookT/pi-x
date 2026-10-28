@@ -84,7 +84,7 @@ test("footer links go straight to targets: one item -> 'Docs 1'; several -> newe
   pinArtifact("s", { title: "Demo", url: "~/Desktop/Kairos demo.md" }, d);
   assert.deepEqual(artifactLinks(loadArtifacts("s", d), "/Users/b"), [
     { label: "Demo", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
-    { label: "Cookbook", url: "https://decision.brooktang.fun/leaderboard?token=x" },
+    { label: "Cookbook leaderboard", url: "https://decision.brooktang.fun/leaderboard?token=x" },
     { label: "+2", url: "" },
   ]);
 });
