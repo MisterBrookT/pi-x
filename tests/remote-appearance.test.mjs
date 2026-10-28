@@ -276,7 +276,7 @@ test("Aurora colour kit: the background colours follow the agent (working, waiti
   } finally { await browser.close(); server.close(); }
 });
 
-test("regression: a failed send shows once (in the message box), not also as a chat bubble; the top dot reads Offline", async () => {
+test("regression: a failed send shows once (in the message box), not also as a chat bubble; the top dot reads Reconnecting…", async () => {
   const server = await serve(); const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
@@ -293,7 +293,7 @@ test("regression: a failed send shows once (in the message box), not also as a c
     });
     assert.equal(r.rows, "", "no bubble for an unsent message");
     assert.equal(r.box, "", "arrived after all: no second copy");
-    assert.equal(r.dot, '"Offline"');
+    assert.equal(r.dot, '"Reconnecting…"');
   } finally { await browser.close(); server.close(); }
 });
 

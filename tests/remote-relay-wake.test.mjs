@@ -48,3 +48,22 @@ test("returning to the page asks the Mac for fresh state at once and replaces a 
   assert.equal(p.sockets.length, 2, "a frozen socket is replaced quickly");
   events.close();
 });
+
+test("a socket that pongs but carries nothing from the Mac is probed and rebuilt (phone looked connected, replies never came)", async () => {
+  const p = phone();
+  const events = p.ctx.relayConnect("k".repeat(43));
+  for (let i = 0; i < 50 && !p.sockets.length; i++) await tick(10);
+  const s = p.sockets[0]; s.readyState = 1; s.onopen();
+  await tick(30);
+  events.online = true;
+  events.heard = Date.now() - 30000; // Mac silent for 30 s, relay still answers pings
+  let offline = 0; events.onerror = () => offline++;
+  const sent = s.sent.length;
+  const check = events.check();
+  await tick(30);
+  assert.ok(s.sent.length > sent, "asks the Mac a small question");
+  await check; // no answer within 8 s
+  assert.ok(offline >= 1, "says it is reconnecting");
+  assert.equal(p.sockets.length, 2, "and rebuilds the link");
+  events.close();
+});

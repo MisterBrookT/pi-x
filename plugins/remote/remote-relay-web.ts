@@ -26,7 +26,7 @@ function relayApi(path,opts={}){return new Promise(async(resolve,reject)=>{
 })}
 function relayConnect(secret){
   relayClosed=false;
-  const events=relayEvents=new EventTarget();events.close=()=>{relayClosed=true;clearTimeout(relayReconnect);relaySocket?.close()};
+  const events=relayEvents=new EventTarget();events.close=()=>{relayClosed=true;clearInterval(events.probe);clearTimeout(relayReconnect);relaySocket?.close()};
   (async()=>{
     try{
       const identity=await relayIdentity(secret);relayKey=identity.key;
@@ -36,7 +36,7 @@ function relayConnect(secret){
         let greeting;const hello=async()=>{if(socket.readyState===WebSocket.OPEN)socket.send(await relaySeal({kind:"hello",active:(typeof active==="string"?active:"")}))};
         let lastPong=Date.now(),beat;
         socket.onopen=()=>{void hello();greeting=setInterval(()=>{if(!events.online)void hello()},2000);
-          beat=setInterval(()=>{if(Date.now()-lastPong>40000){socket.close();return}try{socket.send("ping")}catch{}},15000)};
+          beat=setInterval(()=>{if(socket!==relaySocket){clearInterval(beat);clearInterval(greeting);return}if(Date.now()-lastPong>40000){socket.close();return}try{socket.send("ping")}catch{}},15000)};
         // iOS freezes pages in the background; the socket then looks open but is dead.
         let lastWake=0;events.wake=()=>{if(socket!==relaySocket||socket.readyState!==WebSocket.OPEN||Date.now()-lastWake<1500)return;const sent=lastWake=Date.now();try{socket.send("ping")}catch{}void hello();
           setTimeout(()=>{if(socket===relaySocket&&lastPong<sent){relaySocket=undefined;socket.onclose=null;try{socket.close()}catch{}events.online=false;clearInterval(greeting);clearInterval(beat);for(const p of relayPending.values()){clearTimeout(p.timer);p.reject(Error("Connection lost"))}relayPending.clear();events.onerror?.();start()}},1200)};
@@ -44,7 +44,7 @@ function relayConnect(secret){
           const signal=JSON.parse(e.data).signal;
           if(signal==="agent-online"){void hello();return}
           if(signal==="agent-offline"){events.online=false;events.onerror?.();return}
-          const msg=await relayOpen(e.data);
+          const msg=await relayOpen(e.data);events.heard=Date.now();
           if(msg.kind==="response"){
             const pending=relayPending.get(msg.id);if(!pending)return;clearTimeout(pending.timer);relayPending.delete(msg.id);
             msg.status>=200&&msg.status<300?pending.resolve(msg.body):pending.reject(Object.assign(Error(msg.error||"Request failed"),{status:msg.status,body:msg.body}));
@@ -62,6 +62,15 @@ function relayConnect(secret){
         };
         socket.onerror=()=>events.onerror?.();
       };start();
+      // The relay answers pings itself, so a live socket says nothing about the Mac. If the Mac has been silent for 25 s while
+      // the page is on screen, ask it something small; no answer in 8 s means the path is broken: say so and rebuild it.
+      events.heard=Date.now();
+      events.check=async()=>{if(relayClosed||events!==relayEvents||document.hidden||!events.online||Date.now()-events.heard<25000||events.checking)return;events.checking=true;
+        const sock=relaySocket;const id=crypto.randomUUID();
+        const ok=await new Promise(async r=>{const timer=setTimeout(()=>{relayPending.delete(id);r(false)},8000);relayPending.set(id,{resolve:()=>{clearTimeout(timer);r(true)},reject:()=>{clearTimeout(timer);r(false)},timer});try{sock.send(await relaySeal({kind:"request",id,path:"/api/here?v=1",method:"GET",body:""}))}catch{clearTimeout(timer);relayPending.delete(id);r(false)}});
+        events.checking=false;if(ok||sock!==relaySocket||relayClosed)return;
+        events.online=false;events.onerror?.();relaySocket=undefined;try{sock.onclose=null;sock.close()}catch{}start()};
+      const probe=events.probe=setInterval(()=>{if(relayClosed||events!==relayEvents)return clearInterval(probe);void events.check()},5000);
       const back=()=>{if(!relayClosed&&events===relayEvents){if(relaySocket?.readyState===WebSocket.OPEN)events.wake();else if(!relaySocket||relaySocket.readyState===WebSocket.CLOSED){clearTimeout(relayReconnect);start()}}};
       // iOS may restore a frozen page without visibilitychange (back-forward cache, app switcher): listen to all three.
       addEventListener("pageshow",back);addEventListener("focus",back);
