@@ -7,7 +7,10 @@
  * traced, so a runaway or unexpected script is bounded and visible.
  */
 
-import { type CuaRuntime, type ScriptOutcome, renderOutcome } from "./computer-script.ts";
+import { type CuaRuntime, DEFAULT_BUDGET, type ScriptOutcome, ScriptHaltedError, renderOutcome } from "./computer-script.ts";
+
+/** Hard ceiling for one script: the action budget's time limit plus a margin for its last call to return. */
+export const WALL_CLOCK_MS = (DEFAULT_BUDGET.maxDurationMs ?? 120_000) + 30_000;
 
 export class ScriptCompileError extends Error {}
 
@@ -42,11 +45,25 @@ export const runScript = async (
 	source: string,
 	runtime: CuaRuntime,
 	signal?: AbortSignal,
-	options?: { settleGraceMs?: number },
+	options?: { settleGraceMs?: number; wallClockMs?: number },
 ): Promise<ScriptOutcome> => {
 	const fn = compileScript(source);
+	// The budget only checks the clock at backend calls, so a script stuck on a promise that never
+	// settles (`await new Promise(r => r)`) would hold the agent forever. Race it against a real
+	// wall clock and the host's abort signal; the stuck promise is abandoned, not awaited.
+	let stop: () => void = () => {};
+	const halted = new Promise<never>((_, reject) => {
+		const halt = (why: string) => reject(new ScriptHaltedError(why));
+		if (signal?.aborted) return halt("Script was cancelled. The interface is left as-is; observe before acting again.");
+		const onAbort = () => halt("Script was cancelled. The interface is left as-is; observe before acting again.");
+		signal?.addEventListener("abort", onAbort, { once: true });
+		const ms = options?.wallClockMs ?? WALL_CLOCK_MS;
+		const timer = setTimeout(() => halt(`Script was still running after ${Math.round(ms / 1000)}s (likely awaiting something that never finishes) and was stopped. Observe before acting again.`), ms);
+		stop = () => { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); };
+	});
+	halted.catch(() => {});
 	try {
-		const value = await fn(runtime, signal);
+		const value = await Promise.race([fn(runtime, signal), halted]);
 		return { value, events: runtime.events, actions: runtime.actionCount() };
 	} catch (error) {
 		return {
@@ -56,6 +73,7 @@ export const runScript = async (
 			error: error instanceof Error ? error : new Error(String(error)),
 		};
 	} finally {
+		stop();
 		// A script that forgot an `await` can leave a call in flight. Draining
 		// here keeps its failure inside this run instead of surfacing later as
 		// an unhandled rejection that would take the host process down.

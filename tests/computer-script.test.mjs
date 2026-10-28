@@ -756,3 +756,30 @@ test("a backend that answers act with its own delta: shown as-is, and the guard 
 	await assert.rejects(() => n.act({ action: "press", ref: "@e9" }), /without a target/, "Send is still recognised");
 	await n.act({ action: "press", ref: "@e9" }, undefined, { target: { title: "Mail" } });
 });
+
+test("a script awaiting a promise that never settles stops at the wall clock instead of hanging the agent", async () => {
+	const runtime = createCuaRuntime({ operations: createFakeOperations().operations });
+	const started = Date.now();
+	const outcome = await runScript("await cua.observe({ app: 'Chrome' }); await new Promise(r => r); return 'never';", runtime, undefined, { wallClockMs: 150, settleGraceMs: 10 });
+	assert.ok(outcome.error instanceof ScriptHaltedError);
+	assert.match(outcome.error.message, /still running after/);
+	assert.ok(Date.now() - started < 2000);
+});
+
+test("aborting a script stuck on a never-settling promise ends it right away", async () => {
+	const runtime = createCuaRuntime({ operations: createFakeOperations().operations });
+	const ac = new AbortController();
+	setTimeout(() => ac.abort(), 50);
+	const started = Date.now();
+	const outcome = await runScript("await new Promise(r => r);", runtime, ac.signal, { wallClockMs: 60_000, settleGraceMs: 10 });
+	assert.ok(outcome.error instanceof ScriptHaltedError);
+	assert.match(outcome.error.message, /cancelled/);
+	assert.ok(Date.now() - started < 2000, "did not wait for the wall clock");
+});
+
+test("a normal script's result is unchanged and leaves no timer behind", async () => {
+	const runtime = createCuaRuntime({ operations: createFakeOperations().operations });
+	const outcome = await runScript("return 7;", runtime, undefined, { wallClockMs: 60_000 });
+	assert.equal(outcome.value, 7);
+	assert.equal(outcome.error, undefined);
+});
