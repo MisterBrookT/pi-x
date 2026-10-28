@@ -1,12 +1,13 @@
-// "I saw it" on Feishu. Feishu has no mark-as-read API, so once For you has a message that asks brook
-// (an @mention of him, or a DM to him), it adds one GLANCE reaction (the closest Feishu emoji to 👀;
-// there is no literal eyes emoji) as brook. Never on chit-chat or messages for others, never twice,
+// "I saw it" on Feishu. Feishu has no mark-as-read API for a user (checked 10-28: im read_status is query-only,
+// and fetching a message as brook via mget or GET /im/v1/messages/:id leaves is_read false), so once For you has a
+// message that asks brook (an @mention of him, or a DM to him), it adds one OK (👌) reaction as brook: a plain
+// "got it". Not GLANCE: people read that as a side-eye face. Never on chit-chat or messages for others, never twice,
 // never when he already reacted with anything, and nothing is ever removed.
 import type { Msg, Source } from "./proactive.ts";
 
 /** brook's Feishu open_id (the reaction operator when he reacts himself). */
 export const BROOK_OPEN_ID = "ou_8ecd46c59b552120d654348df02437f0";
-export const SEEN_EMOJI = "GLANCE";
+export const SEEN_EMOJI = "OK";
 
 export type Lark = (args: string[]) => Promise<string>;
 

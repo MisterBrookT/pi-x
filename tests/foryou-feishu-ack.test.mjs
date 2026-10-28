@@ -30,7 +30,7 @@ test("which messages ask brook: @mention of him or a DM; not chit-chat, not othe
 	assert.equal(asksBrook(m("om_6", "x", "@唐英豪 hi"), { ...group, kind: "wechat" }, "唐英豪"), "", "Feishu only");
 });
 
-test("adds GLANCE as brook once, only to forwarded asks, skips ones he already reacted to with anything", async () => {
+test("adds OK (👌, a plain ack, not the GLANCE face) as brook once, only to forwarded asks, skips ones he already reacted to with anything", async () => {
 	const f = fake({ om_b: [{ operator: { operator_id: BROOK_OPEN_ID, operator_type: "user" }, reaction_type: { emoji_type: "THUMBSUP" } }], om_c: [{ operator: { operator_id: "ou_other", operator_type: "user" }, reaction_type: { emoji_type: SEEN_EMOJI } }] });
 	const fresh = [m("om_a", "黄恩浩", "@唐英豪 light是啥"), m("om_b", "x", "@唐英豪 ok?"), m("om_c", "y", "@唐英豪 看下"), m("om_d", "z", "哈哈"), m("om_e", "w", "@唐英豪 not forwarded")];
 	const done = new Set();
@@ -38,7 +38,7 @@ test("adds GLANCE as brook once, only to forwarded asks, skips ones he already r
 	assert.deepEqual(added, ["om_a", "om_c"], "someone else's reaction does not count as his");
 	assert.deepEqual(creates(f.calls), ["om_a", "om_c"]);
 	assert.ok(f.calls.every(a => a.includes("--as") && a[a.indexOf("--as") + 1] === "user"));
-	assert.ok(f.calls.filter(a => a[2] === "create").every(a => a.includes(JSON.stringify({ reaction_type: { emoji_type: "GLANCE" } }))));
+	assert.ok(f.calls.filter(a => a[2] === "create").every(a => a.includes(JSON.stringify({ reaction_type: { emoji_type: "OK" } }))));
 	assert.ok(!f.calls.some(a => a[2] === "delete"), "never removes");
 	// Next round: nothing again.
 	const n = f.calls.length;

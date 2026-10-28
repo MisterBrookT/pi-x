@@ -48,9 +48,10 @@ test("daemon: fast tick every ~1 min on shared cursors; asks mid-thread go to Fo
 	assert.match(src, /tick\(cfg, true\)/);
 	assert.match(src, /fastSources\(cfg, state/);
 	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), FAST_BUDGET\)/);
-	assert.match(src, /filter\(f => !f\.own && \(f\.urgent \|\| fast \|\| f\.source\.chat === "private"\)\)/);
+	assert.match(src, /filter\(f => f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private"\)/);
 	assert.match(src, /addLive\(P\.dir/);
-	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is not an ask");
+	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is marked");
+	assert.match(src, /now_\.filter\(f => !f\.own\)\) addLive/, "it forwards at once but makes no strip row");
 });
 
 test("hub: live strip in /api/foryou; Reply now tells For you, Later only clears; relay-allowed", async (t) => {
@@ -160,6 +161,37 @@ test("live strip clears when handled: a loop made or closed for that chat; who/g
 
 test("daemon clears a chat's row when brook's own message is the newest there", () => {
 	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
-	assert.match(src, /isMe\(fresh\.at\(-1\)!\.sender, [^)]*\)\) && clearLive\(key, P\.dir\)/);
+	assert.match(src, /repliedSince\(msgs, key,/);
+	assert.match(src, /if \(fast\) \{ for \(const r of liveSourcesToCheck\(readLive\(P\.dir\), sources\)\)/, "every fast tick re-checks chats with a row");
 	assert.match(src, /gist: f\.gist/);
+});
+
+test("Knight 10-28: a reply as brook in the group after his ask clears the row (agent-sent counts); before the ask it does not", async () => {
+	const { repliedSince, liveSourcesToCheck } = await import("../plugins/foryou/live-strip.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-live3-"));
+	const key = "feishu:oc_news";
+	addLive(d, { source: "新闻/舆情交易", sourceKey: key, why: "Knight asks for earnings" }, Date.parse("2026-10-28T08:58:56Z"));
+	const before = [
+		{ id: "om_0", sender: "唐英豪", time: "2026-10-28 16:50", text: "earlier, before the ask" },
+		{ id: "om_x100b612fc470cc88dddef5571f19a70", sender: "Knight", time: "2026-10-28 16:58", text: "@唐英豪 earnings?" },
+	];
+	assert.equal(repliedSince(before, key, "唐英豪", d, 8), false, "his earlier message does not count");
+	const after = [...before, { id: "om_x100b612fd5428cb4ce465cc57bcca67", sender: "唐英豪", time: "2026-10-28 17:03", text: "这里是 earnings 结果 — sent by news-running" }];
+	assert.equal(repliedSince(after, key, "唐英豪", d, 8), true);
+	assert.deepEqual(readLive(d), []);
+	assert.deepEqual(liveSourcesToCheck([{ id: "1", at: "", source: "WeChat: 龙哥 212", sourceKey: "wechat:wxid_ueqxjvfhykwo22", why: "" }, { id: "2", at: "", source: "G", sourceKey: "feishu:oc_g", why: "" }, { id: "3", at: "", source: "mail", sourceKey: "gmail:x", why: "" }], [{ kind: "feishu", id: "oc_g", name: "G" }]),
+		[{ kind: "wechat", id: "wxid_ueqxjvfhykwo22", name: "WeChat: 龙哥 212" }]);
+});
+
+test("龙哥 10-28: the judge decides who waits on whom from the last question and answer, uses names not he/she, and sees people cards", async () => {
+	const { filterPrompt } = await import("../plugins/foryou/forward.ts");
+	const fresh = [
+		{ id: "1", sender: "brook", time: "2026-10-28 16:36", text: "晚上唱歌去不" },
+		{ id: "2", sender: "龙哥 212", time: "2026-10-28 16:40", text: "行，晚上不加班我跟你说" },
+	];
+	const memory = "x".repeat(2000) + "\n### Card people/龙哥\n龙哥 212: brook's best friend.";
+	const p = filterPrompt({ me: "brook", source: { kind: "wechat", id: "wxid_ueqxjvfhykwo22", name: "WeChat: 龙哥 212", chat: "private" }, context: [], fresh, memory, lines: "" });
+	assert.match(p, /If brook asked and the other person answered "I'll tell you later",\s+nothing waits on brook/);
+	assert.match(p, /use the name, never "he"\/"she"/);
+	assert.match(p, /Card people\/龙哥/, "people card reaches the judge (no longer cut at 1500 chars)");
 });

@@ -28,7 +28,7 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
 import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
-import { addLive, clearLive } from "./live-strip.ts";
+import { addLive, clearLive, liveSourcesToCheck, readLive, repliedSince } from "./live-strip.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
@@ -156,6 +156,12 @@ async function tick(cfg: Config, fast = false) {
 	const forwards: Forward[] = [];
 	const pendingMarks: (() => void)[] = [];
 	if (fast) sources = await fastSources(cfg, state, (w, e) => { if (logOnce(`fast ${w}: ${e.message}`)) log(`fast ${w}: ${e.message.slice(0, 160)}`); });
+	// Each fast tick also looks at every chat with a live-strip row, so a reply as brook there (typed, or an agent
+	// answering as him) clears it within a minute even when that chat has no new ask.
+	if (fast) { for (const r of liveSourcesToCheck(readLive(P.dir), sources)) {
+		try { const msgs = await adapterFor(r).fetch(r); if (repliedSince(msgs, sourceKey(r), String(r.me ?? cfg.me), P.dir)) log(`live: ${r.name} cleared (brook replied)`); }
+		catch (e) { if (logOnce(`live check ${r.name}`)) log(`live check ${r.name}: ${(e as Error).message.slice(0, 120)}`); }
+	} }
 	else try {
 		if (!dry && cfg.sources.some(x => /wechat|dingtalk/i.test(x.kind))) { const u = await ensureUnlocked(); if (u !== "open") log(`mac: ${u}`); }
 		sources = await expandSources(cfg.sources, {
@@ -183,7 +189,7 @@ async function tick(cfg: Config, fast = false) {
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
 			// His own message is the newest here: he has handled this chat; its live-strip row goes.
-			if (!dry && fresh.length && isMe(fresh.at(-1)!.sender, String(src.me ?? cfg.me)) && clearLive(key, P.dir)) log(`live: ${src.name} cleared (brook replied)`);
+			if (!dry && repliedSince(msgs, key, String(src.me ?? cfg.me), P.dir)) log(`live: ${src.name} cleared (brook replied)`);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); mark(); continue; }
 			// New flow: the cheap model only filters; what passes goes to For you, which decides.
@@ -281,12 +287,13 @@ async function tick(cfg: Config, fast = false) {
 		const text = forwardPrompt(forwards, new Date(), cfg.me);
 		// Asks to brook (a DM, an @, urgent) go to For you now even mid-thread, so the reply task is routed at
 		// once and the page shows them as a live strip; only the rest waits for the thread to go quiet.
-		// brook's own reply (it may close a loop) is not an ask: it waits like any other batch.
-		const now_ = forwards.filter(f => !f.own && (f.urgent || fast || f.source.chat === "private"));
+		// brook's own reply that may close a loop goes now too (it is not an ask, so no strip row): held, its card
+		// stayed open after he answered (Knight, 10-28 17:08).
+		const now_ = forwards.filter(f => f.own || f.urgent || fast || f.source.chat === "private");
 		const later_ = forwards.filter(f => !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
-			if (sent) { for (const f of now_) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
+			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
 			log(`forward: ${now_.map(f => f.source.name).join(", ")} -> ${sent ? "For you now (ask, mid-thread)" : "not delivered; held"}`);
 			if (!sent) later_.push(...now_);
 		}

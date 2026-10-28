@@ -1,5 +1,6 @@
 // Live strip: asks that reached For you while brook was mid-thread with it. The page shows them as a small
 // strip in the For you chat ("Knight asks for the CSV": Reply now / Show / Later) instead of holding them silently.
+import { isMe, type Msg, type Source } from "./proactive.ts";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -46,4 +47,35 @@ export function clearLive(sourceKey: string, dir?: string): number {
 export function doAllPrompt(list: LiveAsk[]): string {
 	return `[For you: brook tapped Do all] Handle every waiting ask now, per his rules: reply (routine, in an existing thread), route it to the session on that work, or make a card when he must decide. Use the loops tool for that chat (create / done / drop) so each one clears from the strip.
 ${list.map((a, i) => `${i + 1}. ${a.who ? `${a.who}: ` : ""}${a.gist ?? a.why} — ${a.source} (source key ${a.sourceKey})`).join("\n")}`;
+}
+
+/** "2026-10-28 17:08" (local, chat tools) or ISO -> ms; NaN when unknown. */
+const msgMs = (t: string, tz = -new Date().getTimezoneOffset() / 60) => {
+	const m = t.match(/^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)(?::(\d\d))?$/);
+	return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] ?? 0)) - tz * 3_600_000 : Date.parse(t);
+};
+
+/**
+ * Any message as brook (typed, or sent by an agent as him) after the ask a row is about: the row is handled.
+ * The ask = the last message from someone else at or before the row was made (msgs are oldest first).
+ */
+export function repliedSince(msgs: Msg[], sourceKey: string, me: string, dir?: string, tz?: number): boolean {
+	const rows = readLive(dir).filter(a => a.sourceKey === sourceKey);
+	if (!rows.length) return false;
+	const made = Math.max(...rows.map(a => Date.parse(a.at)));
+	let ask = -1;
+	msgs.forEach((m, i) => { if (!isMe(m.sender, me) && msgMs(m.time, tz) <= made) ask = i; });
+	if (ask < 0 || !msgs.slice(ask + 1).some(m => isMe(m.sender, me))) return false;
+	return clearLive(sourceKey, dir) > 0;
+}
+
+/** Chats with a live row that this tick does not already fetch (Feishu and WeChat; source key "kind:id"). */
+export function liveSourcesToCheck(rows: LiveAsk[], fetched: Source[]): Source[] {
+	const have = new Set(fetched.map(s => `${s.kind}:${s.id}`)), out = new Map<string, Source>();
+	for (const a of rows) {
+		const [kind, ...rest] = a.sourceKey.split(":"), id = rest.join(":");
+		if (!id || have.has(a.sourceKey) || !/^(feishu|wechat)$/.test(kind)) continue;
+		out.set(a.sourceKey, { kind, id, name: a.source });
+	}
+	return [...out.values()];
 }

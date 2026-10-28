@@ -35,7 +35,7 @@ Mail is rarely addressed to him by name; that is not noise. Always pass: reviewe
 calls), deadlines, and invitations that need prep or a reply. Drop newsletters, receipts, login alerts, marketing, and automatic
 "received your submission" confirmations.
 
-About ${o.me}: ${o.memory.slice(0, 1500) || "(no memory)"}
+About ${o.me} and the people here: ${o.memory.slice(0, 4000) || "(no memory)"}
 His lines of work:
 ${o.lines || "(none)"}
 
@@ -46,7 +46,9 @@ New messages:
 ${o.fresh.map(fmt).join("\n")}
 
 Reply with JSON only: {"pass": true|false, "why": "<one short line>", "ids": ["<ids of the new messages that matter>"], "urgent": true|false, "who": "<short name of the person asking, when pass>", "gist": "<when pass: 3-8 plain English words, what they want, e.g. \"asks for the October CSV\">"}
-urgent = due today, or someone is blocked on ${o.me} right now. Almost always false.`;
+urgent = due today, or someone is blocked on ${o.me} right now. Almost always false.
+Who waits on whom: read the last open question and its answer. If ${o.me} asked and the other person answered "I'll tell you later",
+nothing waits on ${o.me} (drop it unless something else does). Write "who" as their name; in "why" and "gist" use the name, never "he"/"she".`;
 }
 
 export function parseFilter(raw: string): FilterVerdict | undefined {
