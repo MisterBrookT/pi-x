@@ -73,7 +73,7 @@ export function relayRouter(start: "proxy" | "direct" = process.env.https_proxy 
 // plain Agent: Node's built-in WebSocket ignores a dispatcher from another undici copy.
 let undici: any, agent: unknown;
 const directSocket = (url: string): WebSocket => { undici ??= createRequire(import.meta.url)("undici"); agent ??= new undici.Agent(); return new undici.WebSocket(url, { dispatcher: agent }); };
-export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number; router?: ReturnType<typeof relayRouter> }) {
+export function startRemoteRelayAgent(options: { origin: string; secret: string; localBase: string; localToken: string; onState?: (state: string) => void; heartbeatMs?: number; streamQuietMs?: number; router?: ReturnType<typeof relayRouter> }) {
   const { origin, secret, localBase, localToken } = options;
   const relayRoute = options.router ?? relayRouter();
   const parsed = new URL(origin);
@@ -81,6 +81,9 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
   let running = true, socket: WebSocket | undefined, stream: AbortController | undefined, retry: ReturnType<typeof setTimeout> | undefined;
   let connected = false;
   const beatMs = options.heartbeatMs ?? 15_000;
+  // The hub writes ": ping" every 5 s, so 20 s of silence means the local stream is stuck.
+  const streamQuietMs = options.streamQuietMs ?? 20_000;
+  let lastActive: string | undefined;
   let resolveReady!: () => void, rejectReady!: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const readyTimer = setTimeout(() => { if (!connected) rejectReady(Error("Could not reach the Pix Remote relay. Check your Mac's network.")); }, 10_000);
@@ -105,13 +108,31 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
     for (const [event, data] of extras ?? []) send({ kind: "event", event, data });
     if (typeof active !== "string") for (const s of await Promise.all(sessions.map(s => one(s.id)))) if (s) send({ kind: "event", event: "session", data: s });
   };
+  // The hub's event stream can end (hub handed to a newer Pi, hub restart) or stall while the relay socket stays up.
+  // Then the phone looked connected but got nothing (10-27: replies missing for an hour). So: re-listen until the socket
+  // ends, abandon a stream silent for longer than 3 hub pings, and resend the list + shown session after each gap.
   const listen = async (controller: AbortController) => {
+    let first = true;
+    while (!controller.signal.aborted) {
+      if (!first) { options.onState?.("events reconnect"); await publishSessions(lastActive).catch(() => {}); }
+      first = false;
+      await listenOnce(controller);
+      if (!controller.signal.aborted) await new Promise(r => setTimeout(r, Math.min(1000, streamQuietMs / 4)));
+    }
+  };
+  const listenOnce = async (outer: AbortController) => {
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    outer.signal.addEventListener("abort", stop);
+    let heard = Date.now();
+    const watch = setInterval(() => { if (Date.now() - heard > streamQuietMs) { options.onState?.("events stalled"); controller.abort(); } }, Math.max(20, streamQuietMs / 4));
     try {
       const res = await fetch(localBase + `/api/events?token=${encodeURIComponent(localToken)}`, { signal: controller.signal });
       if (!res.ok || !res.body) return;
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
       for (;;) {
         const { done, value } = await reader.read(); if (done) break;
+        heard = Date.now();
         buffer += decoder.decode(value, { stream: true });
         let end: number;
         while ((end = buffer.indexOf("\n\n")) >= 0) {
@@ -123,6 +144,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
         if (buffer.length > 2_000_000) buffer = "";
       }
     } catch { /* Local stream is cancelled on disconnect. */ }
+    finally { clearInterval(watch); outer.signal.removeEventListener("abort", stop); }
   };
   const connect = () => {
     if (!running) return;
@@ -151,7 +173,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
       try {
         if (event.data === "pong") { lastPong = Date.now(); return; }
         const message = openRelayFrame(secret, String(event.data));
-        if (message.kind === "hello") { await publishSessions(typeof message.active === "string" ? message.active : undefined); return; }
+        if (message.kind === "hello") { if (typeof message.active === "string") lastActive = message.active; await publishSessions(typeof message.active === "string" ? message.active : undefined); return; }
         if (message.kind !== "request" || typeof message.id !== "string" || message.id.length > 100 || typeof message.body !== "string") return;
         { const use = phoneUse(message.path, String(message.method), message.body); if (use === "gone") markPhoneGone(); else if (use === "here") markPhoneActive(); }
         // Answer instead of staying silent, so an older Mac shows "reload Pi" rather than a timeout.

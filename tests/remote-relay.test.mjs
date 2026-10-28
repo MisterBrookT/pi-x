@@ -205,3 +205,36 @@ test("tailSession keeps whole turns and leaves short sessions alone", async () =
   assert.equal(tailSession(s, 9), s);
   assert.equal(tailSession(s, 0), s);
 });
+
+test("when the Mac's local event stream ends or stalls, the relay listens again and resends state (phone saw no reply for an hour)", async t => {
+  const http = await import("node:http");
+  const { WebSocketServer } = await import("ws");
+  const { startRemoteRelayAgent, openRelayFrame } = await import("../plugins/remote/remote-relay-agent.ts");
+  const secret = "s".repeat(43);
+  let streams = 0;
+  const hub = http.createServer((req, res) => {
+    if (req.url.startsWith("/api/events")) {
+      streams++;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      if (streams === 1) { res.end(`event: sessions\ndata: []\n\n`); return; } // hub handed over: stream ends
+      if (streams === 2) { res.write(`event: sessions\ndata: []\n\n`); return; } // stalls: no pings, never ends
+      res.write(`event: stream\ndata: {"id":"s1","streaming":"reply arrived"}\n\n`); return;
+    }
+    res.writeHead(200, { "content-type": "application/json" }); res.end(req.url === "/api/sessions" ? "[]" : "[]");
+  });
+  await new Promise(r => hub.listen(0, "127.0.0.1", r));
+  t.after(() => { hub.closeAllConnections(); hub.close(); });
+  const server = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+  t.after(() => server.close());
+  await new Promise(r => server.once("listening", r));
+  const frames = [];
+  server.on("connection", socket => socket.on("message", data => { const text = String(data); if (text === "ping") return socket.send("pong"); try { frames.push(openRelayFrame(secret, text)); } catch {} }));
+  const states = [];
+  const agent = startRemoteRelayAgent({ origin: `http://127.0.0.1:${server.address().port}/`, secret, localBase: `http://127.0.0.1:${hub.address().port}`, localToken: "x", streamQuietMs: 200, onState: s => states.push(s) });
+  t.after(() => agent.stop());
+  await agent.ready;
+  for (let i = 0; i < 120 && !frames.some(f => f.event === "stream"); i++) await new Promise(r => setTimeout(r, 25));
+  assert.ok(states.includes("events stalled"), "a silent stream is noticed");
+  assert.ok(streams >= 3, `listened again (${streams})`);
+  assert.equal(frames.find(f => f.event === "stream")?.data.streaming, "reply arrived");
+});
