@@ -196,7 +196,7 @@ test("wechat CLI: prepare opens the exact private chat (not the group), send re-
 	assert.equal(await runWeChat(["prepare", "浙大 李老师 报销\r", "已提交"], screen, (l) => out.push(l)), 0, out.join("\n"));
 	assert.deepEqual(log.filter((l) => /^(open|SENT)/.test(l)), ["open 浙大 李老师 报销"]);
 	assert.equal(await runWeChat(["send"], screen, (l) => out.push(l)), 0, out.join("\n"));
-	assert.equal(log.find((l) => l.startsWith("SENT")), "SENT 浙大 李老师 报销: 已提交\n\n这条消息来自 brook 的 agent。");
+	assert.equal(log.find((l) => l.startsWith("SENT")), "SENT 浙大 李老师 报销: 已提交\n\nthis message is sent by brook’s agent, he will review it latter, any problem could find him");
 });
 
 test("wechat CLI: if the click lands in another chat, prepare refuses and nothing is sent", async () => {
@@ -223,7 +223,7 @@ test("sendnow: one call opens, types, checks title + box, sends, and reads back;
 	const out = [];
 	assert.equal(await runWeChat(["sendnow", "brookkk", "hello"], screen, (l) => out.push(l)), 0, out.join("\n"));
 	assert.match(out.join("\n"), /^\[SENT\] 'brookkk': read back/);
-	assert.deepEqual(log.filter((l) => l.startsWith("SENT")), ["SENT brookkk: hello\n\nSent by brook's agent."]);
+	assert.deepEqual(log.filter((l) => l.startsWith("SENT")), ["SENT brookkk: hello\n\nthis message is sent by brook’s agent, he will review it latter, any problem could find him"]);
 	assert.ok(log.includes("key Enter →WeChat"), "keys are posted to the app's process");
 	assert.ok(log.includes("paste →WeChat"));
 });

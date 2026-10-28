@@ -8,11 +8,9 @@ import type { Recipe } from "./index.ts";
 
 export const APP = "WeChat";
 
-/** Same rule as Feishu: every outbound message ends with its own signature line. */
-export const signed = (text: string): string => {
-	const sig = /[\u4e00-\u9fa5]/.test(text) ? "这条消息来自 brook 的 agent。" : "Sent by brook's agent.";
-	return text.endsWith(sig) ? text : `${text}\n\n${sig}`;
-};
+/** brook's rule (message skill): every agent-sent message ends with exactly this line, any language. */
+export const SIGNATURE = "this message is sent by brook’s agent, he will review it latter, any problem could find him";
+export const signed = (text: string): string => text.trimEnd().endsWith(SIGNATURE) ? text : `${text}\n\n${SIGNATURE}`;
 
 /** No exact contact, or the wrong chat is open. Nothing was sent. */
 export class Refused extends Error {}

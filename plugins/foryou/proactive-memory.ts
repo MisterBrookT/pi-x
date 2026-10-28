@@ -1,11 +1,16 @@
-// For you memory: a small folder of cards, only for the For you agent (never loaded by normal Pi sessions).
-//   memory/index.md          who brook is, what to notify, plus one line per card (kept up to date here)
-//   memory/people/<name>.md  one person: role, what they work on with brook, dated facts
+// Shared memory: a small folder of cards (~/.pix/proactive/memory).
+//   memory/index.md           who brook is and what to notify him about, then one line per card (kept up to date here)
+//   memory/foryou.md          For you's own operating rules (only the coordinator reads it)
+//   memory/people/<name>.md   one person: role, what they work on with brook, dated facts
 //   memory/lines/<line id>.md one line of work (same id as lines.json): goal, state, dated facts
 //   memory/projects/<name>.md older project cards (still read; new facts go on the line card)
-// One shared memory: For you and every line's owner session read it and write to it.
-// The judge sees the index always, and only the cards that the messages mention. Every change is a
-// dated, sourced line, logged to memory.log; a weekly tidy rewrites long cards.
+// Who reads what, fresh on every turn:
+//   For you (coordinator)       everything (memoryAll + foryou.md)
+//   a session on a line         index "About me", its line card, the people that card names (lineMemory);
+//                               the line's owner and any session holding an open loop on it (sessionLine)
+//   the source-message judge    the whole index plus the cards the new messages mention (memoryForPrompt)
+//   any other session           nothing; rules for every session live in AGENTS.md and skills, not here
+// Every change is a dated, sourced line, logged to memory.log; a weekly tidy rewrites long cards.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Msg, Source } from "./proactive.ts";
