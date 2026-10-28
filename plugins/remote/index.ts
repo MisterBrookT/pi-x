@@ -14,6 +14,7 @@ import { BACKGROUND_CHANGED, backgroundState } from "../core/background-state.ts
 import { CHAT_WAITING } from "../core/chat-waiting.ts";
 import { loadArtifacts } from "../core/artifacts.ts";
 import { runningHelpers } from "./remote-helpers.ts";
+import { autoCloseHours, keepOpen, linesHeldBy, openLoopsHeldBy, recordAutoClose } from "../core/auto-close.ts";
 import { footerStatus } from "../core/footer-status.ts";
 import { autoReloadEnabled, createAutoReload, pixCodeVersion } from "./remote-autoreload.ts";
 import { QUESTION_ANSWER, QUESTION_CLOSE, QUESTION_OPEN } from "../core/question-events.ts";
@@ -408,15 +409,32 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     busy = !next.isIdle();
     connected = true;
     await push();
-    heartbeat = setInterval(() => { void push(); autoReload?.tick(); void replaceStaleHub().then(stale => { if (stale) return ensureHub(!!relayKey).then(() => push()); }).catch(() => {}); }, heartbeatMs);
+    heartbeat = setInterval(() => { void push(); autoReload?.tick(); autoClose(); void replaceStaleHub().then(stale => { if (stale) return ensureHub(!!relayKey).then(() => push()); }).catch(() => {}); }, heartbeatMs);
     heartbeat.unref?.();
     void poll();
     next.ui.setStatus("pix-remote", "remote on");
   };
 
   const track = (_event: unknown, next: ExtensionContext) => { ctx = next; };
-  pi.on("agent_start", (_e, next) => { ctx = next; busy = true; streaming = ""; schedulePush(); });
-  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; streaming = ""; schedulePush(); if (connected) autoReload?.tick(); });
+  // Auto-close (remote-autoclose.ts): idle for PIX_AUTOCLOSE_HOURS (24) with nothing in flight → quit like /quit; history stays in Resume.
+  let idleSince = Date.now();
+  const autoClose = () => {
+    if (!ctx || !sessionId) return;
+    let openLoops = 0, lines = 0;
+    try { openLoops = openLoopsHeldBy(sessionId); } catch { openLoops = 1; }
+    try { lines = linesHeldBy(sessionId); } catch { lines = 1; }
+    const why = keepOpen({ id: sessionId, idleSince, now: Date.now(), hours: autoCloseHours(), busy: busy || !ctx.isIdle(), hubHost: !!hub, draft: hasDraft(ctx), question: !!pendingQuestion,
+      background: backgroundState(pi).running, helpers: runningHelpers(ctx.sessionManager?.getSessionFile?.()).length, openLoops, lines });
+    if (why) return;
+    const last = branchMessages(ctx.sessionManager.getBranch()).filter((m: any) => m?.role === "assistant").at(-1);
+    const text = Array.isArray(last?.content) ? last.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join(" ") : String(last?.content ?? "");
+    const name = (pi as any).getSessionName?.() || basename(ctx.cwd);
+    try { recordAutoClose({ id: sessionId, name, cwd: ctx.cwd, summary: text.split(/(?<=[.!?。])\s/)[0] || "(no reply yet)" }); } catch {}
+    logRelay(`autoclose: ${name} idle ${autoCloseHours()}h, closing`);
+    ctx.shutdown();
+  };
+  pi.on("agent_start", (_e, next) => { ctx = next; busy = true; idleSince = Date.now(); streaming = ""; schedulePush(); });
+  pi.on("agent_settled", (_e, next) => { ctx = next; busy = false; idleSince = Date.now(); streaming = ""; schedulePush(); if (connected) autoReload?.tick(); });
   pi.on("message_update", (event, next) => {
     ctx = next;
     const delta = event.assistantMessageEvent;

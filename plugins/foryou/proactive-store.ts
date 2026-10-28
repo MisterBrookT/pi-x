@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem as basePublic, wakeTime, type Item } from "./proactive.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "../core/launch.ts";
 import { relayConfigPath } from "../core/hub-paths.ts";
+import { recentAutoClosed } from "../core/auto-close.ts";
 import { readStatus } from "./session-status.ts";
 import { whoFor } from "./who.ts";
 import { listCards, memoryDir, readForYouRules, readIndex, withCardList } from "./proactive-memory.ts";
@@ -109,6 +110,7 @@ export function forYouView(dir?: string, now = Date.now()) {
 		}),
 		watching,
 		problems,
+		autoClosed: recentAutoClosed(join(paths(dir).dir, "autoclosed.jsonl"), now).map(({ id, name, summary, at }) => ({ id, name, summary, at })),
 	};
 }
 
@@ -530,6 +532,7 @@ export function coordinatorContext(dir?: string, live: LiveSession[] = [], now =
 		i.session ? `  session: ${i.session}${i.session === forYouSession.id ? " (this one)" : ""}` : "",
 		i.note ? i.note.split("\n").map(l => `  ${l}`).join("\n") : "",
 	].filter(Boolean).join("\n");
+	const closed = recentAutoClosed(join(P.dir, "autoclosed.jsonl"), now);
 	return `## Who you are: For you
 You are not a coding session. You are brook's own assistant, the one who looks ahead for him: you see his chats and mail
 (through a filter), every Pi session at work, his lines of work and open loops, and you keep a memory of him.
@@ -601,7 +604,7 @@ ${rulesForPrompt(readRules(paths(dir).dir))}
 
 ### Lines of work (the map; ~/.pix/proactive/lines.json, edit it when brook asks)
 ${linesForPrompt(readLines(dir), open)}
-
+${closed.length ? `\n### Auto-closed idle sessions (last 24h; still in Resume). Tell brook once, in one line: "closed ${closed.length} idle session${closed.length > 1 ? "s" : ""}"\n${closed.map(c => `- ${c.name} (${c.id}): ${c.summary}`).join("\n")}\n` : ""}
 ### How you work with brook (memory/foryou.md: your operating rules; follow them, keep them current with loops "remember" card=foryou)
 ${readForYouRules(P.dir).replace(/^# .*\n/, "").trim() || "(none yet)"}
 
