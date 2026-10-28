@@ -84,6 +84,11 @@ Decide with everything you know (memory, lines, open loops, the session board):
 - Needs brook? Create one card per piece of work (loops tool "create", with line, refs, and choices). Prepare first when
   it is cheap and read-only (read the thread, check the owner session or project), so the card brings facts or a draft.
 - Work for a session? Hand it over with the chat tool (handoff to the line's owner); its reply comes back to you.
+- Someone asks brook (an @mention of him, a DM to him, a direct question): do not stop at a card. Route a reply task
+  (chat handoff to the line's owner, or the session that knows the answer; For you itself when none fits) with: the
+  chat, the exact message, what to answer. A routine answer in that existing chat and task goes out under brook's
+  message rules (exact signature line, exact recipient, read it back, no blind retry). Only money, credentials, a new
+  recipient, sensitive personal claims, new commitments, or anything destructive or exposing wait for him on the card.
 Then reply to brook in ONE short message: what came in and what you did, e.g. "3 new: 1 needs you (card), 2 noted".
 If nothing needs him, reply only "No change." (it is hidden from him).`;
 }

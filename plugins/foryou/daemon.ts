@@ -30,6 +30,7 @@ import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, di
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
 import { whoFor } from "./who.ts";
+import { ackSeen } from "./feishu-ack.ts";
 import { actItem, finishedItem, startForYou, suggestItem, readOpen, dismissItem, doneItem, laterItem, nextItem, noteItem, nowItem, openItem } from "./proactive-store.ts";
 
 const P = paths();
@@ -194,6 +195,13 @@ async function tick(cfg: Config) {
 				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
 				else mark();
 				if (v.pass) pendingMarks.push(mark);
+				// Feishu has no mark-as-read: an @mention of brook or a DM he got shows a seen reaction once forwarded.
+				if (v.pass && !dry && src.kind === "feishu") {
+					const done = new Set<string>(JSON.parse(state["feishu-seen"] ?? "[]"));
+					const added = await ackSeen({ lark: async a => (await new Promise<string>((ok, no) => execFile("lark-cli", a, { timeout: 30_000, maxBuffer: 1 << 22 }, (e, out) => e ? no(e) : ok(out)))), src, fresh, ids: v.ids.length ? v.ids : fresh.map(m => m.id), me: String(src.me ?? cfg.me), done, log });
+					state["feishu-seen"] = JSON.stringify([...done].slice(-500));
+					if (added.length) log(`${src.name}: seen reaction on ${added.length}`);
+				}
 				continue;
 			}
 			// All open loops from every source, so a reply here can move a loop and duplicates merge.
