@@ -174,7 +174,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
       if (error instanceof Error && /Pix Remote|another service/.test(error.message)) throw error;
     }
     // A phone-started Pi uses the same network mode as the session hosting the hub.
-    const launch = async (dir: string, session?: string, first?: { prompt?: string; model?: string }) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty, session, ...first }); };
+    const launch = async (dir: string, session?: string) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty, session }); };
     try { hub = await startRemoteHub({ token, port, launch, version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay(wait);

@@ -172,7 +172,7 @@ export interface RemoteHubOptions {
   /** Where files sent from the phone composer are saved (default ~/.pi/agent/pix-remote/uploads). */
   uploadsDir?: string;
   /** Start a new Pi process with remote on in this already validated folder. */
-  launch?: (dir: string, session?: string, first?: { prompt?: string; model?: string }) => Promise<void>;
+  launch?: (dir: string, session?: string) => Promise<void>;
   home?: string; sessionsDir?: string; memoryRoot?: string; linksPath?: string;
   /** Milliseconds since the Mac keyboard or mouse was last used; injectable for tests. */
   macIdleMs?: () => number;
@@ -403,12 +403,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       }
       if (req.method === "POST" && path === "/api/launch") {
         if (!options.launch) return send(res, 404, { error: "starting sessions is unavailable" });
-        const b = await body(req), dir = await launchableFolder(b?.path, options.home, options.sessionsDir);
+        const dir = await launchableFolder((await body(req))?.path, options.home, options.sessionsDir);
         if (!dir) return send(res, 400, { error: "choose a folder in your home directory" });
-        // New chat from the phone: the first message (and model) start Pi, so nothing runs until brook sends.
-        const prompt = typeof b?.prompt === "string" && b.prompt.trim() ? b.prompt.slice(0, 100_000) : undefined;
-        const model = typeof b?.model === "string" && /^[\w.:/-]{1,120}$/.test(b.model) ? b.model : undefined;
-        try { await (prompt || model ? options.launch(dir, undefined, { prompt, model }) : options.launch(dir)); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
+        try { await options.launch(dir); } catch (error) { return send(res, 500, { error: `Could not start Pi: ${error instanceof Error ? error.message : String(error)}` }); }
         return send(res, 202, { started: true, path: dir });
       }
       // Reopen a saved session, like `pi -r` on the Mac. Live sessions are already in the list.
