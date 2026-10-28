@@ -9,7 +9,7 @@ const token = "t".repeat(32);
 const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
 const IPAD = "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 
-async function open(t, { ua, pick }) {
+async function open(t, { ua, pick, viewport }) {
 	const { chromium } = await import("playwright");
 	const hub = await startRemoteHub({ token, port: 0 });
 	t.after(() => hub.close());
@@ -17,7 +17,7 @@ async function open(t, { ua, pick }) {
 	await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", messages: [{ id: "a", role: "assistant", text: "See docs and old", html: renderRemoteMarkdown("See [docs](https://example.com/a?b=1) and [old](http://example.org/x)") }] }) });
 	const browser = await chromium.launch({ headless: true });
 	t.after(() => browser.close());
-	const ctx = await browser.newContext({ viewport: { width: 1024, height: 1300 }, ...(ua ? { userAgent: ua, hasTouch: true } : {}) });
+	const ctx = await browser.newContext({ viewport: viewport ?? { width: 1024, height: 1300 }, ...(ua ? { userAgent: ua, hasTouch: true } : {}) });
 	const page = await ctx.newPage();
 	page.on("pageerror", e => { throw e; });
 	await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
@@ -58,4 +58,26 @@ test("pi-rc default, and desktop even with Chrome chosen: no rewrite", async (t)
 	assert.equal(await click(ipad.page), false, "iPad default pi-rc");
 	const desk = await open(t, { pick: "chrome" });
 	assert.equal(await click(desk.page), false, "desktop never rewrites");
+});
+
+test("wide Settings: tapping a section shows that section; ⌘, (keyCode 188 too) toggles Settings", async (t) => {
+	const { page } = await open(t, { ua: IPAD });
+	await page.keyboard.press("Meta+Comma");
+	assert.equal(await page.locator("#sheet").isHidden(), false, "⌘, opens");
+	const shown = () => page.evaluate(() => [...document.querySelectorAll("#sheet .set-sec")].filter(s => s.offsetParent).map(s => s.id));
+	assert.deepEqual(await shown(), ["set-links"]);
+	await page.locator('[data-set-nav="look"]').click();
+	assert.deepEqual(await shown(), ["set-look"]);
+	assert.equal(await page.locator('[data-set-nav="look"]').getAttribute("aria-current"), "true");
+	await page.locator('[data-set-nav="keys"]').click();
+	assert.deepEqual(await shown(), ["set-keys"]);
+	await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Unidentified", keyCode: 188, metaKey: true, bubbles: true, cancelable: true })));
+	assert.equal(await page.locator("#sheet").isHidden(), true, "⌘, with only keyCode closes");
+});
+
+test("phone Settings: one scrolling list, every section shown", async (t) => {
+	const { page } = await open(t, { ua: IPAD, viewport: { width: 390, height: 844 } });
+	await page.evaluate(() => showAppearance());
+	const n = await page.evaluate(() => [...document.querySelectorAll("#sheet .set-sec")].filter(s => s.offsetParent).length);
+	assert.ok(n >= 3, `all sections visible, got ${n}`);
 });
