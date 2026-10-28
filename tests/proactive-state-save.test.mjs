@@ -35,4 +35,5 @@ test("daemon runs the read-only WeChat screen check and reports a failure as a h
 	assert.match(src, /\[script, "check"\]/);
 	assert.match(src, /failed\.push\(\{ source: "WeChat screen"/);
 	assert.doesNotMatch(src, /\[script, "(find|send|sendnow|prepare)"/);
+	assert.match(src, /process\.env\.PIX_WX_SCREEN_CHECK === "1" &&/, "off by default: it would pop a System Events permission dialog");
 });

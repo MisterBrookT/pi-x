@@ -307,7 +307,9 @@ async function tick(cfg: Config, fast = false) {
 	if (fast) { if (!dry) saveState(P.state, state); return; }
 	// WeChat screen read (the path replies go out on): a read-only capture + OCR sanity check every 30 min, so a blind
 	// capture (privacy cover, wrong window: 10-28) shows on For you instead of every send being refused. Never types.
-	if (!dry && cfg.sources.some(x => /wechat/i.test(x.kind)) && Date.now() - Date.parse(state["@wxscreen"] ?? "0") > 30 * 60_000) {
+	// Off by default: from the launchd app, the capture needs Automation access to System Events, and asking for it
+	// pops a macOS permission dialog on brook's screen (10-28 16:02). Sessions run `wechat.ts check` before sending.
+	if (!dry && process.env.PIX_WX_SCREEN_CHECK === "1" && cfg.sources.some(x => /wechat/i.test(x.kind)) && Date.now() - Date.parse(state["@wxscreen"] ?? "0") > 30 * 60_000) {
 		state["@wxscreen"] = new Date().toISOString();
 		const r = await wechatScreenCheck();
 		if (r.ok) fine.push("WeChat screen"); else { failed.push({ source: "WeChat screen", error: r.why }); if (logOnce(`WeChat screen: ${r.why}`)) log(`WeChat screen: ${r.why}`); }
