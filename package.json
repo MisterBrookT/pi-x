@@ -35,7 +35,8 @@
     "prompt:snapshot": "node scripts/render-prompt-comparison.mjs",
     "smoke:anthropic": "node scripts/smoke-pix-anthropic.mjs",
     "postinstall": "node scripts/apply-pi-subagents-patch.mjs",
-    "sim": "scripts/sim"
+    "sim": "scripts/sim",
+    "test:perf": "node --test --test-reporter=spec tests/remote-perf.test.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
