@@ -83,8 +83,8 @@ test("footer links go straight to targets: one item -> 'Docs 1'; several -> newe
   pinArtifact("s", { title: "Cookbook leaderboard", url: "https://decision.brooktang.fun/leaderboard?token=x" }, d);
   pinArtifact("s", { title: "Demo", url: "~/Desktop/Kairos demo.md" }, d);
   assert.deepEqual(artifactLinks(loadArtifacts("s", d), "/Users/b"), [
-    { label: "Docs 1", url: "https://byterum.feishu.cn/docx/A" },
-    { label: "Cookbook leaderbo… +1", url: "https://decision.brooktang.fun/leaderboard?token=x" },
-    { label: "Files 1", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
+    { label: "Demo", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
+    { label: "Cookbook", url: "https://decision.brooktang.fun/leaderboard?token=x" },
+    { label: "+2", url: "" },
   ]);
 });

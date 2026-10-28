@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export type ArtifactKind = "doc" | "link" | "file";
-export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number };
+export type Artifact = { title: string; url: string; kind: ArtifactKind; at: number; /** Open loops the session held when it pinned this; when all are closed the pin's job has ended. */ loops?: string[] };
 
 export const artifactsDir = () => process.env.PIX_ARTIFACTS_DIR ?? join(homedir(), ".pix", "artifacts");
 const safe = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100);
@@ -31,13 +31,13 @@ function save(session: string, items: Artifact[], dir: string) {
 }
 
 /** Pin (or retitle) an item; the same URL is kept once. Newest last. Returns the list. */
-export function pinArtifact(session: string, item: { title?: string; url: string; kind?: ArtifactKind }, dir = artifactsDir(), now = Date.now()): Artifact[] {
+export function pinArtifact(session: string, item: { title?: string; url: string; kind?: ArtifactKind; loops?: string[] }, dir = artifactsDir(), now = Date.now()): Artifact[] {
 	const url = item.url.trim();
 	if (!url) return loadArtifacts(session, dir);
 	const old = loadArtifacts(session, dir);
 	const prev = old.find(x => x.url === url);
 	const title = (item.title?.trim() || prev?.title || url.split(/[/?#]/).filter(Boolean).pop() || url).slice(0, 120);
-	const items = [...old.filter(x => x.url !== url), { title, url, kind: item.kind ?? artifactKind(url), at: prev?.at ?? now }].slice(-50);
+	const items = [...old.filter(x => x.url !== url), { title, url, kind: item.kind ?? artifactKind(url), at: prev?.at ?? now, ...((item.loops ?? prev?.loops)?.length ? { loops: item.loops ?? prev?.loops } : {}) }].slice(-50);
 	save(session, items, dir);
 	return items;
 }
@@ -54,18 +54,34 @@ export function artifactsLabel(items: Artifact[]): string {
 	return ([["Docs", n("doc")], ["Links", n("link")], ["Files", n("file")]] as const).filter(([, c]) => c).map(([l, c]) => `${l} ${c}`).join(" · ");
 }
 
-/**
- * Footer links straight to the targets (no hub hop): one kind with one item -> "Docs 1" opening it;
- * several -> the newest item's title (short) opening it, then "+N". Files open as file:// URLs.
- */
-export function artifactLinks(items: Artifact[], home = homedir()): { label: string; url: string }[] {
+/** A short footer label: "PR #10", "Issue #4", otherwise the title cut at a word to about 16 characters. */
+export function artifactShort(a: Pick<Artifact, "title" | "url">): string {
+	const gh = a.url.match(/^https?:\/\/github\.com\/[^/]+\/[^/]+\/(pull|issues)\/(\d+)/);
+	if (gh) return `${gh[1] === "pull" ? "PR" : "Issue"} #${gh[2]}`;
+	const t = a.title.replace(/\s+/g, " ").trim();
+	if (t.length <= 16) return t;
+	const words = t.split(" "); let out = "";
+	for (const w of words) { if ((out + " " + w).trim().length > 16) break; out = (out + " " + w).trim(); }
+	return out || t.slice(0, 15) + "…";
+}
+
+/** Pins whose job ended (all their loops closed, or a PR merged/closed) drop behind "+N". `isOpen(loopId)` and `prDone(url)` are injected. */
+export function artifactEnded(a: Artifact, o: { isOpen?: (loop: string) => boolean; prDone?: (url: string) => boolean } = {}): boolean {
+	if (a.loops?.length && o.isOpen && !a.loops.some(o.isOpen)) return true;
+	return /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(a.url) && !!o.prDone?.(a.url);
+}
+
+/** Footer: the newest 2 live pins, then "+N" for the rest (older or ended). Items are oldest first. */
+export function footerPins<T extends Artifact>(items: T[], ended: (a: T) => boolean = () => false, show = 2): { shown: T[]; more: number } {
+	const live = items.filter(a => !ended(a)).slice(-show).reverse();
+	return { shown: live, more: items.length - live.length };
+}
+
+/** Terminal links straight to the targets: the newest 2 live pins by short label, then "+N". Files open as file:// URLs. */
+export function artifactLinks(items: Artifact[], home = homedir(), ended: (a: Artifact) => boolean = () => false): { label: string; url: string }[] {
 	const target = (a: Artifact) => a.kind === "file" ? "file://" + encodeURI(a.url.replace(/^~(?=\/|$)/, home)) : a.url;
-	const short = (t: string) => t.length > 18 ? t.slice(0, 17).trimEnd() + "…" : t;
-	return (([["doc", "Docs"], ["link", "Links"], ["file", "Files"]] as const)).flatMap(([k, name]) => {
-		const of = items.filter(x => x.kind === k), last = of.at(-1);
-		if (!last) return [];
-		return [{ label: of.length === 1 ? `${name} 1` : `${short(last.title)} +${of.length - 1}`, url: target(last) }];
-	});
+	const { shown, more } = footerPins(items, ended);
+	return [...shown.map(a => ({ label: artifactShort(a), url: target(a) })), ...(more ? [{ label: `+${more}`, url: "" }] : [])];
 }
 
 /** Hide secrets in text that may reach logs or the agent: query tokens/keys become "…". */

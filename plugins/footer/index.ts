@@ -11,6 +11,7 @@ import { linkFits, readRemoteLinks, remoteDefaultPort, remoteHost, remoteTokenPa
 import { memoryUnseen } from "../core/memory-badge.ts";
 import { queuedCount } from "../core/foryou-queue.ts";
 import { artifactLinks, loadArtifacts } from "../core/artifacts.ts";
+import { pinEnded } from "../core/pin-ended.ts";
 
 
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
@@ -49,7 +50,7 @@ export default function (pi: ExtensionAPI) {
   const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? ` · ${queued.n} queued` : ""; };
   // "Docs 1 · Cookbook… +1": what this session pinned (core/artifacts.ts), each a terminal link straight to its target.
   let pinned: { at: number; links: { label: string; url: string }[] } = { at: 0, links: [] }, sessionId = "";
-  const pinnedLinks = () => { if (Date.now() - pinned.at > 5000) pinned = { at: Date.now(), links: sessionId ? artifactLinks(loadArtifacts(sessionId)) : [] }; return pinned.links; };
+  const pinnedLinks = () => { if (Date.now() - pinned.at > 5000) pinned = { at: Date.now(), links: sessionId ? artifactLinks(loadArtifacts(sessionId), undefined, pinEnded()) : [] }; return pinned.links; };
   const memoryLabel = () => { if (Date.now() - memoryNew.at > 5000) memoryNew = { at: Date.now(), n: memoryUnseen() }; return memoryNew.n ? `Memory +${memoryNew.n}` : "Memory"; };
 
   pi.on("message_start", (event) => {
@@ -128,7 +129,7 @@ export default function (pi: ExtensionAPI) {
         const stats = truncateToWidth((running ? theme.fg("accent", running) : "") + theme.fg("dim", rest), width);
         const branch = footerData.getGitBranch();
         const core = [statuses.get("pix-remote"), statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join(" · ");
-        const pins = pinnedLinks().map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
+        const pins = pinnedLinks().map((l) => l.url ? `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07` : l.label).join("  ");
         const linkText = [...(memoryUrl ? [{ label: memoryLabel() + queuedLabel(), url: memoryUrl }] : []), ...links.filter((l) => linkFits(l.label, ctx.cwd))].map((l) => `\x1b]8;;${l.url}\x07${l.label}\x1b]8;;\x07`).join(" · ");
         // Links only when they fit beside a usable path; remote/goal status always wins the space.
         // Pins always show (they are what brook looks for); the other links only when they fit.
