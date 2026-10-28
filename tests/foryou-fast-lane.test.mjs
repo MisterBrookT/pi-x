@@ -132,3 +132,34 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		assert.deepEqual(errors, []);
 	});
 }
+
+test("live strip clears when handled: a loop made or closed for that chat; who/gist stored; Do all queues one turn", async (t) => {
+	const { createItem, doneItem } = await import("../plugins/foryou/proactive-store.ts");
+	const { clearLive } = await import("../plugins/foryou/live-strip.ts");
+	const { parseFilter } = await import("../plugins/foryou/forward.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-live2-")); mkdirSync(join(d, "memory")); writeFileSync(join(d, "inbox.jsonl"), "");
+	const k = addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:wxid_k", why: "他要十月的CSV", who: "Knight", gist: "asks for the October CSV" });
+	assert.equal(readLive(d)[0].gist, "asks for the October CSV");
+	addLive(d, { source: "Feishu: G", sourceKey: "feishu:oc_g", why: "x" });
+	addLive(d, { source: "WeChat: amber", sourceKey: "wechat:wxid_a", why: "y" });
+	const it = createItem({ title: "Send Knight the CSV", why: "he asked", source: "WeChat: Knight", sourceKey: "wechat:wxid_k" }, d);
+	assert.deepEqual(readLive(d).map(a => a.sourceKey), ["feishu:oc_g", "wechat:wxid_a"], "a loop made for the chat clears its row");
+	assert.equal(clearLive("wechat:wxid_a", d), 1, "his own reply (daemon) clears the row");
+	addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:wxid_k", why: "again" });
+	doneItem(it.id, d);
+	assert.deepEqual(readLive(d).map(a => a.sourceKey), ["feishu:oc_g"], "closing that chat's loop clears it");
+	assert.deepEqual(parseFilter('{"pass":true,"why":"他要CSV","ids":[],"who":"Knight","gist":"asks for the October CSV"}'), { pass: true, why: "他要CSV", ids: [], who: "Knight", gist: "asks for the October CSV" });
+	const token = "t".repeat(32), told = [];
+	const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d, start: async m => { told.push(m); } })] });
+	t.after(() => hub.close());
+	const r = await fetch(`http://127.0.0.1:${hub.port}/api/foryou/live/all/do`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: "{}" });
+	assert.deepEqual(await r.json(), { ok: true, count: 1 });
+	assert.match(told.join("\n"), /Do all\][\s\S]*1\. x — Feishu: G \(source key feishu:oc_g\)/);
+	assert.ok(relayAllowed("/api/foryou/live/all/do", "POST"));
+});
+
+test("daemon clears a chat's row when brook's own message is the newest there", () => {
+	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
+	assert.match(src, /isMe\(fresh\.at\(-1\)!\.sender, [^)]*\)\) && clearLive\(key, P\.dir\)/);
+	assert.match(src, /gist: f\.gist/);
+});

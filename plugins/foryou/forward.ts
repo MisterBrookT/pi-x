@@ -5,7 +5,7 @@
  */
 import { defaultMeAliases, isMe, type Msg, type Source } from "./proactive.ts";
 
-export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urgent?: boolean }
+export interface FilterVerdict { pass: boolean; why: string; ids: string[]; urgent?: boolean; who?: string; gist?: string }
 
 /** The cheap model's only question: does any of this involve brook? */
 /**
@@ -45,7 +45,7 @@ ${o.context.map(fmt).join("\n") || "(none)"}
 New messages:
 ${o.fresh.map(fmt).join("\n")}
 
-Reply with JSON only: {"pass": true|false, "why": "<one short line>", "ids": ["<ids of the new messages that matter>"], "urgent": true|false}
+Reply with JSON only: {"pass": true|false, "why": "<one short line>", "ids": ["<ids of the new messages that matter>"], "urgent": true|false, "who": "<short name of the person asking, when pass>", "gist": "<when pass: 3-8 plain English words, what they want, e.g. \"asks for the October CSV\">"}
 urgent = due today, or someone is blocked on ${o.me} right now. Almost always false.`;
 }
 
@@ -55,11 +55,11 @@ export function parseFilter(raw: string): FilterVerdict | undefined {
 	try {
 		const v = JSON.parse(m[0]);
 		if (typeof v.pass !== "boolean") return undefined;
-		return { pass: v.pass, why: String(v.why ?? "").slice(0, 200), ids: Array.isArray(v.ids) ? v.ids.map(String).slice(0, 40) : [], ...(v.urgent === true && v.pass ? { urgent: true } : {}) };
+		return { pass: v.pass, why: String(v.why ?? "").slice(0, 200), ids: Array.isArray(v.ids) ? v.ids.map(String).slice(0, 40) : [], ...(v.urgent === true && v.pass ? { urgent: true } : {}), ...(v.pass && typeof v.who === "string" && v.who.trim() ? { who: v.who.trim().slice(0, 30) } : {}), ...(v.pass && typeof v.gist === "string" && v.gist.trim() ? { gist: v.gist.replace(/\s+/g, " ").trim().slice(0, 80) } : {}) };
 	} catch { return undefined; }
 }
 
-export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean; /** Passed only because brook replied here (may close a loop); not an ask. */ own?: boolean }
+export interface Forward { source: Source; sourceKey: string; fresh: Msg[]; context: Msg[]; why: string; ids: string[]; howToRead: string; urgent?: boolean; who?: string; gist?: string; /** Passed only because brook replied here (may close a loop); not an ask. */ own?: boolean }
 
 /** One chat message to For you for everything that passed this round. */
 export function forwardPrompt(batches: Forward[], now = new Date(), me = ""): string {

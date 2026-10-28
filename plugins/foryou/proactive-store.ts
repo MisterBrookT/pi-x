@@ -1,3 +1,4 @@
+import { clearLive } from "./live-strip.ts";
 import { boardNameFor, readBoard, sendChat } from "../core/chat-board.ts";
 import { sessionLabeler } from "../core/session-label.ts";
 import { isAutonomy, levelFor, risky, readRules, rulesForPrompt } from "./autonomy.ts";
@@ -114,7 +115,12 @@ export function forYouView(dir?: string, now = Date.now()) {
 	};
 }
 
-const write = (dir: string | undefined, line: Record<string, unknown>) => appendFileSync(paths(dir).inbox, JSON.stringify({ ...line, at_status: new Date().toISOString() }) + "\n");
+// A loop changing state (done, dropped, routed, answered…) means its chat was handled: its live-strip row goes.
+const write = (dir: string | undefined, line: Record<string, unknown>) => {
+	appendFileSync(paths(dir).inbox, JSON.stringify({ ...line, at_status: new Date().toISOString() }) + "\n");
+	const key = readAll(dir).find(i => i.id === line.id)?.sourceKey;
+	if (key) clearLive(key, dir);
+};
 
 /** ✕: drop a loop for good. Works on any open loop (the phone may show parked ones). */
 export function dismissItem(id: string, dir?: string): boolean {
@@ -665,6 +671,7 @@ export function createItem(a: { autonomy?: string; title: string; why: string; a
 	const lv = levelFor({ ...it, line: a.line }, isAutonomy(a.autonomy) ? a.autonomy : undefined, readRules(paths(dir).dir));
 	it.autonomy = lv.level; it.autonomyWhy = lv.why;
 	appendFileSync(paths(dir).inbox, JSON.stringify(it) + "\n");
+	if (it.sourceKey) clearLive(it.sourceKey, dir);
 	return it;
 }
 

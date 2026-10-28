@@ -19,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
-import { newSince, saveState, firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
+import { isMe, newSince, saveState, firstSeen, preparePrompt, applyMemory, defaultConfig, isOpen, judgePrompt, parseInbox, parsePile, pilePrompt, pruneLog, staleOnit, trackHealth, healthSummary, silentSources, sourceKind, type Problem, planBatch, parseVerdict, paths, sourceKey, underLimit, updateLine, wakeTime, type Config, type Item, type WorkSession } from "./proactive.ts";
 import { applyCardEdits, listCards, logCardChanges, memoryAll, memoryDir, memoryForPrompt, migrateMemory, tidyPrompt, writeCard } from "./proactive-memory.ts";
 import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proactive-lines.ts";
 import { ensureUnlocked } from "./unlock.ts";
@@ -28,7 +28,7 @@ import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActive
 import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
 import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
-import { addLive } from "./live-strip.ts";
+import { addLive, clearLive } from "./live-strip.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
@@ -182,6 +182,8 @@ async function tick(cfg: Config, fast = false) {
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
 			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
+			// His own message is the newest here: he has handled this chat; its live-strip row goes.
+			if (!dry && fresh.length && isMe(fresh.at(-1)!.sender, String(src.me ?? cfg.me)) && clearLive(key, P.dir)) log(`live: ${src.name} cleared (brook replied)`);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
 			if (!judge) { if (fresh.length) judged({ kind: "skip", source: src.name, sourceKey: key, me: String(src.me ?? cfg.me), fresh: fresh.map(m => ({ id: m.id, sender: m.sender })), why: "only his own messages and no open loop here" }); mark(); continue; }
 			// New flow: the cheap model only filters; what passes goes to For you, which decides.
@@ -206,7 +208,7 @@ async function tick(cfg: Config, fast = false) {
 				judged({ kind: "filter", source: src.name, sourceKey: key, fresh: fresh.map(m => ({ id: m.id, sender: m.sender, time: m.time, text: m.text.slice(0, 1500) })), raw, verdict: v });
 				if (!v) { log(`${src.name}: ${fresh.length} new -> bad filter reply: ${raw.slice(0, 120)}`); continue; }
 				log(`${src.name}: ${fresh.length} new -> ${v.pass ? "PASS" : "drop"}: ${v.why}`);
-				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, ...(mine.length && !forced.length ? { own: true } : {}), howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
+				if (v.pass) forwards.push({ source: src, sourceKey: key, fresh, context: ctx, why: v.why, ids: v.ids, urgent: v.urgent, who: v.who, gist: v.gist, ...(mine.length && !forced.length ? { own: true } : {}), howToRead: adapter.howToRead(src, v.ids.length ? v.ids : fresh.map(m => m.id)) });
 				else mark();
 				if (v.pass) pendingMarks.push(mark);
 				// Feishu has no mark-as-read: an @mention of brook or a DM he got shows a seen reaction once forwarded.
@@ -262,6 +264,7 @@ async function tick(cfg: Config, fast = false) {
 				const it: Item = { ...a, ...(a.who ? { who: whoFor(a.who.name, String(src.name), key) } : {}), id: randomUUID().slice(0, 8), at: stamp, source: src.name, sourceKey: key, project: src.project ?? a.project, howToRead: adapter.howToRead(src, a.refs), status: parked ? state : "pending", ...(parked ? { wakeAt: wakeTime(a.due, now, state === "waiting" ? 3 : 7), quiet: true } : underLimit(listed, cfg.maxPerHour) ? {} : { quiet: true }) };
 				listed.push(it);
 				appendFileSync(P.inbox, JSON.stringify(it) + "\n");
+				clearLive(key, P.dir);
 				// The judge thinks a live session is already on this: offer a job card there (brook decides).
 				const target = to ? work.find(w => w.id === to) : undefined;
 				if (target && !parked) { suggestItem(it.id, { id: target.id, name: target.name }); log(`card: ${it.id} -> ${target.name}`); }
@@ -283,7 +286,7 @@ async function tick(cfg: Config, fast = false) {
 		const later_ = forwards.filter(f => !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
-			if (sent) { for (const f of now_) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why }); }
+			if (sent) { for (const f of now_) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
 			log(`forward: ${now_.map(f => f.source.name).join(", ")} -> ${sent ? "For you now (ask, mid-thread)" : "not delivered; held"}`);
 			if (!sent) later_.push(...now_);
 		}
