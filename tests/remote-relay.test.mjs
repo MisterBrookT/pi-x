@@ -238,3 +238,10 @@ test("when the Mac's local event stream ends or stalls, the relay listens again 
   assert.ok(streams >= 3, `listened again (${streams})`);
   assert.equal(frames.find(f => f.event === "stream")?.data.streaming, "reply arrived");
 });
+
+test("relay requests wait longer for big uploads: a 1.2 MB photo send is not cut off after 15 s and retried", () => {
+  assert.equal(evaluate(`relayTimeout("/api/sessions/x", 0)`), 15000);
+  assert.equal(evaluate(`relayTimeout("/api/sessions/x/file/preview?path=a", 0)`), 120000);
+  assert.ok(evaluate(`relayTimeout("/api/sessions/x/prompt", 1200000)`) >= 75000, "about 20 KB/s worst-case uplink");
+  assert.ok(evaluate(`relayTimeout("/api/sessions/x/prompt", 50000000)`) <= 180000, "capped");
+});

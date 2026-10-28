@@ -563,7 +563,7 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         if (req.method === "PUT" && !agentMatch[2]) {
           const snapshot = (await body(req)) as RemoteSnapshot;
           const old = sessions.get(id);
-          const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, ...extra } = snapshot as any;
+          const { prompts: _p, waiter: _w, seenAt: _s, updatedAt: _u, cids: _c, ...extra } = snapshot as any;
           const next: Registered = {
             ...extra,
             id, name: String(snapshot.name || "Pi session"), named: snapshot.named === true, cwd: String(snapshot.cwd || ""), busy: Boolean(snapshot.busy), origin: snapshot.origin === "phone" ? "phone" : snapshot.origin === "mac" ? "mac" : undefined, question: validQuestion((snapshot as any).question), waiting: Math.max(0, Number(snapshot.waiting) || 0), nextLook: Number.isFinite(Number(snapshot.nextLook)) && Number(snapshot.nextLook) > 0 ? Number(snapshot.nextLook) : undefined,
@@ -571,6 +571,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
             rewinds: Array.isArray(snapshot.rewinds) ? snapshot.rewinds.slice(-40).map((r: any) => ({ id: String(r?.id ?? "").slice(0, 100), text: String(r?.text ?? "").slice(0, 300) })) : undefined,
             messages: Array.isArray(snapshot.messages) ? snapshot.messages : [], streaming: snapshot.streaming || undefined, streamingHtml: snapshot.streamingHtml || undefined,
             seenAt: Date.now(), updatedAt: Date.now(), prompts: old?.prompts ?? [], waiter: old?.waiter,
+            // Sent-message ids outlive snapshots, or a phone retry after any update is queued twice.
+            ...((old as any)?.cids ? { cids: (old as any).cids } : {}),
           };
           sessions.set(id, next);
           notifyChanges(old, next);

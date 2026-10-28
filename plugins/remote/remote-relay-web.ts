@@ -16,10 +16,12 @@ async function relaySeal(value){const iv=crypto.getRandomValues(new Uint8Array(1
 async function relayOpen(frame){const f=JSON.parse(frame);let plain=await crypto.subtle.decrypt({name:"AES-GCM",iv:relayUnb64(f.iv)},relayKey,relayUnb64(f.data));if(f.z===1)plain=await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();return JSON.parse(new TextDecoder().decode(plain))}
 // A phone waking up or a Mac reconnecting takes a few seconds; wait for it instead of failing.
 async function relayWaitOnline(ms){const end=Date.now()+ms;while(Date.now()<end){if(relaySocket?.readyState===WebSocket.OPEN&&relayEvents?.online)return true;relayEvents?.wake?.();await new Promise(r=>setTimeout(r,250))}return false}
+/* A request's answer waits for its upload too: photo prompts (~1.2 MB) over a slow uplink took longer than 15 s, timed out, and were sent again. */
+function relayTimeout(path,size){return /\/file\/preview(?:\?|$)/.test(path)?120000:Math.min(180000,15000+Math.ceil(size/20))}
 function relayApi(path,opts={}){return new Promise(async(resolve,reject)=>{
   try{
     if(!await relayWaitOnline(12000))throw Error("Mac is not connected");
-    const id=crypto.randomUUID();const timer=setTimeout(()=>{relayPending.delete(id);reject(Error("Mac did not respond"))},/\/file\/preview(?:\?|$)/.test(path)?120000:15000);
+    const id=crypto.randomUUID();const timer=setTimeout(()=>{relayPending.delete(id);reject(Error("Mac did not respond"))},relayTimeout(path,(opts.body||"").length));
     relayPending.set(id,{resolve,reject,timer});
     relaySocket.send(await relaySeal({kind:"request",id,path,method:opts.method||"GET",body:opts.body||""}));
   }catch(e){reject(e)}
