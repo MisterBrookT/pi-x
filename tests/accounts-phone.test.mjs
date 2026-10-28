@@ -92,8 +92,10 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		await page.evaluate(() => document.querySelector('[data-set-nav="accounts"]').click());
 		await page.locator("#accountsRows .acct-row").first().waitFor();
 		const text = await page.locator("#accountsRows").textContent();
-		assert.match(text, /brook.*30% left this 5 h.*resets in 3 h/);
-		assert.match(text, /codex \(Codex\)99% left this week/);
+		assert.match(text, /brookUsage 70% resets in 3 h/);
+		assert.match(text, /codex \(Codex\)Usage 1% resets/);
+		assert.doesNotMatch(text, /left/, "usage, not % left");
+		assert.match(await page.locator("#piFooter").textContent(), /minarabench 60%/, "footer: account and its usage");
 		assert.equal(await page.locator("#accountsRows .acct-ring").count(), 3);
 		await page.locator("#set-accounts").scrollIntoViewIfNeeded();
 		await page.screenshot({ path: `.shots/accounts-${layout}.png` });
