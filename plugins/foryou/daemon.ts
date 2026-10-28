@@ -329,7 +329,10 @@ const wechatScreenCheck = (): Promise<{ ok: boolean; why: string }> => new Promi
 		const text = (String(out ?? "").trim() || String(err ?? "").trim()).split("\n").filter(Boolean).at(-1) ?? "";
 		if (!e) return done({ ok: true, why: "" });
 		if (/locked|not running|did not come|Can’t get|Can't get|Invalid index/i.test(text + String(e.message))) return done({ ok: true, why: "" });
-		done({ ok: false, why: `screen read broken (${text.replace(/^\[BLOCKED\] /, "").slice(0, 120) || e.message.slice(0, 120)})` });
+		// The daemon app has no Automation access to System Events (sessions that send do): it cannot check, which is
+		// not a broken send path. Logged once; never a For you alarm, and no permission prompt is forced.
+		if (/Connection invalid|not allowed|-1743|-600\b|Not authorized/i.test(text)) { if (logOnce(`WeChat screen: no access`)) log("WeChat screen: check skipped (Pix Proactive has no Automation access to System Events)"); return done({ ok: true, why: "" }); }
+		done({ ok: false, why: `screen read broken (${text.replace(/^\[BLOCKED\] /, "").slice(0, 120) || `exit ${(e as any).code ?? "?"}${(e as any).signal ? ` ${(e as any).signal}` : ""}${(e as any).killed ? ", timed out" : ""}`})` });
 	});
 });
 
