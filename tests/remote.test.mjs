@@ -1067,3 +1067,9 @@ test("a message sent while Pi works shows as a dim 'Steering:' line, not a chat 
   await page.keyboard.press("Escape");
   await abort;
 });
+
+test("phone footer's empty waits line is plain text, like the Mac: no ⏳ icon", async () => {
+  const { remoteAppHtml: html } = await import("../plugins/remote/remote-web.ts");
+  assert.ok(html.includes("fs.waits||'waiting: none'"));
+  assert.ok(!html.includes("⏳ waiting"));
+});
