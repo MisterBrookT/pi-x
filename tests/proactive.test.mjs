@@ -46,7 +46,7 @@ test("parseInbox: later status lines override", () => {
 test("prompts carry memory, pending, and a no-send guard", () => {
 	const p = judgePrompt({ me: "brook", memory: "MEM", source: { kind: "feishu", id: "c", name: "G" }, context: [], fresh: parseFeishu(raw), pending: [{ title: "OLD" }], now: "now" });
 	assert.match(p, /MEM/); assert.match(p, /OLD/); assert.match(p, /id=m3\] Knight: doc ready/);
-	assert.match(actPrompt({ source: "G", title: "T", why: "W", action: "A", howToRead: "HOW", refs: [] }), /do not send without my confirmation/);
+	assert.match(actPrompt({ source: "G", title: "T", why: "W", action: "A", howToRead: "HOW", refs: [] }), /may go out directly[\s\S]*new recipient/);
 });
 
 test("sources are pluggable: unknown kind errors, command adapter reads JSON", async () => {

@@ -29,7 +29,7 @@ test("real pi-tui provider: items appear above files and complete into a mention
 test("submitting a mention expands the task and moves the loop to \"on it\" everywhere", () => {
 	const dir = inboxDir();
 	const out = expandForYou("please @foryou:251a4abe now", "sess-1", dir);
-	assert.match(out, /Knight 提醒核对回测设置/); assert.match(out, /HOW/); assert.match(out, /do not send without my confirmation/);
+	assert.match(out, /Knight 提醒核对回测设置/); assert.match(out, /HOW/); assert.match(out, /may go out directly[\s\S]*new recipient/);
 	assert.deepEqual(readPending(dir), []);
 	const [it] = parseInbox(readFileSync(join(dir, "inbox.jsonl"), "utf8"));
 	assert.equal(it.status, "onit", "@ means \"on it\", not done"); assert.equal(it.session, "sess-1");

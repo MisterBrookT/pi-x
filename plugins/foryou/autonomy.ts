@@ -31,8 +31,8 @@ export function removeRule(dir: string, match: string, scope?: string): boolean 
 	return true;
 }
 
-/** Money, outbound messages, credentials, new contacts: never "do", whatever the guess or rule. */
-const RISKY = /(pay|payment|transfer|invoice|refund|purchase|buy|subscri|\$\d|¥|付款|转账|报销|购买|充值|send|reply to|post to|publish|email (him|her|them)|outbound|发给|回复|发送|发布|password|credential|token|api key|login|2fa|密码|验证码|登录|new contact|add friend|加好友|新联系人)/i;
+/** Money, public posts, credentials, new contacts: never "do", whatever the guess or rule. Routine replies in an existing chat are allowed (brook, 2026-10-28). */
+const RISKY = /(pay|payment|transfer|invoice|refund|purchase|buy|subscri|\$\d|¥|付款|转账|报销|购买|充值|post to|publish|发布|password|credential|token|api key|login|2fa|密码|验证码|登录|new contact|add friend|加好友|新联系人)/i;
 export const risky = (text: string) => RISKY.test(text);
 
 /**

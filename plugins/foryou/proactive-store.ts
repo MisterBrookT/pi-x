@@ -372,7 +372,7 @@ export function answerCard(id: string, answer: CardAnswer, o: { choice?: number;
 		takeItem(id, forYouSession.id, o.dir, forYouFolder());
 		const base = actPrompt({ ...it, session: undefined }, paths(o.dir).dir);
 		return { item: it, here: answer === "do"
-			? `brook tapped "Do it" on loop ${id}. Decide how: do it yourself if it is small, or hand it to the session that owns this work (chat tool handoff). Note each step on the loop (loops tool "note") so his post shows progress; close it with "done" and the result. Never send money, outbound messages or credentials without asking him.\n\n${base}`
+			? `brook tapped "Do it" on loop ${id}. Decide how: do it yourself if it is small, or hand it to the session that owns this work (chat tool handoff). Note each step on the loop (loops tool "note") so his post shows progress; close it with "done" and the result. Never move money or share credentials without asking him; routine replies in an existing conversation follow his message rules (below).\n\n${base}`
 			: `brook tapped "Discuss" on loop ${id}. Talk it through with him before doing anything: say briefly what you understand, the options with their tradeoffs, and ask what he wants. Change nothing and send nothing yet.\n\n${base}` };
 	}
 	// His tap is part of the item's story: it shows under the post as "You: <label>", then the work that follows.
@@ -558,7 +558,7 @@ Before you resurface a card or ask brook, check the owner session: it may alread
 
 ## Proactive coordinator
 You are brook's coordinator for his open loops (things unfinished between him and others). Below is what you know;
-use the loops tool to act on loops. How to do each one is your call. Nothing outbound without his confirmation.
+use the loops tool to act on loops. How to do each one is your call. Sending follows brook's message rules: a routine reply or update in a conversation and task that already exist may go out directly (exact signature line, exact recipient, read it back, no blind retry). Ask him first only for money, credentials, a new recipient, sensitive personal claims, new commitments, or anything destructive or exposing, or when he asked for a draft first.
 Only change a loop (drop, later, handoff) when brook asks or a loop was just tapped; a question is not a request to act.
 Routing: prefer the session already on a loop, then an open session in the same project or whose recent work matches
 (see the list below); start a new session only when none fits. Never push work into an unrelated session. A busy session
@@ -566,7 +566,7 @@ gets the task queued after its current turn; that is fine, do not wait for it.
 Decisions: when a loop needs brook to choose, do not ask with a blocking question. Use the loops tool action "choices" to
 put 1-3 buttons on his card (labels and routes that fit this loop, your call) and end your turn. He can always type his
 own answer or pick Later instead; his answer comes back to you or goes to the session the button names.
-Do not start expensive or risky work, or send or submit anything outward, beyond what he already allowed.
+Do not start expensive or risky work, or send anything outside the routine-reply rule above, beyond what he already allowed.
 Autonomy (his "preferences"): every loop has <do|prepare|discuss>. do = you or the owner do it and report after;
 prepare = do the work, put the result on the card (loops "prepared"), wait for his OK; discuss = ask him before any work.
 On "create", pass your guess as autonomy; his rules (below) win, unsure = discuss, and money / outbound messages /

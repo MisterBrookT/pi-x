@@ -142,7 +142,7 @@ test("coordinator context: memory, every open loop with project, session and bri
 	assert.match(c, /id=b \[needs brook\]/);
 	assert.doesNotMatch(c, /id=c/);
 	assert.match(c, /- nd \(s1\) in \/x, busy/);
-	assert.match(c, /Nothing outbound without his confirmation/);
+	assert.doesNotMatch(c, /Nothing outbound without his confirmation/); assert.match(c, /routine reply or update in a conversation and task that already exist may go out directly/); assert.match(c, /new recipient/);
 });
 
 test("judge: a loop can carry a project folder; bad paths are dropped; the judge sees progress", () => {
@@ -297,7 +297,7 @@ test("the owner's task after an approval says to do exactly the approved draft, 
 	const { actPrompt } = await import("../plugins/foryou/proactive.ts");
 	const base = { id: "a2", at: "x", title: "Links", why: "w", source: "WeChat", sourceKey: "", howToRead: "", status: "onit", action: "Send the reply", prepared: "师兄，论文：x" };
 	assert.match(actPrompt({ ...base, approved: "Send to wenzhen" }), /tapped "Send to wenzhen" on this exact draft[\s\S]*师兄，论文：x/);
-	assert.match(actPrompt(base), /do not send without my confirmation/);
+	{ const a = actPrompt(base); assert.doesNotMatch(a, /do not send without my confirmation|Draft anything outbound/); assert.match(a, /may go out directly/); assert.match(a, /money, credentials, a new recipient/); }
 	assert.match(actPrompt(base), /decide brook's next move yourself/);
 	const dir = mkdtempSync(join(tmpdir(), "fy-approve2-"));
 	appendFileSync(join(dir, "inbox.jsonl"), JSON.stringify({ ...base, approved: "Send to wenzhen", refs: [] }) + "\n");

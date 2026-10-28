@@ -494,8 +494,8 @@ Why: ${it.why}
 Suggested next step: ${it.action}${it.due ? `\nDue: ${it.due}` : ""}
 Original items: ${it.howToRead}
 ${it.note ? `\nProgress so far (the loop's brief):\n${it.note}\n` : ""}
-${it.approved && it.prepared ? `brook tapped "${it.approved}" on this exact draft. That is his confirmation: do it now with exactly this text (no edits, nothing else outbound):\n${it.prepared}\n` : `Read the referenced items and any project files you need, then prepare this next step.
-Draft anything outbound and show it to me first; do not send without my confirmation.`}
+${it.approved && it.prepared ? `brook tapped "${it.approved}" on this exact draft. That is his confirmation: do it now with exactly this text (no edits, nothing else outbound):\n${it.prepared}\n` : `Read the referenced items and any project files you need, then do this next step.
+Sending follows brook's message rules: a routine reply or update in a conversation and task that already exist may go out directly (exact signature line, exact recipient, read it back, no blind retry). Ask him first only for money, credentials, a new recipient, sensitive personal claims, new commitments, or anything destructive or exposing, or when he asked for a draft first.`}
 When you stop, record where the loop stands, so whoever picks it up next knows (one of these):
 After each step, decide brook's next move yourself (a short, specific button, not "Do it") and hand it back with next, so his post always offers the one thing that makes sense now.
 - still in progress: ${cli} note ${it.id} "<what is done, what is next>"

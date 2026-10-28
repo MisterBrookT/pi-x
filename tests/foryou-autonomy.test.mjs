@@ -78,7 +78,9 @@ test("loop autonomy: rules (line > person > type) beat the guess; unsure = discu
   assert.equal(levelFor({ title: "Rerun replay", source: "WeChat: Lowes" }, "do", r).level, "discuss", "person beats type and guess");
   assert.equal(levelFor({ title: "看下曲线", source: "黄恩浩" }, undefined, r).level, "prepare");
   assert.equal(levelFor({ title: "something new" }, undefined, r).level, "discuss", "unsure = discuss");
-  assert.equal(levelFor({ title: "Reply to Knight with the numbers" }, "do", r).level, "prepare", "outbound capped");
+  assert.equal(levelFor({ title: "Reply to Knight with the numbers" }, "do", r).level, "do", "a routine reply is not capped (brook: no per-message approval)");
+  assert.equal(levelFor({ title: "Pay the invoice for Knight" }, "do", r).level, "prepare", "money still capped");
+  assert.equal(levelFor({ title: "Add friend Amber on WeChat" }, "do", r).level, "prepare", "new contact still capped");
   assert.equal(levelFor({ title: "Pay the GPU invoice replay" }, undefined, r).level, "prepare", "money capped even by a rule");
   assert.equal(removeRule(d, "replay"), true); assert.equal(readRules(d).length, 2);
 
@@ -94,10 +96,10 @@ test("phone: a card shows its loop's level; tap cycles it and tells For you to r
   const { createItem } = await import("../plugins/foryou/proactive-store.ts");
   const d = tmp(), token = "iauto-token-1234567890abcdef";
   const it = createItem({ title: "Check the Kairos curve", why: "he asked", source: "Group", autonomy: "discuss" }, d);
-  const out = createItem({ title: "Reply to Knight", why: "he asked", source: "Group", autonomy: "prepare" }, d);
+  const out = createItem({ title: "Pay Knight the deposit", why: "he asked", source: "Group", autonomy: "prepare" }, d);
   const { setItemAutonomy } = await import("../plugins/foryou/proactive-store.ts");
   assert.equal(setItemAutonomy(out.id, undefined, d).level, "discuss");
-  assert.deepEqual(setItemAutonomy(out.id, undefined, d), { level: "prepare", capped: true }, "a tap skips 'do' on outbound");
+  assert.deepEqual(setItemAutonomy(out.id, undefined, d), { level: "prepare", capped: true }, "a tap skips 'do' on money");
   assert.equal(setItemAutonomy(out.id, "do", d).level, "prepare");
   const told = [];
   const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d, start: async m => { told.push(m); } })] });
