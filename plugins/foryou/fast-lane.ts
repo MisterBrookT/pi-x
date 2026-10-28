@@ -76,5 +76,7 @@ export async function fastSources(cfg: { sources: Source[] }, state: Record<stri
 		} catch (e) { onError("WeChat", e as Error); }
 	}
 	for (const g of cfg.sources.filter(s => s.kind === "gmail")) out.push({ ...g, fastKnownOnly: true });
+	// Unfiltered local sources (website review comments) are cheap to read: every fast tick.
+	out.push(...cfg.sources.filter(s => s.always));
 	return out;
 }

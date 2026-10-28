@@ -180,14 +180,16 @@ async function tick(cfg: Config, fast = false) {
 			const key = sourceKey(src);
 			const last = msgs.at(-1)?.id;
 			const mark = () => { if (last) { state[key] = last; state[`${key}@t`] = msgs.at(-1)!.time; if (!dry) saveState(P.state, state); } };
-			if (!state[key]) { // new chat: the first daemon run marks all seen; later, judge what came since the last check
+			if (!state[key] && !src.always) { // new chat (unfiltered sources send every open item the first time): the first daemon run marks all seen; later, judge what came since the last check
 				const { cursor } = firstSeen(msgs, state["@tick"], -new Date().getTimezoneOffset() / 60);
 				if (cursor.id === last || !last) { mark(); log(`${src.name}: cursor set (${msgs.length} msgs)`); continue; }
 				state[key] = cursor.id; state[`${key}@t`] = cursor.time;
 				log(`${src.name}: new chat, judging ${msgs.length - 1 - msgs.findIndex(m => m.id === cursor.id)} recent msgs`);
 			}
 			const items = parseInbox(existsSync(P.inbox) ? readFileSync(P.inbox, "utf8") : "");
-			const { fresh, context: ctx, judge } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
+			const { fresh: fresh0, context: ctx, judge: judge0 } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
+			// Unfiltered sources (review comments): his own comments count too; already-resolved ones are not sent.
+			const fresh = src.always ? fresh0.filter(m => !m.text.endsWith("[resolved]")) : fresh0, judge = src.always ? fresh.length > 0 : judge0;
 			// His own message is the newest here: he has handled this chat; its live-strip row goes.
 			if (!dry && repliedSince(msgs, key, String(src.me ?? cfg.me), P.dir)) log(`live: ${src.name} cleared (brook replied)`);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
@@ -206,6 +208,7 @@ async function tick(cfg: Config, fast = false) {
 				if (mine.length && !forced.length) raw = JSON.stringify({ pass: true, why: `brook replied here; ${items.filter(i => isOpen(i) && i.sourceKey === key).length} open item(s) here may be done`, ids: mine.map(m => m.id) });
 				else if (forced.length) raw = JSON.stringify({ pass: true, why: `pass list: ${forced.map(m => m.sender).slice(0, 3).join(", ")}`, ids: forced.map(m => m.id) });
 				else if (rule) raw = JSON.stringify(rule);
+				else if (src.always) raw = JSON.stringify({ pass: true, why: `${fresh.length} new ${src.name.toLowerCase()}`, ids: fresh.map(m => m.id), who: [...new Set(fresh.map(m => m.sender))].slice(0, 2).join(", "), gist: fresh.length === 1 ? fresh[0].text.slice(0, 80) : `${fresh.length} review comments` })
 				else if (src.kind === "feishu-meeting") raw = JSON.stringify({ pass: true, why: "meeting notes: summary and 待办", ids: fresh.map(m => m.id) });
 				else try { raw = await ask(prompt, cfg.model); } catch (e) { failed.push({ source: "model", error: (e as Error).message }); judged({ kind: "filter", source: src.name, sourceKey: key, error: (e as Error).message.slice(0, 2000) }); continue; }
 				fine.push("model");
@@ -289,11 +292,11 @@ async function tick(cfg: Config, fast = false) {
 		// once and the page shows them as a live strip; only the rest waits for the thread to go quiet.
 		// brook's own reply that may close a loop goes now too (it is not an ask, so no strip row): held, its card
 		// stayed open after he answered (Knight, 10-28 17:08).
-		const now_ = forwards.filter(f => f.own || f.urgent || fast || f.source.chat === "private");
+		const now_ = forwards.filter(f => f.own || f.urgent || fast || f.source.chat === "private" || !!f.source.always);
 		const later_ = forwards.filter(f => !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
-			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
+			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.source.always ? { verb: "do" as const } : {}), ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
 			log(`forward: ${now_.map(f => f.source.name).join(", ")} -> ${sent ? "For you now (ask, mid-thread)" : "not delivered; held"}`);
 			if (!sent) later_.push(...now_);
 		}

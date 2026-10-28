@@ -48,7 +48,7 @@ test("daemon: fast tick every ~1 min on shared cursors; asks mid-thread go to Fo
 	assert.match(src, /tick\(cfg, true\)/);
 	assert.match(src, /fastSources\(cfg, state/);
 	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), FAST_BUDGET\)/);
-	assert.match(src, /filter\(f => f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private"\)/);
+	assert.match(src, /filter\(f => f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private" \|\|/);
 	assert.match(src, /addLive\(P\.dir/);
 	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is marked");
 	assert.match(src, /now_\.filter\(f => !f\.own\)\) addLive/, "it forwards at once but makes no strip row");
@@ -194,4 +194,30 @@ test("龙哥 10-28: the judge decides who waits on whom from the last question a
 	assert.match(p, /If brook asked and the other person answered "I'll tell you later",\s+nothing waits on brook/);
 	assert.match(p, /use the name, never "he"\/"she"/);
 	assert.match(p, /Card people\/龙哥/, "people card reaches the judge (no longer cut at 1500 chars)");
+});
+
+test("Docs comments: a source with no filter; each new batch forwards (his own comments too), resolved ones skipped; rows show Do", async () => {
+	const { adapters } = await import("../plugins/foryou/proactive-sources.ts");
+	const { livePrompt } = await import("../plugins/foryou/live-strip.ts");
+	const { fastSources } = await import("../plugins/foryou/fast-lane.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-docs-")), file = join(d, "comments.jsonl");
+	writeFileSync(file, [
+		JSON.stringify({ id: "c1", author: "Lowes", page: "/docs/use-cases", selector: "h2#hero", text: "Hide the 27B model here", note: "", status: "open", time: "2026-10-28 19:20" }),
+		"not json",
+		JSON.stringify({ id: "c2", author: "brook", page: "/docs/api", selector: "", text: "TypeSafe style", status: "resolved", time: "2026-10-28 19:21" }),
+	].join("\n"));
+	const src = { kind: "docs-comments", id: "kdocs", name: "Docs comments", always: true, file };
+	const msgs = await adapters["docs-comments"].fetch(src);
+	assert.deepEqual(msgs.map(m => [m.id, m.sender]), [["c1", "Lowes"], ["c2", "brook"]]);
+	assert.equal(msgs[0].text, "/docs/use-cases (h2#hero): Hide the 27B model here");
+	assert.match(msgs[1].text, /\[resolved\]$/);
+	assert.deepEqual(await adapters["docs-comments"].fetch({ ...src, file: join(d, "missing.jsonl") }), [], "no file yet: nothing, no error");
+	const a = addLive(d, { source: "Docs comments", sourceKey: "docs-comments:kdocs", why: "1 new docs comments", who: "Lowes", gist: "/docs/use-cases (h2#hero): Hide the 27B model here", verb: "do" });
+	assert.match(livePrompt(a, "reply"), /^\[For you: brook tapped Do\][\s\S]*news-docs/);
+	assert.ok((await fastSources({ sources: [src] }, {}, () => {})).some(s => s.kind === "docs-comments"), "read every fast tick");
+	const daemon = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
+	assert.match(daemon, /if \(!state\[key\] && !src\.always\)/, "first comments are sent, not marked seen");
+	assert.match(daemon, /else if \(src\.always\) raw = JSON\.stringify\(\{ pass: true/, "no model filter");
+	assert.match(daemon, /src\.always \? fresh0\.filter\(m => !m\.text\.endsWith\("\[resolved\]"\)\)/);
+	assert.match(daemon, /f\.source\.chat === "private" \|\| !!f\.source\.always\)/, "mid-chat: straight to For you + a strip row, never held");
 });

@@ -1,7 +1,7 @@
 // Source adapters for the proactive loop. Add a new channel (email, WeChat, ...) by
 // writing one adapter and registering it below; the daemon, judge, and UI stay unchanged.
 import { execFile } from "node:child_process";
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -93,6 +93,22 @@ const command: Adapter = {
 		return list.map((m: any) => ({ id: String(m.id), time: String(m.time ?? ""), sender: String(m.sender ?? "?").trim(), text: String(m.text ?? "").slice(0, 1500) }));
 	},
 	howToRead: (src, refs) => `Source command: ${src.command}. Item ids: ${refs.join(", ") || "n/a"}.`,
+};
+
+/**
+ * Website review comments (news-docs writes one JSON line each: id, author, page, selector, text, note, status).
+ * A source in the generic model: no filter (`always`), every new batch goes to For you; ones already resolved are not sent.
+ */
+export const docsComments: Adapter = {
+	async fetch(src) {
+		const file = String(src.file ?? join(homedir(), "workspace/tools/kdocs/comments.jsonl"));
+		if (!existsSync(file)) return [];
+		return readFileSync(file, "utf8").split("\n").filter(l => l.trim()).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
+			.filter(c => c?.id) // resolved ones stay listed (the cursor is the last line); the daemon skips them
+			.map(c => ({ id: String(c.id), time: String(c.time ?? c.at ?? c.created ?? ""), sender: String(c.author ?? "?").trim(),
+				text: [`${c.page ?? "?"}${c.selector ? ` (${c.selector})` : ""}: ${String(c.text ?? "")}`, c.note ? `note: ${c.note}` : "", /^(resolved|done|closed|wontfix)$/i.test(String(c.status ?? "")) ? "[resolved]" : ""].filter(Boolean).join(" — ").slice(0, 1500) }));
+	},
+	howToRead: (src, refs) => `Website review comments in ${String(src.file ?? "~/workspace/tools/kdocs/comments.jsonl")} (one JSON line each; news-docs owns the site). Comment ids: ${refs.join(", ") || "n/a"}.`,
 };
 
 /** Every unmuted Feishu chat (groups and direct messages). Muted chats are skipped: mute = not important. */
@@ -391,7 +407,7 @@ const feishuMeetings: Adapter = {
 	howToRead: (_src, refs) => `Feishu meeting ${refs.join(", ") || "<meeting_id>"}. Read the AI notes with: lark-cli vc +detail --as user --meeting-ids <id> -> note +detail --note-id <note_id> -> docs +fetch --doc <note_doc_token> (all --as user).`,
 };
 const dingtalk = dingAdapters();
-export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat, "feishu-meeting": feishuMeetings };
+export const adapters: Record<string, Adapter> = { feishu, "feishu-all": feishuAll, wechat, "wechat-all": wechatAll, gmail, command, "dingtalk-all": dingtalk.all, dingtalk: dingtalk.chat, "feishu-meeting": feishuMeetings, "docs-comments": docsComments };
 
 export interface ExpandHooks { onError?: (src: Source, error: Error) => void; onSuccess?: (src: Source) => void; guard?: (app: string) => Promise<string | undefined> }
 /**

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { paths } from "./proactive.ts";
 
-export interface LiveAsk { id: string; at: string; source: string; sourceKey: string; why: string; /** Short sender name. */ who?: string; /** Short English gist ("asks for the October CSV"); `why` is the fallback. */ gist?: string }
+export interface LiveAsk { id: string; at: string; source: string; sourceKey: string; why: string; /** Short sender name. */ who?: string; /** "do": a task (review comment), shown as Do instead of Reply now. */ verb?: "do"; /** Short English gist ("asks for the October CSV"); `why` is the fallback. */ gist?: string }
 const file = (dir?: string) => join(paths(dir).dir, "live.json");
 /** An ask stays on the strip for 6 h unless brook acts on it. */
 export const LIVE_MS = 6 * 3_600_000;
@@ -18,7 +18,7 @@ const write = (list: LiveAsk[], dir?: string) => { const f = file(dir), t = `${f
 
 /** One entry per chat: a newer ask from the same chat replaces the older one. */
 export function addLive(dir: string | undefined, a: Omit<LiveAsk, "id" | "at">, now = Date.now()): LiveAsk {
-	const it = { id: randomUUID().slice(0, 8), at: new Date(now).toISOString(), ...a, why: a.why.replace(/\s+/g, " ").slice(0, 160), ...(a.who ? { who: a.who.slice(0, 30) } : {}), ...(a.gist ? { gist: a.gist.slice(0, 80) } : {}) };
+	const it = { id: randomUUID().slice(0, 8), at: new Date(now).toISOString(), ...a, why: a.why.replace(/\s+/g, " ").slice(0, 160), ...(a.who ? { who: a.who.slice(0, 30) } : {}), ...(a.gist ? { gist: a.gist.slice(0, 80) } : {}), ...(a.verb ? { verb: a.verb } : {}) };
 	write([...readLive(dir, now).filter(x => x.sourceKey !== a.sourceKey), it].slice(-12), dir);
 	return it;
 }
@@ -31,6 +31,7 @@ export const liveExists = (dir?: string) => existsSync(file(dir));
 
 /** What For you is told when brook taps a strip button. "later" only removes it from the strip. */
 export function livePrompt(a: LiveAsk, verb: "reply" | "show"): string {
+	if (verb === "reply" && a.verb === "do") return `[For you: brook tapped Do] ${a.source} (source key ${a.sourceKey}): ${a.gist ?? a.why}. Handle it now: hand each comment to the session that owns that work (website comments: news-docs) or do it, then tell him briefly.`;
 	return verb === "reply"
 		? `[For you: brook tapped Reply now] ${a.source} (source key ${a.sourceKey}): ${a.gist ?? a.why}. Draft the reply for this ask now and show it to him.`
 		: `[For you: brook tapped Show] ${a.source} (source key ${a.sourceKey}): ${a.gist ?? a.why}. Show him the messages of this ask, briefly.`;
