@@ -822,7 +822,9 @@ c.addEventListener('touchstart',()=>userScrolling(),{passive:true});c.addEventLi
 c.addEventListener('wheel',()=>userScrolling(),{passive:true});
 c.addEventListener('scroll',()=>{const reader=touching||Date.now()<userScrollUntil;if(reader){if(c.scrollTop<lastTop-2&&!atBottom())setFollow(false);else if(atBottom())setFollow(true)}lastTop=c.scrollTop},{passive:true});
 // Content that grows after rendering (pictures, opened tools) keeps the bottom in view while following.
-new ResizeObserver(()=>{if(follow)toBottom()}).observe($("messages"));new ResizeObserver(()=>{if(follow)toBottom()}).observe(c);$('input').addEventListener('input',()=>{if(follow)requestAnimationFrame(()=>{if(follow)toBottom()})});}
+new ResizeObserver(()=>{if(follow)toBottom()}).observe($("messages"));/* The input growing (a new line, the todo list above it) shrinks the chat from the bottom. When reading higher up, keep the lines
+   that were at the bottom where they were instead of hiding them under the composer. */
+let lastH=c.clientHeight;new ResizeObserver(()=>{const h=c.clientHeight,d=lastH-h;lastH=h;if(follow)toBottom();else if(d)c.scrollTop+=d}).observe(c);$('input').addEventListener('input',()=>{if(follow)requestAnimationFrame(()=>{if(follow)toBottom()})});}
 $('toBottom').onclick=()=>{setFollow(true);$("chat").scrollTo({top:$("chat").scrollHeight,behavior:'smooth'})};
 let pendingNew=null,missingSince=0;
 const actionNames={reload:'Reload Pi',new:'New chat',compact:'Compact',rewind:'Rewind'};
