@@ -221,3 +221,66 @@ test("Docs comments: a source with no filter; each new batch forwards (his own c
 	assert.match(daemon, /src\.always \? fresh0\.filter\(m => !m\.text\.endsWith\("\[resolved\]"\)\)/);
 	assert.match(daemon, /f\.source\.chat === "private" \|\| !!f\.source\.always\)/, "mid-chat: straight to For you + a strip row, never held");
 });
+
+for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }]]) {
+	test(`phone (${layout}): a website review comment (verb do) shows a "Do" button that posts reply; other rows keep the arrow`, async t => {
+		const { chromium } = await import("playwright");
+		const d = mkdtempSync(join(tmpdir(), "fy-lvdo-")); mkdirSync(join(d, "memory")); writeFileSync(join(d, "inbox.jsonl"), "");
+		addLive(d, { source: "Docs: kairos", sourceKey: "pinpoint:kairos", why: "Make the hero shorter", verb: "do" });
+		addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:wxid_k", why: "Knight asks for the CSV" });
+		const token = "l".repeat(32);
+		const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d })] });
+		const browser = await chromium.launch();
+		t.after(async () => { await browser.close(); await hub.close(); });
+		const base = `http://127.0.0.1:${hub.port}`, h = { authorization: `Bearer ${token}` };
+		await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: h, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [{ id: "m", role: "assistant", text: "Morning chat" }] }) });
+		const page = await browser.newPage({ viewport, hasTouch: true });
+		const posts = []; page.on("request", r => { if (r.method() === "POST" && r.url().includes("/api/foryou/live/")) posts.push(new URL(r.url()).pathname); });
+		await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; localStorage.pixFyView = "chat"; });
+		await page.goto(`${base}/#token=${token}`);
+		const rows = page.locator("#liveStrip .lv");
+		await rows.nth(1).waitFor();
+		const doRow = rows.filter({ hasText: "Make the hero shorter" }), other = rows.filter({ hasText: "Knight" });
+		assert.equal((await doRow.locator(".lv-reply").textContent()).trim(), "Do");
+		assert.equal(await doRow.locator(".lv-reply").getAttribute("aria-label"), "Do");
+		assert.equal(await other.locator(".lv-reply").getAttribute("aria-label"), "Reply now");
+		assert.equal(await doRow.locator(".lv-reply").isVisible(), true, "Do is always visible");
+		await page.screenshot({ path: `.shots/live-do-${layout}.png` });
+		await doRow.locator(".lv-reply").click();
+		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 1);
+		assert.ok(posts.some(p => /\/live\/[^/]+\/reply$/.test(p)), posts.join(","));
+	});
+}
+
+test("docs watch: an append runs that source within ~300 ms, debounced, never overlapping; works before the file exists", async () => {
+	const { watchDocs } = await import("../plugins/foryou/docs-watch.ts");
+	const { appendFileSync } = await import("node:fs");
+	const d = mkdtempSync(join(tmpdir(), "fy-watch-")), file = join(d, "kdocs", "comments.jsonl");
+	let runs = 0, active = 0, maxActive = 0; const t0 = Date.now(); let first = 0;
+	const stop = watchDocs(file, async () => { runs++; if (!first) first = Date.now() - t0; active++; maxActive = Math.max(maxActive, active); await new Promise(r => setTimeout(r, 400)); active--; }, 100);
+	await new Promise(r => setTimeout(r, 50));
+	appendFileSync(file, '{"id":"a"}\n'); appendFileSync(file, '{"id":"b"}\n');
+	await new Promise(r => setTimeout(r, 250));
+	appendFileSync(file, '{"id":"c"}\n');
+	await new Promise(r => setTimeout(r, 1200));
+	stop();
+	assert.ok(first > 0 && first < 1000, `first run after ${first} ms`);
+	assert.equal(maxActive, 1, "never two at once");
+	assert.ok(runs >= 2 && runs <= 3, `burst debounced, the later append still runs (${runs})`);
+});
+
+test("saveState with base merges by changed keys: a watch tick and a sweep running together keep both cursors", async () => {
+	const { saveState } = await import("../plugins/foryou/proactive.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-state-")), f = join(d, "state.json");
+	writeFileSync(f, JSON.stringify({ a: "1", b: "1", gone: "x" }));
+	const sweep = JSON.parse(readFileSync(f, "utf8")), sweepBase = { ...sweep };
+	const watch = JSON.parse(readFileSync(f, "utf8")), watchBase = { ...watch };
+	watch["docs-comments:kdocs"] = "c9"; saveState(f, watch, watchBase);
+	sweep.a = "2"; delete sweep.gone; saveState(f, sweep, sweepBase);
+	assert.deepEqual(JSON.parse(readFileSync(f, "utf8")), { a: "2", b: "1", "docs-comments:kdocs": "c9" });
+	sweep.b = "3"; saveState(f, sweep, sweepBase);
+	assert.equal(JSON.parse(readFileSync(f, "utf8"))["docs-comments:kdocs"], "c9", "later saves of the sweep still keep it");
+	const src = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
+	assert.match(src, /watchDocs\(file, \(\) => \{ log\(`docs-comments: watch -> forward/);
+	assert.match(src, /tick\(cfg, true, \[src\]\)/);
+});

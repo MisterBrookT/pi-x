@@ -299,7 +299,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		const L = readLive(deps.dir), key = L.map(a => a.id).join(",");
 		if (key === liveShown) return;
 		liveShown = key;
-		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}  ${a.why}   ${a.source}`), "/live <n> reply, show or later"] : undefined);
+		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a: any, i) => `${i + 1}  ${a.why}   ${a.source}${a.verb === "do" ? "   /live " + (i + 1) + " reply to do it" : ""}`), "/live <n> reply, show or later"] : undefined);
 	};
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
