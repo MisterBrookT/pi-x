@@ -38,3 +38,16 @@ test("unnamed pins are named once in the background (Feishu title first, then th
 	await resolveLabels("s", loadArtifacts("s", d), { dir: d, feishu, model });
 	assert.equal(calls, before, "cached: not asked again");
 });
+
+test("a generic Feishu title ('final') falls back to the first heading; a cached generic label is renamed", async () => {
+	const { docName } = await import("../plugins/core/pin-label.ts");
+	assert.equal(docName("<title>final</title><h1>Minara Agent 桌面端 v1.5.2 发版验收(9164f38)</h1><p>x</p>"), "Minara Agent 桌面端 v1.5.2 发版验收(9164f38)");
+	assert.equal(docName("<title>Kairos 新闻源清单</title><h1>a</h1>"), "Kairos 新闻源清单");
+	assert.equal(docName("<title>final</title><p>no heading</p>"), undefined);
+	assert.equal(pinLabel({ title: "MZyRdRQqYoyFOux8OkmcWk18nyh", url: "https://byterum.feishu.cn/docx/MZyRdRQqYoyFOux8OkmcWk18nyh", kind: "doc", at: 0, label: "final" }), "Doc");
+	const d = mkdtempSync(join(tmpdir(), "pl2-"));
+	pinArtifact("s", { title: "MZyRdRQqYoyFOux8OkmcWk18nyh", url: "https://byterum.feishu.cn/docx/MZyRdRQqYoyFOux8OkmcWk18nyh" }, d);
+	const a = loadArtifacts("s", d); a[0].label = "final";
+	await resolveLabels("s", a, { dir: d, feishu: async () => "Minara Agent 桌面端 v1.5.2 发版验收", model: async () => undefined });
+	assert.equal(pinLabel(loadArtifacts("s", d)[0]), "Minara Agent 桌面端");
+});

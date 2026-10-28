@@ -13,6 +13,7 @@ export function meaningless(t: string): boolean {
 	if (s.length < 2 || /\$\{|`|token=|^https?:/i.test(s)) return true;
 	if (/^[\w.-]+\.(com|fun|dev|app|io|cn|net|org)$/i.test(s)) return true; // a bare host
 	if (/^[A-Za-z0-9_-]{12,}$/.test(s) && /\d/.test(s) && /[A-Z]/.test(s) && /[a-z]/.test(s)) return true; // mixed-case id
+	if (/^(final|draft|untitled|new|doc|docs|document|test|temp|tmp|copy|v\d+|无标题|未命名|文档|副本)( ?(\d+|copy|v\d+))?$/i.test(s)) return true; // generic
 	if (/^[0-9a-f]{7,}$/i.test(s) || /^[\w]+_token$/i.test(s)) return true;
 	return false;
 }
@@ -35,7 +36,7 @@ export function urlLabel(a: Pick<Artifact, "url" | "kind">): string | undefined 
 	let url: URL; try { url = new URL(u); } catch { return undefined; }
 	const path = url.pathname.split("/").filter(Boolean).filter(p => !meaningless(p)).flatMap(words);
 	if (/trycloudflare\.com$|\.pages\.dev$|\.workers\.dev$|\.vercel\.app$|ngrok/.test(url.hostname)) {
-		const last = path.at(-1); return /^docs?$/i.test(last ?? "") ? "Docs preview" : last ? `${title(last)} preview` : "Preview";
+		const last = path.at(-1); return url.pathname.split("/").some(w => /^docs?$/i.test(w)) ? "Docs preview" : last ? `${title(last)} preview` : "Preview";
 	}
 	if (/feishu|larksuite|larkoffice|docs\.google|notion/.test(url.hostname)) return undefined; // the token says nothing
 	const sub = url.hostname.split(".").length > 2 ? url.hostname.split(".")[0] : "";
@@ -44,19 +45,27 @@ export function urlLabel(a: Pick<Artifact, "url" | "kind">): string | undefined 
 	return hostWord ? title(hostWord) : undefined;
 }
 
+/** A Feishu doc's name: its title, or its first heading when the title is generic ("final"). */
+export function docName(xml: string): string | undefined {
+	const strip = (t?: string) => t?.replace(/<[^>]+>/g, "").trim() || undefined;
+	const t = strip(xml.match(/<title>([\s\S]*?)<\/title>/)?.[1]);
+	if (t && !meaningless(t)) return t;
+	const h = strip(xml.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/)?.[1]);
+	return h && !meaningless(h) ? h : undefined;
+}
 type Fetcher = (a: Artifact) => Promise<string | undefined>;
 const feishuTitle: Fetcher = a => new Promise(res => {
 	const tok = a.url.match(/\/(?:docx|docs|wiki|sheets|base)\/([A-Za-z0-9]+)/)?.[1];
 	if (!tok || !/feishu|lark/.test(a.url)) return res(undefined);
 	execFile("lark-cli", ["docs", "+fetch", "--doc", tok, "--scope", "outline", "--max-depth", "1", "-q", ".data.document.content"], { timeout: 30_000 }, (e, out) => {
 		if (e) return res(undefined);
-		res(String(out).match(/<title>([^<]+)<\/title>/)?.[1]);
+		res(docName(String(out)));
 	});
 	// outline has no <title>; fall back to the first 300 chars of the full doc
 }).then(t => t ?? new Promise<string | undefined>(res => {
 	const tok = a.url.match(/\/(?:docx|docs|wiki|sheets|base)\/([A-Za-z0-9]+)/)?.[1];
 	if (!tok) return res(undefined);
-	execFile("lark-cli", ["docs", "+fetch", "--doc", tok, "-q", ".data.document.content"], { timeout: 30_000, maxBuffer: 1 << 24 }, (e, out) => res(e ? undefined : String(out).match(/<title>([^<]+)<\/title>/)?.[1]));
+	execFile("lark-cli", ["docs", "+fetch", "--doc", tok, "-q", ".data.document.content"], { timeout: 30_000, maxBuffer: 1 << 24 }, (e, out) => res(e ? undefined : docName(String(out))));
 }));
 const modelName: Fetcher = a => new Promise(res => {
 	const child = execFile("pi", ["-p", "--no-session", "-nt", "-ne", "--model", "anthropic/claude-haiku-4-5", "--thinking", "off"], { timeout: 60_000 }, (e, out) => {
@@ -70,7 +79,7 @@ const pending = new Set<string>();
 /** Fill `label` in the background for pins that have no meaningful title or URL label; saved once, shown on the next read. */
 export function resolveLabels(session: string, items: Artifact[], o: { dir?: string; feishu?: Fetcher; model?: Fetcher } = {}): Promise<void> {
 	const dir = o.dir ?? artifactsDir();
-	const need = items.filter(a => !a.label && meaningless(a.title) && !urlLabel(a) && !pending.has(session + a.url));
+	const need = items.filter(a => (!a.label || meaningless(a.label)) && meaningless(a.title) && !urlLabel(a) && !pending.has(session + a.url));
 	if (!need.length) return Promise.resolve();
 	for (const a of need) pending.add(session + a.url);
 	return Promise.all(need.map(async a => [a.url, (await (o.feishu ?? feishuTitle)(a).catch(() => undefined)) ?? (await (o.model ?? modelName)(a).catch(() => undefined))] as const)).then(found => {
@@ -84,7 +93,7 @@ export function resolveLabels(session: string, items: Artifact[], o: { dir?: str
 
 /** The label to show now (sync). A pin still being named shows its kind ("Doc", "Link", "File") until then. */
 export function pinLabel(a: Artifact): string {
-	if (a.label) return a.label;
+	if (a.label && !meaningless(a.label)) return a.label;
 	const fromUrl = urlLabel(a);
 	if (/github\.com\/[^/]+\/[^/]+\/(pull|issues)\/\d+/.test(a.url) && fromUrl) return fromUrl;
 	if ((a.kind === "file" || /^(~|\/)/.test(a.url)) && fromUrl && a.title.trim() === basename(a.url)) return fromUrl;
