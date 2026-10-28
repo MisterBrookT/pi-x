@@ -48,7 +48,7 @@ test("daemon: fast tick every ~1 min on shared cursors; asks mid-thread go to Fo
 	assert.match(src, /tick\(cfg, true\)/);
 	assert.match(src, /fastSources\(cfg, state/);
 	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), FAST_BUDGET\)/);
-	assert.match(src, /filter\(f => f\.urgent \|\| fast \|\| f\.source\.chat === "private"\)/);
+	assert.match(src, /filter\(f => !f\.own && \(f\.urgent \|\| fast \|\| f\.source\.chat === "private"\)\)/);
 	assert.match(src, /addLive\(P\.dir/);
 	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is not an ask");
 });
