@@ -31,7 +31,7 @@ import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts
 import { behavior } from "../core/behavior.ts";
 import { watchDocs } from "./docs-watch.ts";
 import { docsCommentsFile } from "./proactive-sources.ts";
-import { addLive, clearLive, liveSourcesToCheck, readLive, repliedSince } from "./live-strip.ts";
+import { addLive, clearClosed, clearLive, commentPrint, liveSourcesToCheck, readLive, repliedSince } from "./live-strip.ts";
 import { adapterFor, autoQuitApps, magicQuitList, dingLooksStale, dingNewest, dingSyncedAt, expandSources } from "./proactive-sources.ts";
 import { probeApp } from "./access.ts";
 import { checkGmailAuth, gmailProblem } from "./gmail-health.ts";
@@ -195,8 +195,14 @@ async function tick(cfg: Config, fast = false, only?: Source[]) {
 			const { fresh: fresh0, context: ctx, judge: judge0 } = planBatch(msgs, state[key], String(src.me ?? cfg.me), items.filter(i => isOpen(i) && i.sourceKey === key).length, state[`${key}@t`], src.chat === "private");
 			// Unfiltered sources (review comments): his own comments count too; already-resolved ones are not sent.
 			// A comment resolved since its row was made clears that row (the strip shows only open comments).
-			if (src.always && !dry && msgs.some(m => (m as { resolved?: boolean }).resolved) && !msgs.some(m => !(m as { resolved?: boolean }).resolved && !(m as { test?: boolean }).test) && clearLive(key, P.dir)) log(`live: ${src.name} cleared (comments resolved)`);
-			const fresh = src.always ? fresh0.filter(m => !(m as { resolved?: boolean }).resolved && !(m as { test?: boolean }).test) : fresh0, judge = src.always ? fresh.length > 0 : judge0;
+type Doc = Msg & { resolved?: boolean; test?: boolean };
+			const openIds = new Set((msgs as Doc[]).filter(m => !m.resolved).map(m => m.id));
+			if (src.always && !dry && clearClosed(key, r => openIds.has(r), P.dir)) log(`live: ${src.name} cleared (comments resolved)`);
+			// Docs comments: "new" = a comment whose id+status+note+text changed since it was last seen (the file is
+			// rewritten and lines move, so a position cursor re-sent old ones, 10-28 12:13). Seen prints live in state.
+			const seenKey = `${key}#seen`, seen: Record<string, string> = src.always ? (() => { try { return JSON.parse(state[seenKey] ?? "{}"); } catch { return {}; } })() : {};
+			const fresh = src.always ? (msgs as Doc[]).filter(m => seen[m.id] !== commentPrint(m) && !m.resolved && !m.test) : fresh0, judge = src.always ? fresh.length > 0 : judge0;
+			if (src.always) { const prev = state[seenKey]; state[seenKey] = JSON.stringify(Object.fromEntries((msgs as Doc[]).map(m => [m.id, commentPrint(m)]))); if (!fresh.length && prev !== state[seenKey] && !dry) saveState(P.state, state, base); }
 			// His own message is the newest here: he has handled this chat; its live-strip row goes.
 			if (!dry && repliedSince(msgs, key, String(src.me ?? cfg.me), P.dir)) log(`live: ${src.name} cleared (brook replied)`);
 			// Advance the cursor only once the batch is judged; a failed model call retries next tick.
@@ -303,7 +309,7 @@ async function tick(cfg: Config, fast = false, only?: Source[]) {
 		const later_ = forwards.filter(f => !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
-			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.source.always ? { verb: "do" as const } : {}), ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
+			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.source.always ? { verb: "do" as const, refs: f.ids } : {}), ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
 			log(`forward: ${now_.map(f => f.source.name).join(", ")} -> ${sent ? "For you now (ask, mid-thread)" : "not delivered; held"}`);
 			if (!sent) later_.push(...now_);
 		}

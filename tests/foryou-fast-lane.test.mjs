@@ -170,13 +170,14 @@ test("Knight 10-28: a reply as brook in the group after his ask clears the row (
 	const { repliedSince, liveSourcesToCheck } = await import("../plugins/foryou/live-strip.ts");
 	const d = mkdtempSync(join(tmpdir(), "fy-live3-"));
 	const key = "feishu:oc_news";
-	addLive(d, { source: "新闻/舆情交易", sourceKey: key, why: "Knight asks for earnings" }, Date.parse("2026-10-28T08:58:56Z"));
+	const at = Date.now() - 60_000, hm = (ms) => new Date(ms + 8 * 3_600_000).toISOString().slice(0, 16).replace("T", " ");
+	addLive(d, { source: "新闻/舆情交易", sourceKey: key, why: "Knight asks for earnings" }, at);
 	const before = [
-		{ id: "om_0", sender: "唐英豪", time: "2026-10-28 16:50", text: "earlier, before the ask" },
-		{ id: "om_x100b612fc470cc88dddef5571f19a70", sender: "Knight", time: "2026-10-28 16:58", text: "@唐英豪 earnings?" },
+		{ id: "om_0", sender: "唐英豪", time: hm(at - 600_000), text: "earlier, before the ask" },
+		{ id: "om_x100b612fc470cc88dddef5571f19a70", sender: "Knight", time: hm(at - 120_000), text: "@唐英豪 earnings?" },
 	];
 	assert.equal(repliedSince(before, key, "唐英豪", d, 8), false, "his earlier message does not count");
-	const after = [...before, { id: "om_x100b612fd5428cb4ce465cc57bcca67", sender: "唐英豪", time: "2026-10-28 17:03", text: "这里是 earnings 结果 — sent by news-running" }];
+	const after = [...before, { id: "om_x100b612fd5428cb4ce465cc57bcca67", sender: "唐英豪", time: hm(at + 240_000), text: "这里是 earnings 结果 — sent by news-running" }];
 	assert.equal(repliedSince(after, key, "唐英豪", d, 8), true);
 	assert.deepEqual(readLive(d), []);
 	assert.deepEqual(liveSourcesToCheck([{ id: "1", at: "", source: "WeChat: 龙哥 212", sourceKey: "wechat:wxid_ueqxjvfhykwo22", why: "" }, { id: "2", at: "", source: "G", sourceKey: "feishu:oc_g", why: "" }, { id: "3", at: "", source: "mail", sourceKey: "gmail:x", why: "" }], [{ kind: "feishu", id: "oc_g", name: "G" }]),
@@ -218,8 +219,8 @@ test("Docs comments: a source with no filter; each new batch forwards (his own c
 	const daemon = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
 	assert.match(daemon, /if \(!state\[key\] && !src\.always\)/, "first comments are sent, not marked seen");
 	assert.match(daemon, /else if \(src\.always\) raw = JSON\.stringify\(\{ pass: true/, "no model filter");
-	assert.match(daemon, /src\.always \? fresh0\.filter\(m => !\(m as \{ resolved\?: boolean \}\)\.resolved && !\(m as \{ test\?: boolean \}\)\.test\)/, "resolved and test comments never forward or make a row");
-	assert.match(daemon, /clearLive\(key, P\.dir\)\) log\(`live: \$\{src\.name\} cleared \(comments resolved\)`\)/);
+	assert.match(daemon, /&& !m\.resolved && !m\.test\)/, "resolved and test comments never forward or make a row");
+	assert.match(daemon, /clearClosed\(key, r => openIds\.has\(r\), P\.dir\)\) log\(`live: \$\{src\.name\} cleared \(comments resolved\)`\)/);
 	assert.match(daemon, /underBudget\(fastJudged, Date\.now\(\), fastBudget\(\)\)/, "budget read from Settings per use");
 	assert.match(daemon, /f\.source\.chat === "private" \|\| !!f\.source\.always\)/, "mid-chat: straight to For you + a strip row, never held");
 });
@@ -297,4 +298,27 @@ test("Docs comments 10-28: a later line with the same id (status change) wins; p
 	].map(x => JSON.stringify(x)).join("\n"));
 	const msgs = await adapters["docs-comments"].fetch({ kind: "docs-comments", id: "kdocs", name: "Docs comments", always: true, file });
 	assert.deepEqual(msgs.map(m => [m.id, !!m.resolved, !!m.test, m.time]), [["k1", false, false, "2026-10-28T12:04:00.000Z"], ["latency25734", true, true, "2026-10-28T12:03:49.000Z"]]);
+});
+
+test("10-28 rows: a docs row clears when its comments resolve, and after 20 min at most; asks after 3 h", async () => {
+	const { clearClosed, DO_MS, LIVE_MS } = await import("../plugins/foryou/live-strip.ts");
+	const d = mkdtempSync(join(tmpdir(), "fy-live4-")), now = Date.now();
+	addLive(d, { source: "Docs comments", sourceKey: "docs-comments:kdocs", why: "1 new", verb: "do", refs: ["mvs3p60hun5"] }, now);
+	addLive(d, { source: "WeChat: K", sourceKey: "wechat:k", why: "ask" }, now);
+	assert.equal(clearClosed("docs-comments:kdocs", id => id !== "mvs3p60hun5", d), 1, "resolved -> row gone");
+	addLive(d, { source: "Docs comments", sourceKey: "docs-comments:kdocs", why: "1 new", verb: "do", refs: ["x"] }, now);
+	assert.equal(readLive(d, now + DO_MS + 1).some(a => a.verb === "do"), false, "do row is only a notice: gone after 20 min");
+	assert.equal(readLive(d, now + DO_MS + 1).length, 1);
+	assert.equal(readLive(d, now + LIVE_MS + 1).length, 0);
+});
+
+test("10-28 12:13: docs comments forward only on a real change (id+status+note+text), not on file rewrite", async () => {
+	const { commentPrint } = await import("../plugins/foryou/live-strip.ts");
+	const a = { id: "mvs265i1w9j", text: "/docs: fix hero — note: x" };
+	assert.equal(commentPrint(a), commentPrint({ ...a }), "same comment, same print");
+	assert.notEqual(commentPrint(a), commentPrint({ ...a, text: a.text + " more" }), "note/text edit is new");
+	assert.notEqual(commentPrint(a), commentPrint({ ...a, resolved: true }), "status change is new");
+	const daemon = readFileSync(new URL("../plugins/foryou/daemon.ts", import.meta.url), "utf8");
+	assert.match(daemon, /filter\(m => seen\[m\.id\] !== commentPrint\(m\) && !m\.resolved && !m\.test\)/);
+	assert.match(daemon, /verb: "do" as const, refs: f\.ids/);
 });

@@ -6,19 +6,21 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { paths } from "./proactive.ts";
 
-export interface LiveAsk { id: string; at: string; source: string; sourceKey: string; why: string; /** Short sender name. */ who?: string; /** "do": a task (review comment), shown as Do instead of Reply now. */ verb?: "do"; /** Short English gist ("asks for the October CSV"); `why` is the fallback. */ gist?: string }
+export interface LiveAsk { id: string; at: string; source: string; sourceKey: string; why: string; /** Short sender name. */ who?: string; /** "do": a task (review comment), shown as Do instead of Reply now. */ verb?: "do"; /** Item ids in this row (docs comment ids). */ refs?: string[]; /** Short English gist ("asks for the October CSV"); `why` is the fallback. */ gist?: string }
 const file = (dir?: string) => join(paths(dir).dir, "live.json");
 /** An ask stays on the strip for 6 h unless brook acts on it. */
-export const LIVE_MS = 6 * 3_600_000;
+export const LIVE_MS = 3 * 3_600_000;
+/** A "do" row (review comments) is already with For you, which hands it on at once; it is only a notice. */
+export const DO_MS = 20 * 60_000;
 
 export function readLive(dir?: string, now = Date.now()): LiveAsk[] {
-	try { return (JSON.parse(readFileSync(file(dir), "utf8")) as LiveAsk[]).filter(a => now - Date.parse(a.at) < LIVE_MS); } catch { return []; }
+	try { return (JSON.parse(readFileSync(file(dir), "utf8")) as LiveAsk[]).filter(a => now - Date.parse(a.at) < (a.verb === "do" ? DO_MS : LIVE_MS)); } catch { return []; }
 }
 const write = (list: LiveAsk[], dir?: string) => { const f = file(dir), t = `${f}.${process.pid}.tmp`; writeFileSync(t, JSON.stringify(list, null, 2)); renameSync(t, f); };
 
 /** One entry per chat: a newer ask from the same chat replaces the older one. */
 export function addLive(dir: string | undefined, a: Omit<LiveAsk, "id" | "at">, now = Date.now()): LiveAsk {
-	const it = { id: randomUUID().slice(0, 8), at: new Date(now).toISOString(), ...a, why: a.why.replace(/\s+/g, " ").slice(0, 160), ...(a.who ? { who: a.who.slice(0, 30) } : {}), ...(a.gist ? { gist: a.gist.slice(0, 80) } : {}), ...(a.verb ? { verb: a.verb } : {}) };
+	const it = { id: randomUUID().slice(0, 8), at: new Date(now).toISOString(), ...a, why: a.why.replace(/\s+/g, " ").slice(0, 160), ...(a.who ? { who: a.who.slice(0, 30) } : {}), ...(a.gist ? { gist: a.gist.slice(0, 80) } : {}), ...(a.verb ? { verb: a.verb } : {}), ...(a.refs?.length ? { refs: a.refs.slice(0, 40) } : {}) };
 	write([...readLive(dir, now).filter(x => x.sourceKey !== a.sourceKey), it].slice(-12), dir);
 	return it;
 }
@@ -80,3 +82,13 @@ export function liveSourcesToCheck(rows: LiveAsk[], fetched: Source[]): Source[]
 	}
 	return [...out.values()];
 }
+
+/** Rows whose items are all closed (e.g. every comment resolved) are done: drop them. Returns how many. */
+export function clearClosed(sourceKey: string, open: (ref: string) => boolean, dir?: string): number {
+	const list = readLive(dir), keep = list.filter(a => a.sourceKey !== sourceKey || !a.refs?.length || a.refs.some(open));
+	if (keep.length !== list.length) write(keep, dir);
+	return list.length - keep.length;
+}
+
+/** What makes a docs comment "new" to For you: its id plus status, note and text. Same fingerprint = already sent. */
+export const commentPrint = (m: { id: string; text: string; resolved?: boolean }) => `${m.text.length}:${m.resolved ? 1 : 0}:${[...m.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)}`;
