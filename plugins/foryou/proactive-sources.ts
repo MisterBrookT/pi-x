@@ -153,13 +153,48 @@ const wechat: Adapter = {
 	howToRead: (src, refs) => `WeChat chat ${src.name} (${src.id}), read-only. Read with: wechat-cli msg get_message '{"talker":"${src.id}","limit":50}' (local_ids ${refs.join(",") || "n/a"}). Never send from the CLI; replies go through the desktop app after brook confirms.`,
 };
 
+const ordinaryChat = (s: any) => s?.username && (s.chat_type === "group" || s.chat_type === "private") && !/^gh_|holder$|^@|^notifymessage$/.test(String(s.username));
+/**
+ * Names guard for the WeChat chat list. After some wx-daemon restarts, every chat comes back as its raw id
+ * (10-28 12:00: 0 of 20 named), and judging then runs blind. Degraded = at least 2 ordinary chats that had a
+ * name before now show only their id, and no ordinary chat has a name. A chat that never had a name is fine.
+ * Recovery: one `wx daemon stop` (it restarts on the next read), at most once per cooldown, then one re-read.
+ * Still degraded: throw, so this check reads no WeChat chat (cursors stay; the next check retries) and the
+ * error goes to source health.
+ */
+export function wechatNamesGuard(o: { cooldownMs?: number; now?: () => number } = {}) {
+	const named = new Set<string>();
+	let lastRecovery = -Infinity;
+	const degraded = (json: unknown) => {
+		const list = ((json as any)?.data?.sessions ?? []).filter(ordinaryChat);
+		const lost = list.filter((s: any) => named.has(s.username) && String(s.chat ?? s.username) === s.username);
+		const anyNamed = list.some((s: any) => s.chat && s.chat !== s.username);
+		return lost.length >= 2 && !anyNamed;
+	};
+	const learn = (json: unknown) => { for (const s of ((json as any)?.data?.sessions ?? []).filter(ordinaryChat)) if (s.chat && s.chat !== s.username) named.add(s.username); };
+	return async (read: () => Promise<unknown>, stopDaemon: () => Promise<unknown>) => {
+		let json = await read();
+		if (degraded(json)) {
+			const now = (o.now ?? Date.now)();
+			if (now - lastRecovery < (o.cooldownMs ?? 30 * 60_000)) throw new Error("WeChat chat names missing (wx-daemon lost contacts); recovery on cooldown, skipped this check");
+			lastRecovery = now;
+			await stopDaemon().catch(() => {});
+			json = await read();
+			if (degraded(json)) throw new Error("WeChat chat names missing (wx-daemon lost contacts) after one daemon restart; skipped this check");
+		}
+		learn(json);
+		return json;
+	};
+}
+const namesGuard = wechatNamesGuard();
+
 /** Recently active WeChat chats. Options: days (default 2), max (30), exclude (chat names or ids), me. */
 const wechatAll: Adapter = {
 	fetch: async () => [],
 	howToRead: () => "",
 	async expand(src) {
 		const days = Number(src.days ?? 2);
-		const list = parseWechatChats(await wechatCli(["msg", "get_msg_chat_list", "{}"]), { sinceSec: Date.now() / 1000 - days * 86400, exclude: src.exclude as string[] | undefined, max: Number(src.max ?? 30) });
+		const list = parseWechatChats(await namesGuard(() => wechatCli(["msg", "get_msg_chat_list", "{}"]), () => run("wx", ["daemon", "stop"], { timeout: 10_000 })), { sinceSec: Date.now() / 1000 - days * 86400, exclude: src.exclude as string[] | undefined, max: Number(src.max ?? 30) });
 		return list.map(s => ({ ...s, ...(src.me ? { me: src.me } : {}) }));
 	},
 };

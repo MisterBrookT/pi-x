@@ -44,3 +44,31 @@ test("WeChat voice: the connector's inline transcript reaches the For you filter
   const msgs = parseWechat({ data: { chat: "浙大 李老师 报销", messages: [{ local_id: 280, type: "语音", time: "2026-10-24 18:36", sender: "浙大 李老师 报销", content: "[语音 11s] 英豪，刚刚陈老师说…稍等。" }] } });
   assert.equal(msgs[0].text, "[语音 11s] 英豪，刚刚陈老师说…稍等。");
 });
+
+test("wechatNamesGuard: named chats turning into raw ids get one daemon restart, with cooldown; id-only lists pass", async () => {
+	const { wechatNamesGuard } = await import("../plugins/foryou/proactive-sources.ts");
+	const list = named => ({ data: { sessions: [
+		{ username: "1@chatroom", chat: named ? "Group A" : "1@chatroom", chat_type: "group", timestamp: 1 },
+		{ username: "wxid_b", chat: named ? "Bob" : "wxid_b", chat_type: "private", timestamp: 1 },
+		{ username: "gh_x", chat: "gh_x", chat_type: "official_account", timestamp: 1 },
+	] } });
+	// A list that was never named (or legitimately id-only) passes untouched, no restart.
+	let stops = 0; const stop = async () => { stops++; };
+	const fresh = wechatNamesGuard();
+	assert.deepEqual(await fresh(async () => list(false), stop), list(false));
+	assert.equal(stops, 0);
+	// Named, then all ids: one restart; recovered names pass.
+	let t = 0; const g = wechatNamesGuard({ cooldownMs: 1000, now: () => t });
+	await g(async () => list(true), stop);
+	const reads = [list(false), list(true)];
+	assert.deepEqual(await g(async () => reads.shift(), stop), list(true));
+	assert.equal(stops, 1);
+	// Restart does not help: throw (the check reads no WeChat chat, so no cursor moves and nothing is judged).
+	t = 5000;
+	await assert.rejects(g(async () => list(false), stop), /names missing.*after one daemon restart/);
+	assert.equal(stops, 2);
+	// Within cooldown: no restart loop, still refuses.
+	t = 5500;
+	await assert.rejects(g(async () => list(false), stop), /cooldown/);
+	assert.equal(stops, 2);
+});
