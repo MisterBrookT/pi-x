@@ -5,7 +5,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
-import { readRemoteToken, tailSession } from "./remote-hub.ts";
+import { lightSession, readRemoteToken, tailSession } from "./remote-hub.ts";
 import { pluginRelayAllowed } from "../core/hub-plugin.ts";
 
 /** Turns (user messages and everything after) a phone gets per session at first; older ones load on request. */
@@ -51,7 +51,7 @@ export const openRelayFrame = (secret: string, frame: string): any => {
   return JSON.parse((value.z === 1 ? inflateRawSync(plain, { maxOutputLength: 20_000_000 }) : plain).toString("utf8"));
 };
 
-export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return (path === "/api/frame-check" && method === "GET") || path === "/api/push" && (method === "GET" || method === "POST") || path === "/api/here" && method === "GET" || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/thumb|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
+export const relayAllowed = (url: string, method: string) => { const path = String(url).split("?")[0]; return (path === "/api/frame-check" && method === "GET") || path === "/api/push" && (method === "GET" || method === "POST") || path === "/api/here" && method === "GET" || method === "GET" && (path === "/api/sessions" || /^\/api\/sessions\/[a-zA-Z0-9_-]+$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/media\/[a-f0-9]{64}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/tool\/[A-Za-z0-9_-]{1,100}$/.test(path) || /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(files|file|file\/preview|file\/thumb|file\/source)$/.test(path)) || method === "POST" && /^\/api\/sessions\/[a-zA-Z0-9_-]+\/(prompt|abort|action|file\/save|file\/create|file\/image|file\/upload)$/.test(path)
   || pluginRelayAllowed(path, method)
   || method === "GET" && (path === "/api/folders" || path === "/api/links" || path === "/api/past" || path === "/api/memory" || path === "/api/memory/file") || method === "POST" && (path === "/api/launch" || path === "/api/resume")
   || method === "POST" && path === "/api/desktop/open" || method === "GET" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/read$/.test(path) || method === "POST" && /^\/api\/desktop\/[A-Za-z0-9_-]{24}\/(write|close|input)$/.test(path)
@@ -100,7 +100,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
   const publishSessions = async (active?: string) => {
     // Fetch everything at once, and send the session the phone shows first: it is what Brook is looking at.
     const json = async (path: string) => { try { const r = await local(path); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
-    const one = (id: string) => json(`/api/sessions/${encodeURIComponent(id)}?tail=${relayTail}`);
+    const one = (id: string) => json(`/api/sessions/${encodeURIComponent(id)}?tail=${relayTail}&light=1`);
     const [sessions, extras, shown] = await Promise.all([json("/api/sessions") as Promise<{ id: string }[] | undefined>, json("/api/extras") as Promise<[string, unknown][] | undefined>, active ? one(active) : undefined]);
     if (!sessions) return;
     send({ kind: "event", event: "sessions", data: sessions });
@@ -139,7 +139,7 @@ export function startRemoteRelayAgent(options: { origin: string; secret: string;
           const block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
           const type = block.match(/^event: ([\w-]+)$/m)?.[1];
           const data = block.match(/^data: (.+)$/m)?.[1];
-          if (type && data) { try { const value = JSON.parse(data); send({ kind: "event", event: type, data: type === "session" ? tailSession(value, relayTail) : value }); } catch {} }
+          if (type && data) { try { const value = JSON.parse(data); send({ kind: "event", event: type, data: type === "session" ? lightSession(tailSession(value, relayTail)) : type === "sessionPatch" && Array.isArray(value?.tail) ? { ...value, tail: lightSession({ messages: value.tail }).messages } : value }); } catch {} }
         }
         if (buffer.length > 2_000_000) buffer = "";
       }

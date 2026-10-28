@@ -14,7 +14,7 @@ import { launchableFolder, listFolders, pastSessions, resumableSession, listMemo
 import { renderRemoteMarkdown } from "./remote-markdown.ts";
 import { checkRemotePath, convertDocument, listRemoteFiles, previewSourceLimit, readEditable, createEditable, saveMarkdownImage, saveUpload, readRemoteChunk, saveEditable } from "./remote-files.ts";
 import { previewRemoteDocument } from "./remote-document-preview.ts";
-import { remoteThumbnail } from "./remote-thumb.ts";
+import { mediaThumbnail, remoteThumbnail } from "./remote-thumb.ts";
 import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "../desktop/remote-desktop.ts";
 import { createDesktopCredentialStore, type DesktopCredentialStore } from "../desktop/remote-desktop-credentials.ts";
 import { createDesktopInput, createDesktopInputController, type DesktopInputController } from "../desktop/remote-desktop-input.ts";
@@ -93,6 +93,20 @@ export function tailSession<T extends { messages: unknown[] }>(session: T, turns
   if (seen < turns) start = 0;
   if (start === 0) return session;
   return { ...session, messages: session.messages.slice(start), older: start };
+}
+/** For the phone's first view: tool input/output cut to a short preview (the row is closed anyway); the full text loads on tap. */
+export const toolPreviewChars = 400;
+export function lightSession<T extends { messages: any[] }>(session: T, chars = toolPreviewChars): T {
+  let changed = false;
+  const messages = session.messages.map(m => {
+    if (!Array.isArray(m?.tools) || !m.tools.some((t: any) => (t.input?.length ?? 0) > chars || (t.output?.length ?? 0) > chars)) return m;
+    changed = true;
+    return { ...m, tools: m.tools.map((t: any) => {
+      const cut = (t.input?.length ?? 0) > chars || (t.output?.length ?? 0) > chars;
+      return cut ? { ...t, input: t.input?.slice(0, chars), output: t.output == null ? t.output : t.output.slice(0, chars), cut: true } : t;
+    }) };
+  });
+  return changed ? { ...session, messages } : session;
 }
 export function fitRemoteSnapshot(snapshot: RemoteSnapshot, maxBytes = 1_300_000): RemoteSnapshot {
   if (Buffer.byteLength(JSON.stringify(snapshot)) <= maxBytes) return snapshot;
@@ -409,12 +423,21 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
         const file = await readMemory(url.searchParams.get("path"), options.memoryRoot);
         return file ? send(res, 200, { path: file.path, html: renderRemoteMarkdown(file.text) }) : send(res, 404, { error: "file unavailable" });
       }
+      const toolGet = path.match(/^\/api\/sessions\/([^/]+)\/tool\/([A-Za-z0-9_-]{1,100})$/);
+      if (req.method === "GET" && toolGet) {
+        const session = sessions.get(decodeURIComponent(toolGet[1]));
+        const tool = session?.messages.flatMap((m: any) => m.tools ?? []).find((t: any) => t.id === toolGet[2]);
+        return tool ? send(res, 200, { id: tool.id, input: tool.input, output: tool.output }) : send(res, 404, { error: "tool not found" });
+      }
       const mediaGet = path.match(/^\/api\/sessions\/([^/]+)\/media\/([a-f0-9]{64})$/);
       if (req.method === "GET" && mediaGet) {
         const id = decodeURIComponent(mediaGet[1]);
         if (!sessions.has(id)) return send(res, 404, { error: "session is no longer connected" });
         const media = mediaBySession.get(id)?.get(mediaGet[2]);
-        return send(res, media ? 200 : 404, media ?? { error: "image unavailable" });
+        if (!media) return send(res, 404, { error: "image unavailable" });
+        // The chat shows a small copy (~640 px JPEG); the full image loads only when brook opens it.
+        if (url.searchParams.get("thumb") === "1") return send(res, 200, { ...media, ...(await mediaThumbnail(media)) });
+        return send(res, 200, media);
       }
       // Mac files named in chat or browsed in the Files panel; remote-files.ts checks every path.
       // Phone editor: open and save existing Markdown/text files; saveEditable refuses stale overwrites.
@@ -468,7 +491,10 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       if (sessionMatch) {
         const session = sessions.get(decodeURIComponent(sessionMatch[1]));
         if (!session) return send(res, 404, { error: "session is no longer connected" });
-        if (req.method === "GET" && !sessionMatch[2]) return send(res, 200, tailSession(publicSession(session), Number(url.searchParams.get("tail")) || 0));
+        if (req.method === "GET" && !sessionMatch[2]) {
+          const full = tailSession(publicSession(session), Number(url.searchParams.get("tail")) || 0);
+          return send(res, 200, url.searchParams.get("light") === "1" ? lightSession(full) : full);
+        }
         if (req.method === "POST" && sessionMatch[2] === "/abort") {
           await body(req);
           session.prompts.push({ abort: true });
