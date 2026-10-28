@@ -74,13 +74,14 @@ test("hub: live strip in /api/foryou; Reply now tells For you, Later only clears
 });
 
 for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
-	test(`phone (${layout}): live strip above the composer in the For you chat only; Reply now / Show / Later clear the row`, async (t) => {
+	test(`phone (${layout}): live strip in the For you chat only; one line each (who bold, gist, muted source); tap = Show, × = Later, reply arrow on hover/swipe; Do all`, async (t) => {
 		const { chromium } = await import("playwright");
 		const d = mkdtempSync(join(tmpdir(), "fy-lvw-")); mkdirSync(join(d, "memory")); writeFileSync(join(d, "inbox.jsonl"), "");
 		addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:wxid_k", why: "Knight asks for the CSV" });
 		addLive(d, { source: "Feishu: G", sourceKey: "feishu:oc_g", why: "@brook review the deck" });
-		const token = "l".repeat(32), told = [];
-		const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d, start: async m => { told.push(m); } })] });
+		addLive(d, { source: "WeChat: Amber", sourceKey: "wechat:a", why: "Amber asks about Friday" });
+		const token = "l".repeat(32);
+		const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d })] });
 		const browser = await chromium.launch();
 		t.after(async () => { await browser.close(); await hub.close(); });
 		const base = `http://127.0.0.1:${hub.port}`, h = { authorization: `Bearer ${token}` };
@@ -88,32 +89,43 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		await fetch(`${base}/agent/s1`, { method: "PUT", headers: h, body: JSON.stringify({ name: "work", named: true, cwd: d, busy: false, messages: [{ id: "w", role: "user", text: "work chat" }] }) });
 		const page = await browser.newPage({ viewport, hasTouch: layout !== "monitor" });
 		const errors = []; page.on("pageerror", e => errors.push(e.message));
+		const posts = []; page.on("request", r => { if (r.method() === "POST" && r.url().includes("/api/foryou/live/")) posts.push(new URL(r.url()).pathname); });
 		await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; localStorage.pixFyView = "chat"; });
 		await page.goto(`${base}/#token=${token}`);
 		await page.getByText("Morning chat").waitFor();
-		const strip = page.locator("#liveStrip");
-		await strip.locator(".lv").nth(1).waitFor();
-		assert.match(await strip.locator(".lv").first().textContent(), /Knight asks for the CSV\s*WeChat: Knight/);
+		const strip = page.locator("#liveStrip"), rows = strip.locator(".lv");
+		await rows.nth(2).waitFor();
+		assert.match((await strip.locator(".lv-h").textContent()).trim(), /^3 waiting\s*Do all$/);
+		assert.equal(await rows.first().locator("p b").textContent(), "Knight");
+		assert.match(await rows.first().locator("p").textContent(), /^Knight Knight asks for the CSV WeChat$/);
+		assert.equal(await strip.getByText(/Reply now|Show|Later/).count(), 0, "no text buttons");
+		for (const r of await rows.all()) assert.ok((await r.boundingBox()).height < 60, "one line");
 		const sb = await strip.boundingBox(), ib = await page.locator("#input").boundingBox();
-		assert.ok(sb.y + sb.height <= ib.y + 2, "above the composer input");
-		assert.ok(sb.x >= 0 && sb.x + sb.width <= viewport.width + 1, "fits");
-		for (const b of await strip.locator("button").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
+		assert.ok(sb.y + sb.height <= ib.y + 2 && sb.x >= 0 && sb.x + sb.width <= viewport.width + 1, "above the input, fits");
+		assert.equal(await rows.first().locator(".lv-reply").isVisible(), false, "reply arrow hidden until hover/swipe");
 		await page.screenshot({ path: `.shots/live-${layout}.png` });
-		await strip.locator(".lv").first().getByRole("button", { name: "Reply now" }).click();
+		// × = Later; tap the row = Show; reply arrow (hover on a pointer, swipe on touch) = Reply now.
+		await rows.nth(2).locator('[aria-label="Later"]').click();
+		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 2);
+		await rows.nth(1).locator("p").click();
 		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 1);
+		if (layout === "monitor") await rows.first().hover();
+		else await rows.first().evaluate(el => { const T = (x) => [new Touch({ identifier: 1, target: el, clientX: x, clientY: 10 })]; el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: T(300), changedTouches: T(300) })); el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, touches: [], changedTouches: T(200) })); });
+		await rows.first().locator(".lv-reply").click();
+		await page.waitForFunction(() => document.getElementById("liveStrip").hidden);
+		assert.deepEqual(posts.map(p => p.split("/").pop()), ["later", "show", "reply"]);
 		const q = await (await fetch(`${base}/agent/pix-foryou/next`, { headers: h })).json();
-		assert.match(q.prompts.join("\n"), /Reply now\].*Knight asks for the CSV/);
-		await strip.getByRole("button", { name: "Later" }).click();
-		await page.waitForFunction(() => document.getElementById("liveStrip").hidden);
-		const q2 = await (await fetch(`${base}/agent/pix-foryou/next?wait=0`, { headers: h, signal: AbortSignal.timeout(1500) }).then(r => r.json()).catch(() => ({ prompts: [] })));
-		assert.deepEqual(q2.prompts ?? [], [], "Later does not wake For you");
-		// Not in the feed, not in other sessions.
-		addLive(d, { source: "WeChat: Amber", sourceKey: "wechat:a", why: "Amber asks about Friday" });
-		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 1, null, { timeout: 8000 });
+		assert.match(q.prompts.join("\n"), /Show\].*@brook review the deck[\s\S]*Reply now\].*Knight asks for the CSV/);
+		// Do all: one call on the header.
+		addLive(d, { source: "WeChat: A", sourceKey: "wechat:x", why: "x" }); addLive(d, { source: "WeChat: B", sourceKey: "wechat:y", why: "y" });
+		await strip.getByRole("button", { name: "Do all" }).waitFor({ timeout: 8000 });
+		await strip.getByRole("button", { name: "Do all" }).click();
+		await page.waitForFunction(() => /For you is on it|not on the Mac yet/.test(document.getElementById("composerStatus").textContent));
+		assert.equal(posts.at(-1), "/api/foryou/live/all/do");
+		// Not in the feed or other sessions.
 		await page.locator("#fyDog").click();
 		await page.waitForFunction(() => document.getElementById("liveStrip").hidden);
 		await page.locator("#fyDog").click();
-		await page.waitForFunction(() => !document.getElementById("liveStrip").hidden);
 		await page.evaluate(() => open("s1"));
 		await page.getByText("work chat").waitFor();
 		assert.equal(await strip.isHidden(), true, "only in the For you chat");
