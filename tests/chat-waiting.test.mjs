@@ -89,8 +89,9 @@ test("phone: a session waiting on another shows the same quiet 'Waiting for pix'
   const page = await browser.newPage({ ...devices["iPhone 13"] });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
-  await page.locator(".peer-wait-line").waitFor();
-  assert.equal(await page.locator(".peer-wait-line").textContent(), "Waiting for pix");
+  await page.locator("#phoneWaits").waitFor();
+  assert.equal(await page.locator("#phoneWaits").textContent(), "Waiting for pix", "under the input, not in the chat");
+  assert.equal(await page.locator(".peer-wait-line").count(), 0);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await page.locator(".bubble.typing").count(), 0, "not shown as running");
   await page.locator("#menu").click();

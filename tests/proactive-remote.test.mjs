@@ -460,8 +460,9 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   for (const sel of [".activity", ".ln-box", ".job-waitline", ".bubble.typing", "#messages .job-card"]) assert.equal(await page.locator(sel).count(), 0, sel);
   assert.doesNotMatch(await page.locator("#messages").textContent(), /ls -t/);
   await put([]);
-  await page.waitForFunction(() => /Waiting for pix/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
-  assert.match(await st.textContent(), /^Thinking… · Waiting for pix$/);
+  await page.waitForFunction(() => /^Thinking/.test(document.querySelector("#messages .fy-status")?.textContent || ""));
+  assert.match(await st.textContent(), /^Thinking…$/, "the wait is in the footer, not the status row");
+  await page.waitForFunction(() => /Waiting for pix/.test(document.getElementById("phoneWaits")?.textContent || ""));
   assert.equal(await page.locator("#messages .fy-status").count(), 1, "one steady row, updated in place");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(400); await page.screenshot({ path: process.env.PIX_SHOT }); }
 });
