@@ -82,6 +82,7 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) h
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   // Main chat stays clean: only a red dot on the bell; For you is its own page.
@@ -229,6 +230,7 @@ test("phone composer: typing @ suggests For you items and a tap inserts the ment
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
@@ -260,8 +262,9 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) F
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi foryou" }, { role: "assistant", text: "Morning. Two things today." }] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
-  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
+  await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; localStorage.pixFyView = "feed"; });
   await page.goto(`${base}/#token=${token}`);
   await page.getByText("hello there").waitFor();
   assert.equal(await page.locator("#messages .fp, #messages [data-job]").count(), 0, "work sessions show no posts");
@@ -281,9 +284,9 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) F
   assert.match(await post.locator(".tl-act.main").textContent(), /Ask Minara/);
   for (const b of await post.locator("button:visible").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
   if (process.env.PIX_SHOT) { await page.waitForTimeout(600); await page.screenshot({ path: process.env.PIX_SHOT }); }
-  // The dog opens the chat (the composer talks to For you); "Feed" goes back.
-  assert.equal(await page.getByRole("button", { name: "Talk to For you" }).boundingBox().then(b => b.height >= 40), true);
-  await page.getByRole("button", { name: "Talk to For you" }).click();
+  // "Chat" (top right) opens the chat (the composer talks to For you); "Feed" goes back.
+  assert.equal(await page.getByRole("button", { name: "Back to the chat" }).boundingBox().then(b => b.height >= 38), true);
+  await page.getByRole("button", { name: "Back to the chat" }).click();
   await page.getByText("Morning. Two things today.").waitFor();
   assert.equal(await page.locator("#messages .fp").count(), 0, "chat sheet has no posts");
   assert.equal(await page.locator("#input").isVisible(), true);
@@ -291,7 +294,7 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) F
   await page.locator("#input").fill("what's left today?");
   await page.locator("#send").click();
   assert.match((await toFy).prompts[0], /what's left today\?/);
-  await page.getByRole("button", { name: "Back to the feed" }).click();
+  await page.getByRole("button", { name: "Show the feed" }).click();
   await post.waitFor();
   const next = fetch(`${base}/agent/s1/next`, { headers: auth }).then(r => r.json());
   await post.locator(".tl-act.main").click();
@@ -311,6 +314,7 @@ test("posts in the For you chat: Reply sends brook's words; Later parks; while F
   await put();
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const p1 = page.locator('#messages .tl-post[data-fy="k1"]'), p2 = page.locator('#messages .tl-post[data-fy="k2"]');
@@ -347,6 +351,7 @@ test("bell page: every card has Something else; brook's words go to For you", as
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const card = await openPost(page.locator("#forYou"), "e1");
@@ -383,6 +388,7 @@ test.skip("(superseded: brook asked for one item = one post, never grouped) rela
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   // On the phone a line with 2+ open asks is ONE post: newest as the body, the rest as a muted "Also"; no counts.
@@ -424,6 +430,7 @@ test("tracking: a session that owns a loop records where it stands on each turn 
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   // Who is on what: in-progress posts in the same feed, each with a short trail of its latest notes.
@@ -444,6 +451,7 @@ test("For you at work: one steady status line (doing · waiting on · cards); no
   await put([{ id: "t2", name: "chat", label: "send to pix" }]);
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`${base}/#token=${token}`);
   const st = page.locator("#messages .fy-status");
@@ -472,6 +480,7 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) f
   await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
@@ -521,6 +530,7 @@ test.skip("(superseded: fixed Do it · Later · Done · Discuss on every post) p
   for (const id of ["m1", "m2", "m3"]) await fetch(`${base}/agent/${id}`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara", named: true, cwd: dir, busy: false, messages: [] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const k1 = await openPost(page.locator("#forYouPage"), "k1");
@@ -538,6 +548,7 @@ test("phone: a card a session handed back shows where it stands now, not the ori
   await fetch(`${base}/agent/s3`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "minara-3", named: true, cwd: dir, busy: false, messages: [] }) });
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   // The row already says where it stands; the post page has the open question.
@@ -580,6 +591,7 @@ test.skip("(superseded: brook asked for one item = one post, never grouped) job:
   const base = `http://127.0.0.1:${hub.port}`;
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"], colorScheme: process.env.PIX_DARK ? "dark" : "light" });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`${base}/#token=${token}`);
   await page.evaluate(() => document.getElementById("forYouOpen").click());
   const job = page.locator('#forYouPage .tl-group[data-fy-detail="l:kairos-launch"]');
@@ -610,6 +622,7 @@ test("a line with one ask that waits on brook is one row (no second 'Waiting on 
   t.after(() => hub.close());
   const browser = await launch(); t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   await page.evaluate(() => document.getElementById("forYouOpen").click());
   await page.locator('#forYouPage .tl-post[data-fy="c1"]').waitFor({ timeout: 12000 });
@@ -635,6 +648,7 @@ test.skip("(superseded: brook asked for one item = one post, never grouped) jobs
   const browser = await launch(); t.after(() => browser.close());
   await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: dir, busy: false, messages: [{ role: "user", text: "hi" }] }) });
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   // Two open loops in one job: one post; its page lists each loop, and a loop's page has every update oldest first.
@@ -668,6 +682,7 @@ test("phone: Do it on any post goes to For you, which decides how; the post stay
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const post = page.locator('.tl-post[data-fy="a"]').first();
@@ -694,6 +709,7 @@ test("phone sidebar lists a line's owner session by the line name, with the fold
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s-minara"; });
   await page.goto(`${base}/#token=${token}`);
   const row = page.locator('#sessions .row[data-id="s-minara"]');
@@ -712,6 +728,7 @@ test("regression (status row did nothing): in the For you feed, tapping a job's 
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   const row = page.locator('#messages .tl-post[data-fy="a"] .tl-prog').first();
@@ -732,6 +749,7 @@ test("post: main button is the job's next step, a draft is labelled as a draft, 
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
   await page.locator("#forYouOpen").click();
   const a = page.locator('.tl-post[data-fy="a"]').first();

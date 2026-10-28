@@ -53,6 +53,7 @@ test("phone: the opened job shows its autonomy chip, tap cycles it; Memory shows
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [] }) });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
@@ -108,6 +109,7 @@ test("phone: a card shows its loop's level; tap cycles it and tells For you to r
   const browser = await chromium.launch({ headless: true, ...(process.env.PIX_TEST_BROWSER_PATH ? { executablePath: process.env.PIX_TEST_BROWSER_PATH } : {}) });
   t.after(() => browser.close());
   const page = await browser.newPage({ ...devices["iPhone 13"] });
+  await page.addInitScript(() => { if (!localStorage.pixFyView) localStorage.pixFyView = "feed"; });
   await fetch(`http://127.0.0.1:${hub.port}/agent/pix-foryou`, { method: "PUT", headers: { authorization: `Bearer ${token}` }, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [] }) });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; });
   await page.goto(`http://127.0.0.1:${hub.port}/#token=${token}`);
