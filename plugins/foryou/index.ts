@@ -29,6 +29,7 @@ import { forYouHub, forYouRelayAllowed } from "./hub.ts";
 import { expandForYou, withForYou } from "./foryou-mention.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
+import { livePrompt, readLive, takeLive } from "./live-strip.ts";
 
 const TOOL = "loops";
 const MEMORY_TOOL = "memory";
@@ -292,8 +293,17 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		cardLog(deps.dir, "widget", { id: it?.id ?? null, left: it?.left });
 		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
 	};
+	// Live strip (same as the phone): asks that came in mid-thread, one line each above the editor. /live acts on them.
+	let liveShown = "";
+	const liveWidget = (ctx: any) => {
+		const L = readLive(deps.dir), key = L.map(a => a.id).join(",");
+		if (key === liveShown) return;
+		liveShown = key;
+		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}  ${a.why}   ${a.source}`), "/live <n> reply, show or later"] : undefined);
+	};
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
+		liveWidget(ctx);
 		const it = currentCard(deps.dir, await sessions().catch(() => []));
 		// Close the open picker only when its card was answered elsewhere (phone) or went away,
 		// not because another card is first in line (the picker may show card 2 of 3).
@@ -363,6 +373,15 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.registerShortcut(CARD_KEY, { description: "Answer the waiting For you card", handler: async (ctx) => { if (isCoordinator(ctx)) await answer(ctx); } });
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
 	// Older loop prompts were stored as plain user messages: fold them the same way when drawn.
+	pi.registerCommand?.("live", {
+		description: "Act on a live ask: /live <n> reply|show|later",
+		handler: async (args: string, ctx: any) => {
+			const [n, verb = "reply"] = String(args ?? "").trim().split(/\s+/), a = readLive(deps.dir)[Number(n) - 1];
+			if (!a || !["reply", "show", "later"].includes(verb)) { ctx.ui.notify("Usage: /live <n> reply, show or later", "info"); return; }
+			takeLive(a.id, deps.dir); liveWidget(ctx);
+			if (verb !== "later") pi.sendUserMessage(livePrompt(a, verb as "reply" | "show"), ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+		},
+	});
 	pi.registerMarkdownTransformer?.((md, c) => {
 		if (c.messageType === "assistant" && isForYouProcess && /^\s*No change\.?\s*$/i.test(md)) return "";
 		if (c.messageType !== "user") return md;

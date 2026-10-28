@@ -72,3 +72,51 @@ test("hub: live strip in /api/foryou; Reply now tells For you, Later only clears
 	assert.equal((await call(`/api/foryou/live/nope/show`, "POST")).status, 404);
 	assert.ok(relayAllowed(`/api/foryou/live/${a.id}/show`, "POST"));
 });
+
+for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPad", { width: 1180, height: 820 }], ["monitor", { width: 1920, height: 1080 }]]) {
+	test(`phone (${layout}): live strip above the composer in the For you chat only; Reply now / Show / Later clear the row`, async (t) => {
+		const { chromium } = await import("playwright");
+		const d = mkdtempSync(join(tmpdir(), "fy-lvw-")); mkdirSync(join(d, "memory")); writeFileSync(join(d, "inbox.jsonl"), "");
+		addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:wxid_k", why: "Knight asks for the CSV" });
+		addLive(d, { source: "Feishu: G", sourceKey: "feishu:oc_g", why: "@brook review the deck" });
+		const token = "l".repeat(32), told = [];
+		const hub = await startRemoteHub({ token, port: 0, home: d, plugins: [forYouHub({ dir: d, start: async m => { told.push(m); } })] });
+		const browser = await chromium.launch();
+		t.after(async () => { await browser.close(); await hub.close(); });
+		const base = `http://127.0.0.1:${hub.port}`, h = { authorization: `Bearer ${token}` };
+		await fetch(`${base}/agent/pix-foryou`, { method: "PUT", headers: h, body: JSON.stringify({ name: "For you", named: true, cwd: d, busy: false, messages: [{ id: "m", role: "assistant", text: "Morning chat" }] }) });
+		await fetch(`${base}/agent/s1`, { method: "PUT", headers: h, body: JSON.stringify({ name: "work", named: true, cwd: d, busy: false, messages: [{ id: "w", role: "user", text: "work chat" }] }) });
+		const page = await browser.newPage({ viewport, hasTouch: layout !== "monitor" });
+		const errors = []; page.on("pageerror", e => errors.push(e.message));
+		await page.addInitScript(() => { localStorage.pixRemoteSession = "pix-foryou"; localStorage.pixFyView = "chat"; });
+		await page.goto(`${base}/#token=${token}`);
+		await page.getByText("Morning chat").waitFor();
+		const strip = page.locator("#liveStrip");
+		await strip.locator(".lv").nth(1).waitFor();
+		assert.match(await strip.locator(".lv").first().textContent(), /Knight asks for the CSV\s*WeChat: Knight/);
+		const sb = await strip.boundingBox(), ib = await page.locator("#input").boundingBox();
+		assert.ok(sb.y + sb.height <= ib.y + 2, "above the composer input");
+		assert.ok(sb.x >= 0 && sb.x + sb.width <= viewport.width + 1, "fits");
+		for (const b of await strip.locator("button").all()) assert.ok((await b.boundingBox()).height >= 40, "touch-sized");
+		await page.screenshot({ path: `.shots/live-${layout}.png` });
+		await strip.locator(".lv").first().getByRole("button", { name: "Reply now" }).click();
+		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 1);
+		const q = await (await fetch(`${base}/agent/pix-foryou/next`, { headers: h })).json();
+		assert.match(q.prompts.join("\n"), /Reply now\].*Knight asks for the CSV/);
+		await strip.getByRole("button", { name: "Later" }).click();
+		await page.waitForFunction(() => document.getElementById("liveStrip").hidden);
+		const q2 = await (await fetch(`${base}/agent/pix-foryou/next?wait=0`, { headers: h, signal: AbortSignal.timeout(1500) }).then(r => r.json()).catch(() => ({ prompts: [] })));
+		assert.deepEqual(q2.prompts ?? [], [], "Later does not wake For you");
+		// Not in the feed, not in other sessions.
+		addLive(d, { source: "WeChat: Amber", sourceKey: "wechat:a", why: "Amber asks about Friday" });
+		await page.waitForFunction(() => document.querySelectorAll("#liveStrip .lv").length === 1, null, { timeout: 8000 });
+		await page.locator("#fyDog").click();
+		await page.waitForFunction(() => document.getElementById("liveStrip").hidden);
+		await page.locator("#fyDog").click();
+		await page.waitForFunction(() => !document.getElementById("liveStrip").hidden);
+		await page.evaluate(() => open("s1"));
+		await page.getByText("work chat").waitFor();
+		assert.equal(await strip.isHidden(), true, "only in the For you chat");
+		assert.deepEqual(errors, []);
+	});
+}

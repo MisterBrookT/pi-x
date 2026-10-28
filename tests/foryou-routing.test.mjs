@@ -83,7 +83,7 @@ test("pile check: closes and merges only open loops it names", () => {
 function fakePi() {
 	const handlers = {}, sent = [];
 	const commands = {}, renderers = {}, custom = [];
-	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, registerMarkdownTransformer: f => { renderers.md = f; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
+	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerCommand: (k, c) => { commands['/' + k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, registerMarkdownTransformer: f => { renderers.md = f; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
 }
 const macCtx = (id, picks, notes = [], widgets = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
 	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m), setWidget: (k, v) => widgets.push([k, v]) } });
@@ -602,4 +602,24 @@ test("regression: DingTalk is started when closed (its local DB only updates whi
 	const { all } = src.dingAdapters(() => [{ id: "c", name: "博2班", me: "m", messages: [{ id: "1", time: "2026-10-19T02:00:00Z", sender: "a", text: "x" }] }], async () => false);
 	await all.expand({ kind: "dingtalk-all", id: "", name: "DingTalk" });
 	assert.equal(src.dingNewest.at, "2026-10-19T02:00:00Z");
+});
+
+test("Mac: live asks show as a quiet widget in the For you session; /live <n> reply|later acts like the phone", async () => {
+	const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
+	const d = tmp();
+	addLive(d, { source: "WeChat: Knight", sourceKey: "wechat:k", why: "Knight asks for the CSV" });
+	addLive(d, { source: "Feishu: G", sourceKey: "feishu:g", why: "@brook review" });
+	const pi = fakePi(), widgets = [], notes = [];
+	register(pi, { dir: d, sessions: async () => [], cardPollMs: 60_000 });
+	const fy = macCtx("pix-foryou", [], notes, widgets);
+	pi.handlers.agent_end[0]({}, fy);
+	await new Promise(r => setTimeout(r, 20));
+	const w = widgets.find(x => x[0] === "foryou-live");
+	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "/live <n> reply, show or later"]);
+	await pi.commands["/live"].handler("1 reply", fy);
+	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
+	await pi.commands["/live"].handler("1 later", fy);
+	assert.equal(pi.sent.length, 1, "later does not wake For you");
+	assert.deepEqual(readLive(d), []);
+	assert.equal(widgets.at(-1)[0], "foryou-live"); assert.equal(widgets.at(-1)[1], undefined, "strip gone");
 });
