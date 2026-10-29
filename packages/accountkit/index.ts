@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import crypto from "node:crypto";
 import { join } from "node:path";
 
-export interface Account { id: string; label: string; provider?: string; configDir?: string; dir?: string }
+export interface Account { id: string; label: string; provider?: string; configDir?: string; dir?: string; disabled?: boolean; disabledReason?: string; disabledAt?: number }
 export interface Usage { left?: number; resetsAt?: string; coolUntil?: number; checkedAt?: number }
 
 const dir = () => process.env.PIX_HOME ?? join(homedir(), ".pix");
@@ -33,6 +33,24 @@ const DEFAULTS: Account[] = [
 export const inventory = (): Account[] => read<{ accounts?: Account[] }>("accounts.json", {}).accounts ?? DEFAULTS;
 /** Existing Claude integration. Never route a Kaji Codex inventory entry as a Claude login. */
 export const accounts = (): Account[] => inventory().filter(a => !a.provider || a.provider === "claude");
+/** Reversible shared availability metadata. Never changes credential locations, route pins or usage. */
+export function setDisabled(id: string, reason: string | false): void {
+	if (reason !== false && !/^[a-z][a-z0-9_-]{0,79}$/.test(reason)) throw new Error("AccountKit: invalid disabled reason");
+	const path = join(dir(), "accounts.json");
+	const config = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+	if (!config || typeof config !== "object" || Array.isArray(config) || (config.accounts !== undefined && !Array.isArray(config.accounts))) throw new Error("AccountKit: invalid account inventory");
+	const all: Account[] = config.accounts ?? DEFAULTS;
+	if (!all.some(a => a?.id === id)) throw new Error(`AccountKit: unknown account ${id}`);
+	if (all.filter(a => a?.id === id).length !== 1) throw new Error("AccountKit: duplicate account id");
+	config.accounts = all.map(a => {
+		if (a?.id !== id) return a;
+		const next = { ...a };
+		if (reason === false) { delete next.disabled; delete next.disabledReason; delete next.disabledAt; }
+		else { next.disabled = true; next.disabledReason = reason; next.disabledAt = Date.now(); }
+		return next;
+	});
+	write("accounts.json", config);
+}
 export const bandWidth = (): number => Number(process.env.PIX_ACCOUNT_BAND ?? read<{ band?: number }>("accounts.json", {}).band ?? 25);
 const band = (left?: number) => left === undefined ? -1 : Math.floor(left / bandWidth());
 
@@ -47,6 +65,7 @@ export function recordUsage(id: string, u: Usage): void { const all = usage(); a
 
 /** A profile is ready once its Claude Code login exists (own always is). */
 export function ready(a: Account): boolean {
+	if (a.disabled) return false;
 	if (a.provider === "codex") return !!a.dir && existsSync(join(a.dir, "auth.json"));
 	return !a.configDir || existsSync(join(a.configDir, ".claude.json")) || existsSync(join(a.configDir, ".credentials.json"));
 }
@@ -60,7 +79,7 @@ const resting = (a: Account, now: number) => { const u = usage()[a.id]; return !
  */
 export function plan(now = Date.now(), session?: string): Account[] {
 	const all = accounts().filter(ready), c = choice();
-	if (c !== "auto") return accounts().filter(a => a.id === c);
+	if (c !== "auto") return accounts().filter(a => a.id === c && !a.disabled);
 	const u = usage(), b = (a: Account) => band(u[a.id]?.left);
 	const awake = all.filter(a => !resting(a, now)), tired = all.filter(a => resting(a, now));
 	// A session brook moved to an account runs there first (others stay as quota fallback).
@@ -92,10 +111,12 @@ export function setSessionAccount(session: string, v: SessionAccount): void {
 /** The account a session's next request goes to (its pin, else auto's pick), without changing anything. */
 export function sessionAccount(session: string, now = Date.now()): { id?: string; pinned: boolean } {
 	const c = choice();
-	if (c !== "auto") return { id: c, pinned: true };
+	const available = accounts().filter(a => !a.disabled), eligible = (id?: string) => available.some(a => a.id === id);
+	if (c !== "auto") return { id: eligible(c) ? c : undefined, pinned: true };
 	const m = sessionAccounts()[session];
-	if (m?.pin && accounts().some(a => a.id === m.pin)) return { id: m.pin, pinned: true };
-	return { id: m?.active ?? usage()._active?.id, pinned: false };
+	if (m?.pin && eligible(m.pin)) return { id: m.pin, pinned: true };
+	const id = eligible(m?.active) ? m?.active : usage()._active?.id;
+	return { id: eligible(id) ? id : undefined, pinned: false };
 }
 
 /** Make an account the current one in auto mode (it stays until another is in a strictly higher band). */
@@ -133,7 +154,8 @@ function recordOutcome(id: string, response: Response, reason: AccountOutcome["r
 /** Run the existing account order once, never retrying a denied account within this pass.
  * HTTP and credentials remain the caller's adapters. Organization denial is auth, not quota. */
 export async function attemptAccounts(order: Account[], send: (account: Account) => Promise<Response>, options: { oauth: boolean; signal?: AbortSignal; unavailable?: Set<string>; onSuccess?: (account: Account) => void; onRotate?: (from: string, to: string, status: number) => void } ): Promise<Response> {
-	const candidates = order.filter((a, i) => !options.unavailable?.has(a.id) && order.findIndex(other => other.id === a.id) === i);
+	const disabled = new Set(inventory().filter(a => a.disabled).map(a => a.id));
+	const candidates = order.filter((a, i) => !a.disabled && !disabled.has(a.id) && !options.unavailable?.has(a.id) && order.findIndex(other => other.id === a.id) === i);
 	if (!candidates.length) throw new Error("AccountKit: no account ready");
 	let response!: Response;
 	for (let n = 0; n < candidates.length; n++) {
@@ -173,6 +195,13 @@ export function leftFromUsage(d: Record<string, { utilization?: number | null; r
 		if (w && typeof w.utilization === "number") { const l = Math.max(0, 100 - w.utilization); if (left === undefined || l < left) { left = l; resetsAt = w.resets_at; } }
 	}
 	return { left, resetsAt };
+}
+
+/** Canonical Claude availability label; disabled inventory remains visible without pretending to be active. */
+export function unavailableLabel(): string | undefined {
+	const all = accounts();
+	if (!all.length || all.some(a => !a.disabled)) return undefined;
+	return all.every(a => a.disabledReason === "oauth_org_denied") ? "Claude unavailable, organization denied" : "Claude unavailable";
 }
 
 /** Footer text: active account and % left, e.g. "minarabench" or "brook 37%". */

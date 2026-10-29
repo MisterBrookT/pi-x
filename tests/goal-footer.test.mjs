@@ -282,3 +282,21 @@ test("a reply from another session is background work: the goal holds (no contin
 	await h.emit("agent_settled");
 	assert.equal(h.wakes().length, m);
 });
+
+test("footer reflects shared disabled organization state without claiming an account is active, and re-enable restores it", async t => {
+	const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os"); const { join } = await import("node:path");
+	const dir = mkdtempSync(join(tmpdir(), "footer-disabled-")), previous = process.env.PIX_HOME;
+	process.env.PIX_HOME = dir;
+	t.after(() => { if (previous === undefined) delete process.env.PIX_HOME; else process.env.PIX_HOME = previous; rmSync(dir, { recursive: true, force: true }); });
+	const path = join(dir, "accounts.json"), h = await harness(t);
+	h.ctx.model = { id: "claude-opus-5-5", provider: "pix-anthropic" };
+	h.data.setExtensionStatus("pix-account", "brook 99%");
+	writeFileSync(path, JSON.stringify({ accounts: [{ id: "own", label: "brook", disabled: true, disabledReason: "oauth_org_denied" }] }));
+	assert.match(h.render(200)[1], /Claude unavailable, organization denied/);
+	assert.doesNotMatch(h.render(200)[1], /brook 99%/);
+	writeFileSync(path, JSON.stringify({ accounts: [{ id: "own", label: "brook" }] }));
+	assert.match(h.render(200)[1], /brook 99%/);
+	h.ctx.model = { id: "gpt-6.1-sol", provider: "openai-codex" };
+	assert.doesNotMatch(h.render(200)[1], /Claude unavailable|brook 99%/);
+});
