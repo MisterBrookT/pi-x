@@ -1,4 +1,9 @@
 import test from "node:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.PIX_HOME = mkdtempSync(join(tmpdir(), "pix-transport-test-"));
+delete process.env.PIX_CLAUDE_ROUTE;
 import assert from "node:assert/strict";
 import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import registerPixAnthropic from "../plugins/pix-anthropic/index.ts";

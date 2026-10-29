@@ -1,0 +1,10 @@
+{
+  "name": "@brooktang/accountkit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.ts",
+  "bin": { "accountkit": "./cli.ts" },
+  "scripts": { "test": "node --test" },
+  "engines": { "node": ">=24" }
+}

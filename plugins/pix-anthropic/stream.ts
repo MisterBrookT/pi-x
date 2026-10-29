@@ -13,7 +13,7 @@
  *   6. Full X-Stainless-* header set, x-client-request-id, keep-alive
  */
 
-import { plan, choice, isQuota, coolDown, type Account } from "./accountkit.ts";
+import { plan, choice, isQuota, attemptAccounts, setActive, setSessionAccount, type Account } from "./accountkit.ts";
 import { readClaudeToken } from "./claude-auth.ts";
 import {
 	type AssistantMessage,
@@ -650,12 +650,16 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				// Each profile is its own Claude Code login; swap only the bearer token.
 				const send = async (acc: Account) => {
 					const h = { ...headers };
-					if (acc.configDir && oauth) h.Authorization = `Bearer ${await readClaudeToken(acc.configDir)}`;
+					if (oauth && (acc.configDir || acc.id !== order[0]?.id)) {
+						// A fallback to the default account must read that account's login,
+						// never reuse the incoming token from the rejected profile.
+						h.Authorization = `Bearer ${await readClaudeToken(acc.configDir ?? "")}`;
+					}
 					const res = await doFetch(url, { method: "POST", headers: h, body: serialized, signal: options?.signal });
 					// Claude Code rotates the login token (and revokes the old one) when any `claude` run
 					// refreshes it. A token read moments earlier then gets 401: re-read it once and retry.
 					if (res.status !== 401 || !oauth || options?.signal?.aborted) return res;
-					const fresh = await readClaudeToken(acc.configDir).catch(() => undefined);
+					const fresh = await readClaudeToken(acc.configDir ?? "").catch(() => undefined);
 					if (!fresh || h.Authorization === `Bearer ${fresh}`) return res;
 					await res.body?.cancel().catch(() => undefined);
 					h.Authorization = `Bearer ${fresh}`;
@@ -663,19 +667,13 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 				};
 				const order = plan(Date.now(), options?.sessionId);
 				if (!order.length) throw new Error("pix-anthropic: no Claude account ready (see claude-route)");
-				const sendAll = async () => {
-					let res!: Response;
-					for (let n = 0; n < order.length; n++) {
-						res = await send(order[n]!);
-						if (res.ok || options?.signal?.aborted || n === order.length - 1) break;
-						const t = await res.clone().text().catch(() => "");
-						if (!isQuota(res.status, t) && res.status !== 401) break;
-						if (res.status !== 401) coolDown(order[n]!.id, res.headers);
-						if (config.debug) process.stderr.write(`[pix-anthropic] ${order[n]!.id} ${res.status}; trying ${order[n + 1]!.id}\n`);
-						await res.body?.cancel().catch(() => undefined);
-					}
-					return res;
-				};
+				// Keep a denied organization out of the normal-speed retry too.
+				const unavailable = new Set<string>();
+				const sendAll = () => attemptAccounts(order, send, {
+					oauth, signal: options?.signal, unavailable,
+					onSuccess: account => { if (options?.sessionId) setSessionAccount(options.sessionId, { active: account.id }); else setActive(account.id); },
+					onRotate: (from, to, status) => { if (config.debug) process.stderr.write(`[pix-anthropic] ${from} ${status}; trying ${to}\n`); },
+				});
 				let response = await sendAll();
 				await options?.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers.entries()) }, model);
 

@@ -11,6 +11,11 @@
  */
 
 import http from "node:http";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+process.env.PIX_HOME = mkdtempSync(join(tmpdir(), "pix-wire-test-"));
+delete process.env.PIX_CLAUDE_ROUTE;
 import { createPixAnthropicStream } from "../plugins/pix-anthropic/stream.ts";
 import { CLAUDE_BILLING_HEADER_PREFIX, xxHash64 } from "../plugins/pix-anthropic/fingerprint.ts";
 
