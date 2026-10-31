@@ -29,6 +29,8 @@ import { prepareRemotePairing, prepareRelayPairing } from "./remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "./remote-mac.ts";
 import { bypassProxyForLoopback } from "./remote-loopback.ts";
 import { startPrivacyCover } from "./privacy-cover.ts";
+import { macControlsHub, macControlsRelayAllowed } from "./mac-controls.ts";
+import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "./remote-relay-agent.ts";
 
 /** True when brook has typed something not yet sent in the Mac input box (a reload would lose it). */
@@ -69,6 +71,8 @@ const reloadResume: Map<string, { relay: boolean }> = ((globalThis as any).__pix
 const nextSession = "__next";
 
 export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions = {}) {
+  // Mac cover and keep-awake: manual toggles in phone Settings (and their shortcuts).
+  registerHubPlugin("mac-controls", macControlsHub(), macControlsRelayAllowed);
   bypassProxyForLoopback();
   const port = options.port ?? Number(process.env.PIX_REMOTE_PORT || remoteDefaultPort);
   const base = `http://${remoteHost}:${port}`;
