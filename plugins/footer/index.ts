@@ -15,6 +15,14 @@ import { mainLine, pinEnded } from "../core/pin-ended.ts";
 import { resolveLabels } from "../core/pin-label.ts";
 
 
+/** The status row's text: waits first, then jobs; "·" becomes a comma. Undefined when nothing temporary runs. */
+export function statusRowText(statuses: ReadonlyMap<string, string>): string | undefined {
+  const clean = (t?: string) => t?.replace(/\s*·\s*\/jobs\s*$/, "").replace(/\s*·\s*/g, ", ").replace(/\s{3,}/g, "  ").trim();
+  const waits = clean(statuses.get("pix-chat-waits")), work = clean(statuses.get("pix-background"));
+  const parts = [waits ? `Waiting for ${waits}` : "", work ? `Background ${work}` : ""].filter(Boolean);
+  return parts.length ? parts.join("  ") : undefined;
+}
+
 const configPath = join(homedir(), ".pi/agent/pix-footer.json");
 const labels: Record<keyof FooterOptions, string> = {
   input: "Input tokens", output: "Output tokens", cacheRead: "Cache reads", cacheWrite: "Cache writes",
@@ -85,7 +93,8 @@ export default function (pi: ExtensionAPI) {
     installFooter?.(ctx);
   });
 
-  installFooter = (ctx) => ctx.ui.setFooter((tui, theme, footerData) => {
+  installFooter = (ctx) => { installStatusRow(ctx); ctx.ui.setFooter((tui, theme, footerData) => {
+    liveStatuses = () => footerData.getExtensionStatuses();
     const unsubscribe = footerData.onBranchChange(() => tui.requestRender());
     // Repaint only while background work runs, so the spinner shows it is alive.
     let timer: ReturnType<typeof setInterval> | undefined;
@@ -130,11 +139,10 @@ export default function (pi: ExtensionAPI) {
         const account = model?.provider === "pix-anthropic" ? statuses.get("pix-account") : undefined;
         if (account) right = `${account}  ${right}`;
         const work = statuses.get("pix-background");
-        animate(Boolean(work));
-        const frame = SUBAGENT_SPINNER_FRAMES[Math.floor(Date.now() / SUBAGENT_SPINNER_INTERVAL_MS) % SUBAGENT_SPINNER_FRAMES.length];
         const waits = statuses.get("pix-chat-waits");
-        // Waits sit on the stats line (nothing when none), so the footer is always two lines and never jumps.
-        const running = (work ? `${frame} ${work}  ` : "") + (waits ? `waiting: ${waits}  ` : "");
+        // Jobs and waits live in the status row above the input (statusRowText); the footer keeps long-term info only.
+        const running = "";
+        void animate;
         const metrics = parts.join(" ");
         const room = width - visibleWidth(running) - visibleWidth(metrics) - visibleWidth(right);
         const rest = room >= 2 ? metrics + " ".repeat(room) + right : truncateToWidth(`${metrics}  ${right}`, Math.max(0, width - visibleWidth(running)));
@@ -152,8 +160,30 @@ export default function (pi: ExtensionAPI) {
         const pathWidth = status ? Math.max(0, width - visibleWidth(status) - 2) : width;
         const path = truncateToWidth(`${shortCwd(ctx.cwd)}${branch ? ` (${branch})` : ""}`, pathWidth);
         const location = !status ? path : pathWidth > 0 ? path + " ".repeat(width - visibleWidth(path) - visibleWidth(status)) + status : truncateToWidth(status, width);
-        shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join("  ") || undefined, waits: waits || undefined };
+        shared = { work: work || undefined, core: [statuses.get("pix-goal"), statuses.get("pix-chat")].filter(Boolean).join("  ") || undefined, waits: waits || undefined, status: statusRowText(rawStatuses) };
         return [truncateToWidth(theme.fg("dim", location), width), stats];
+      },
+    };
+  }); };
+
+  // One line just above the input, like Pi's "Working" row: spinner + muted text while something temporary runs
+  // (other sessions we wait on, background jobs, next check). Always one line, blank when idle, so nothing shifts.
+  let liveStatuses: () => ReadonlyMap<string, string> = () => new Map();
+  const installStatusRow = (ctx: ExtensionContext) => ctx.ui.setWidget?.("pix-status", (tui, theme) => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const animate = (on: boolean) => {
+      if (on && !timer) { timer = setInterval(() => tui.requestRender(), SUBAGENT_SPINNER_INTERVAL_MS); timer.unref?.(); }
+      if (!on && timer) { clearInterval(timer); timer = undefined; }
+    };
+    return {
+      dispose: () => animate(false),
+      invalidate() {},
+      render(width: number): string[] {
+        const text = statusRowText(liveStatuses());
+        animate(Boolean(text));
+        if (!text) return [" "];
+        const frame = SUBAGENT_SPINNER_FRAMES[Math.floor(Date.now() / SUBAGENT_SPINNER_INTERVAL_MS) % SUBAGENT_SPINNER_FRAMES.length];
+        return [truncateToWidth(`${theme.fg("accent", frame)} ${theme.fg("muted", text)}`, width, "...")];
       },
     };
   });

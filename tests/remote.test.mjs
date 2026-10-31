@@ -971,15 +971,16 @@ test("iPad footer shows the Mac footer's jobs, goal and waiting lines", async (t
   const hub = await startRemoteHub({ token, port: 0 });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", footer: { work: "2 jobs", core: "goal: ship", waits: "⏳ waiting: minara" }, messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", footer: { work: "2 jobs", core: "goal: ship", waits: "minara", status: "Waiting for minara  Background 2 jobs running" }, messages: [{ id: "a", role: "user", text: "hi" }] }) });
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
-  await page.waitForSelector("#piFooter .pf-waits");
+  await page.waitForFunction(() => /minara/.test(document.querySelector("#phoneWaits")?.textContent || ""));
+  assert.equal(await page.locator("#phoneWaits .sr-t").textContent(), "Waiting for minara  Background 2 jobs running");
   const text = await page.locator("#piFooter").innerText();
-  for (const s of ["2 jobs", "goal: ship", "⏳ waiting: minara"]) assert.ok(text.includes(s), s);
+  assert.ok(text.includes("goal: ship"));assert.ok(!/minara|2 jobs/.test(text), "temporary status left the footer");
 });
 
 test("iPad: typing anywhere goes straight into the message box, and Enter clears it at once (before the Mac answers)", async (t) => {
@@ -1068,9 +1069,9 @@ test("a message sent while Pi works shows as a dim 'Steering:' line, not a chat 
   await abort;
 });
 
-test("phone footer's empty waits line is plain text, like the Mac: no ⏳ icon", async () => {
+test("phone status row has no icon and no 'waiting: none' filler, like the Mac", async () => {
   const { remoteAppHtml: html } = await import("../plugins/remote/remote-web.ts");
-  assert.ok(html.includes("footWaits(fs)||'waiting: none'"));
+  assert.ok(!html.includes("waiting: none"));
   assert.ok(!html.includes("⏳ waiting"));
 });
 

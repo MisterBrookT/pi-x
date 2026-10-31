@@ -23,7 +23,7 @@ async function harness(t) {
 		getAvailableProviderCount: () => 1,
 		onBranchChange: (handler) => data.onBranchChange(handler),
 	};
-	let footer;
+	let footer, row;
 	let renders = 0;
 	const pi = {
 		events: createEventBus(),
@@ -44,6 +44,11 @@ async function harness(t) {
 		ui: {
 			notify() {},
 			setStatus: (key, value) => { data.setExtensionStatus(key, value); renders++; },
+			setWidget: (key, factory) => {
+				if (key !== "pix-status") return;
+				row?.dispose?.();
+				row = factory({ requestRender() { renders++; } }, { fg: (_color, text) => text });
+			},
 			setFooter: (factory) => {
 				footer?.dispose();
 				footer = factory({ requestRender() { renders++; } }, { fg: (_color, text) => text }, footerData);
@@ -54,12 +59,13 @@ async function harness(t) {
 	registerGoal(pi);
 	const emit = async (name, event = {}) => { for (const handler of handlers.get(name) ?? []) await handler(event, ctx); };
 	await emit("session_start");
-	t.after(() => footer?.dispose());
+	t.after(() => { footer?.dispose(); row?.dispose?.(); });
 	return {
 		pi, emit, data, ctx, sm, sent, tools, wakes,
 		command: (args) => commands.get("goal").handler(args, ctx),
 		finish: (status) => tools.get("goal").execute("done", { id: sm.getBranch().filter((entry) => entry.customType === "pix-goal").at(-1).data.id, status, evidence: "Checked the result." }, undefined, undefined, ctx),
 		render: (width = 100) => footer.render(width),
+		row: (width = 100) => row.render(width),
 		renders: () => renders,
 	};
 }
@@ -152,48 +158,51 @@ test("goal visibility takes priority over a long path and all footer lines fit o
 	assert.ok(h.renders() > rendersBefore);
 });
 
-test("running background work sits on the bottom line with a live spinner", async (t) => {
+test("background work shows in the status row above the input with a live spinner, never in the footer", async (t) => {
 	const h = await harness(t);
-	h.ctx.ui.setStatus("pix-background", "1 job running · /jobs");
-	const [top, bottom] = h.render();
-	assert.doesNotMatch(top, /running/);
-	assert.match(bottom, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job running  \/jobs/);
+	assert.deepEqual(h.row(), [" "], "idle: one blank reserved line");
+	h.ctx.ui.setStatus("pix-background", "1 job running · look 18:00 · /jobs");
+	assert.doesNotMatch(h.render().join("\n"), /running/);
+	const [line] = h.row();
+	assert.match(line, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Background 1 job running, look 18:00$/);
 	h.ctx.ui.setStatus("pix-background", undefined);
-	assert.doesNotMatch(h.render()[1], /running/);
+	assert.deepEqual(h.row(), [" "]);
 });
 
-test("footer repaints periodically only while background work runs", async (t) => {
+test("status row repaints periodically only while something temporary runs", async (t) => {
 	const h = await harness(t);
 	const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-	h.render();
+	h.row();
 	let before = h.renders();
 	await sleep(300);
-	assert.equal(h.renders(), before, "idle footer schedules no animation repaints");
+	assert.equal(h.renders(), before, "idle row schedules no animation repaints");
 	h.ctx.ui.setStatus("pix-background", "1 running");
-	h.render();
+	h.row();
 	before = h.renders();
 	await sleep(300);
 	assert.ok(h.renders() > before, "running work repaints at the spinner cadence");
 	h.ctx.ui.setStatus("pix-background", undefined);
-	h.render();
+	h.row();
 	before = h.renders();
 	await sleep(300);
 	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
 });
 
-test("footer: always two lines with stable widths; waits inline only when pending, no 'waiting: none', no '·'", async (t) => {
+test("footer keeps long-term info only; waits go to the one-line status row, no '·', '...' only at the end, height fixed", async (t) => {
 	const h = await harness(t);
 	const idle = h.render(120);
 	assert.equal(idle.length, 2);
-	assert.doesNotMatch(idle.join("\n"), /waiting/);
 	h.ctx.ui.setStatus("pix-chat-waits", "minara-3: restyle leaderboard · 12m   minara-2 · 3m");
-	const lines = h.render(120);
-	assert.deepEqual(lines.map(visibleWidth), idle.map(visibleWidth), "the layout never jumps");
-	assert.match(lines[1], /waiting: minara-3: restyle leaderboard  12m/);
-	assert.doesNotMatch(lines.join("\n"), /·/);
-	for (const line of h.render(30)) assert.ok(visibleWidth(line) <= 30);
-	h.ctx.ui.setStatus("pix-chat-waits", undefined);
-	assert.deepEqual(h.render(120).map(visibleWidth), idle.map(visibleWidth));
+	h.ctx.ui.setStatus("pix-background", "2 jobs running · /jobs");
+	assert.deepEqual(h.render(120), idle, "footer unchanged by temporary status");
+	const row = h.row(120);
+	assert.equal(row.length, 1);
+	assert.match(row[0], /Waiting for minara-3: restyle leaderboard, 12m  minara-2, 3m  Background 2 jobs running$/);
+	assert.doesNotMatch(row[0], /·|\/jobs/);
+	const narrow = h.row(30)[0];
+	assert.ok(visibleWidth(narrow) <= 30);assert.match(narrow.replace(/\x1b\[[0-9;]*m/g, ""), /\.\.\.$/);
+	h.ctx.ui.setStatus("pix-chat-waits", undefined);h.ctx.ui.setStatus("pix-background", undefined);
+	assert.deepEqual(h.row(120), [" "]);
 });
 
 test("footer: pins stay across back-to-back renders and their files are read at most every 5 s (typing renders the footer per key)", async (t) => {
