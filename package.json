@@ -95,7 +95,8 @@
       "./plugins/web/index.ts",
       "./plugins/core/tool.ts",
       "./plugins/foryou/index.ts",
-      "./plugins/artifacts/index.ts"
+      "./plugins/artifacts/index.ts",
+      "./plugins/mac/index.ts"
     ]
   },
   "engines": {
