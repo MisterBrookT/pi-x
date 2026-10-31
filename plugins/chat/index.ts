@@ -149,10 +149,10 @@ export default function (pi: ExtensionAPI) {
     const n = message.details as Note;
     // One quiet line; the text shows when expanded (the model always gets all of it).
     const head = `${theme.fg("dim", `↳ ${n.kind} from ${n.from}`)}`;
-    return new Text(expanded ? `${head}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", ` · ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
+    return new Text(expanded ? `${head}${theme.fg("dim", `, thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", ` · ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
   });
 
-  pi.registerMessageRenderer(MSG_CHECK, (message, _o, theme) => new Text(theme.fg("dim", `⏳ ${(message.details as { text: string }).text.split(":")[0]}`), 0, 0));
+  pi.registerMessageRenderer(MSG_CHECK, (message, _o, theme) => new Text(theme.fg("dim", `${(message.details as { text: string }).text.split(":")[0]}`), 0, 0));
 
   const show = (ps: Peer[]) => ps.map((p) =>
     `${p.name === me?.name ? "* " : "  "}${p.name} [${p.status}] ${p.cwd}\n    doing: ${p.doing || "-"}\n    claims: ${(p.claims ?? []).join(", ") || "-"}`).join("\n");
@@ -189,7 +189,7 @@ export default function (pi: ExtensionAPI) {
       const n = (r.details as { sent?: Note & { to: string } } | undefined)?.sent;
       const t = r.content[0]?.type === "text" ? r.content[0].text : "";
       if (!n) return new Text(theme.fg(context.isError ? "error" : "muted", t), 0, 0);
-      return new Text(`${theme.fg("accent", `✉ ${n.kind} to ${n.to}`)}${theme.fg("dim", ` · thread ${n.thread}`)}\n${n.text}`, 0, 0);
+      return new Text(`${theme.fg("accent", `${n.kind} to ${n.to}`)}${theme.fg("dim", `, thread ${n.thread}`)}\n${n.text}`, 0, 0);
     },
     async execute(_id, p, _signal, _update, ctx: ExtensionContext) {
       const text = ((): string => {

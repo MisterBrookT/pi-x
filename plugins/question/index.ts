@@ -359,7 +359,7 @@ export default function question(pi: ExtensionAPI) {
 
 		renderResult(result, _options, theme, _context) {
 			const many = (result.details as any)?.many as { header: string; answer: string }[] | undefined;
-			if (many) return new Text((result.details as any).timedOut ? theme.fg("warning", "⏱ No answer, defaulted: ") + theme.fg("accent", many.map(m => `${m.header} ${m.answer}`).join(" · ")) : theme.fg("success", "✓ ") + theme.fg("accent", many.map(m => `${m.header}: ${m.answer}`).join(" · ")), 0, 0);
+			if (many) return new Text((result.details as any).timedOut ? theme.fg("warning", "No answer, defaulted: ") + theme.fg("accent", many.map(m => `${m.header} ${m.answer}`).join(" · ")) : theme.fg("success", "✓ ") + theme.fg("accent", many.map(m => `${m.header}: ${m.answer}`).join(" · ")), 0, 0);
 			if ((result.details as any)?.many === null) return new Text(theme.fg("warning", "Cancelled"), 0, 0);
 			const details = result.details as QuestionDetails | undefined;
 			if (!details) {

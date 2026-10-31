@@ -14,7 +14,7 @@ export function forYouSuggestions(prefix: string, items: Item[]): AutocompleteIt
 	return items
 		.filter(i => !q || i.id.startsWith(q) || `${i.title} ${i.source}`.toLowerCase().includes(q) || "foryou".startsWith(q))
 		.slice(0, 10)
-		.map(i => ({ value: `${TOKEN}${i.id}`, label: `${i.status === "pending" ? "🔔" : i.status === "onit" ? "▶" : "⏳"} ${i.title}`, description: i.source }));
+		.map(i => ({ value: `${TOKEN}${i.id}`, label: i.title, description: i.source }));
 }
 
 /** Put For you items above the normal "@file" list. */
