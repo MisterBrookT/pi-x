@@ -85,7 +85,15 @@ test("footer links go straight to targets: one item -> 'Docs 1'; several -> newe
   assert.deepEqual(artifactLinks(loadArtifacts("s", d), "/Users/b"), [
     { label: "Demo", url: "file:///Users/b/Desktop/Kairos%20demo.md" },
     { label: "Cookbook leaderboard", url: "https://decision.brooktang.fun/leaderboard?token=x" },
-    { label: "Cookbook", url: "https://decision.brooktang.fun" },
-    { label: "+1", url: "" },
   ]);
+});
+
+test("pin rules: semantic 1-3 word titles only; a 3rd pin is refused with the 2 existing ones", async () => {
+  const { goodTitle, pinsFull } = await import("../plugins/core/artifacts.ts");
+  for (const t of ["Kairos docs", "Data sources doc", "PR #10", "案例库"]) assert.ok(goodTitle(t), t);
+  for (const t of ["IXandvru", "AbC123xyz", "7812b42", "核对通过的", "docx_token", "rc.brooktang.fun", "empsit_09052025.htm", "增量范围与发布建", "a long cut off sentence here", "Report...", "docx/AbC", "", undefined]) assert.ok(!goodTitle(t), String(t));
+  const d = dir();
+  pinArtifact("s", { title: "A doc", url: "https://a" }, d); pinArtifact("s", { title: "B doc", url: "https://b" }, d);
+  assert.deepEqual(pinsFull("s", "https://c", d).map(x => x.title), ["A doc", "B doc"]);
+  assert.deepEqual(pinsFull("s", "https://a", d), [], "re-pinning one already there fits");
 });

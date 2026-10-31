@@ -31,6 +31,28 @@ function save(session: string, items: Artifact[], dir: string) {
 	writeFileSync(tmp, JSON.stringify(items, null, 1)); renameSync(tmp, f);
 }
 
+/** Hard cap: at most 2 live pins per session. A 3rd is refused (never auto-retired); the agent picks what to unpin. */
+export const MAX_PINS = 2;
+
+/** A semantic 1-3 word title ("Kairos docs"), never a raw id, doc token, URL slug or cut-off sentence. */
+export function goodTitle(t?: string): boolean {
+	const s = t?.trim() ?? "";
+	if (!s || s.length > 32 || /\.\.\.|…|https?:|\//.test(s)) return false;
+	if (/[\u3400-\u9fff]/.test(s)) return s.length <= 6 && !/[的，,。、]$/.test(s);
+	const words = s.split(/\s+/);
+	// Ids, file names and hosts: snake_case, dotted (rc.brooktang.fun, empsit_0905.htm).
+	if (words.some(w => /_|\w\.\w/.test(w))) return false;
+	if (words.length > 3) return false;
+	// Token-like: a long word mixing case or digits (IXandvru, AbC123xyz, 7812b42), or no letters at all.
+	return !words.some(w => /^[A-Za-z0-9_-]{6,}$/.test(w) && (/\d/.test(w) && /[a-z]/i.test(w) || /[a-z][A-Z]|^[A-Z]{2}[a-z]/.test(w))) && /\p{L}/u.test(s);
+}
+
+/** The live pins blocking a new one, or [] when there is room (re-pinning a URL already pinned always fits). */
+export function pinsFull(session: string, url: string, dir = artifactsDir()): Artifact[] {
+	const live = loadArtifacts(session, dir).filter(x => !x.retired);
+	return live.some(x => x.url === url.trim()) || live.length < MAX_PINS ? [] : live;
+}
+
 /** Pin (or retitle) an item; the same URL is kept once. Newest last. Returns the list. */
 export function pinArtifact(session: string, item: { title?: string; url: string; kind?: ArtifactKind; loops?: string[]; line?: string }, dir = artifactsDir(), now = Date.now()): Artifact[] {
 	const url = item.url.trim();
@@ -39,8 +61,8 @@ export function pinArtifact(session: string, item: { title?: string; url: string
 	const prev = old.find(x => x.url === url);
 	const title = (item.title?.trim() || prev?.title || url.split(/[/?#]/).filter(Boolean).pop() || url).slice(0, 120);
 	const all = [...old.filter(x => x.url !== url), { title, url, kind: item.kind ?? artifactKind(url), at: prev?.at ?? now, ...((item.line ?? prev?.line) ? { line: item.line ?? prev?.line } : {}), ...((item.loops ?? prev?.loops)?.length ? { loops: item.loops ?? prev?.loops } : {}) }].slice(-50);
-	// At most 3 live pins per session: a 4th retires the oldest live one.
-	const live = all.filter(x => !x.retired), items = all.map(x => x.retired || live.indexOf(x) >= live.length - 3 ? x : { ...x, retired: true });
+	// Callers check pinsFull first; this only guards the cap if one does not.
+	const live = all.filter(x => !x.retired), items = all.map(x => x.retired || live.indexOf(x) >= live.length - MAX_PINS ? x : { ...x, retired: true });
 	save(session, items, dir);
 	return items;
 }
@@ -60,25 +82,24 @@ export function artifactsLabel(items: Artifact[]): string {
 /** A short semantic footer label (core/pin-label.ts): never a hash or a random host part. */
 export function artifactShort(a: Pick<Artifact, "title" | "url"> & Partial<Artifact>): string { return pinLabel({ kind: artifactKind(a.url), at: 0, ...a } as Artifact); }
 
-/** Pins whose job ended (all their loops closed, or a PR merged/closed) drop behind "+N". `isOpen(loopId)` and `prDone(url)` are injected. */
+/** Pins whose job ended (all their loops closed, or a PR merged/closed) leave the footer (no count). `isOpen(loopId)` and `prDone(url)` are injected. */
 export function artifactEnded(a: Artifact, o: { isOpen?: (loop: string) => boolean; prDone?: (url: string) => boolean } = {}): boolean {
 	if (a.loops?.length && o.isOpen && !a.loops.some(o.isOpen)) return true;
 	return /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(a.url) && !!o.prDone?.(a.url);
 }
 
-/** Footer: the newest 3 live pins, then "+N" for the rest (older or ended). Items are oldest first. */
-export function footerPins<T extends Artifact>(items: T[], ended: (a: T) => boolean = () => false, show = 3, main?: string): { shown: T[]; more: number } {
+/** Footer: at most the newest 2 live pins, never a "+N" count. Items are oldest first. */
+export function footerPins<T extends Artifact>(items: T[], ended: (a: T) => boolean = () => false, show = MAX_PINS, main?: string): { shown: T[] } {
 	const ok = items.filter(a => !a.retired && !ended(a)), rev = ok.slice().reverse();
 	// The main line's pins first (newest first), then the newest others.
 	const live = [...rev.filter(a => main && a.line === main), ...rev.filter(a => !main || a.line !== main)].slice(0, show);
-	return { shown: live, more: items.length - live.length };
+	return { shown: live };
 }
 
-/** Terminal links straight to the targets: the newest 3 live pins by short label, then "+N". Files open as file:// URLs. */
+/** Terminal links straight to the targets: the newest 2 live pins by short label. Files open as file:// URLs. */
 export function artifactLinks(items: Artifact[], home = homedir(), ended: (a: Artifact) => boolean = () => false, main?: string): { label: string; url: string }[] {
 	const target = (a: Artifact) => a.kind === "file" ? "file://" + encodeURI(a.url.replace(/^~(?=\/|$)/, home)) : a.url;
-	const { shown, more } = footerPins(items, ended, 3, main);
-	return [...shown.map(a => ({ label: artifactShort(a), url: target(a) })), ...(more ? [{ label: `+${more}`, url: "" }] : [])];
+	return footerPins(items, ended, MAX_PINS, main).shown.map(a => ({ label: artifactShort(a), url: target(a) }));
 }
 
 /** Hide secrets in text that may reach logs or the agent: query tokens/keys become "…". */
