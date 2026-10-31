@@ -20,7 +20,7 @@ test("disabled accounts stay visible in generic inventory and Claude compatibili
   assert.deepEqual(kit.plan().map(a => a.id), ["ok"]);
 });
 
-test("global and session pins are preserved but cannot claim a disabled account is active", () => {
+test("global route stays pinned but stale session pins are pruned for disabled accounts", () => {
   kit.setChoice("blocked");
   assert.equal(kit.choice(), "blocked"); assert.deepEqual(kit.plan(), []);
   assert.equal(kit.sessionAccount("s").id, undefined); assert.equal(kit.footerLabel(), "");
@@ -28,7 +28,7 @@ test("global and session pins are preserved but cannot claim a disabled account 
   assert.equal(kit.sessionAccount("s").id, undefined);
   assert.deepEqual(kit.plan(Date.now(), "s").map(a => a.id), ["ok"]);
   assert.deepEqual(kit.sessionAccount("s"), { id: "ok", pinned: false });
-  assert.equal(kit.sessionAccounts().s.pin, "blocked", "retain the pin for reversible re-enable");
+  assert.equal(kit.sessionAccounts().s.pin, undefined, "do not resurrect a disabled session pin after re-enable");
 });
 
 test("a stale supplied request order cannot send a disabled account", async () => {

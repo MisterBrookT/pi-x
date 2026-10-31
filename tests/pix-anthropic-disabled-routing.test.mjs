@@ -48,12 +48,12 @@ async function stream() {
   return { calls, last: events.at(-1) };
 }
 
-test("real Pix transport excludes disabled high-quota accounts and old session pin/active, without rewriting the pin", async () => {
+test("real Pix transport excludes disabled high-quota accounts and prunes skipped session pin/active", async () => {
   k.setSessionAccount("s1", { pin: "own", active: "minarabench" }); k.setActive("minarabench");
   const { calls, last } = await stream();
   assert.equal(last.type, "done"); assert.deepEqual(calls, ["fetch"]);
   assert.equal(k.sessionAccounts().s1.active, "nftgo-yinghao");
-  assert.equal(k.sessionAccounts().s1.pin, "own", "disabled pin is retained, never used");
+  assert.equal(k.sessionAccounts().s1.pin, undefined, "disabled session pin is pruned persistently");
   assert.equal(k.choice(), "auto");
 });
 
