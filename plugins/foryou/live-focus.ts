@@ -11,14 +11,19 @@ export function createLiveFocus(options: {
 	/** d / Backspace: remove the row (undoable); selection moves to the next row. */
 	remove?(id: string, next: string | undefined): void;
 }) {
-	let selectedId: string | undefined;
+	let selectedId: string | undefined, detailId: string | undefined;
 	const reset = () => {
 		selectedId = undefined;
+		detailId = undefined;
 		options.render();
 	};
 	return {
 		get selectedId() {
 			return selectedId;
+		},
+		/** s: the selected row's full detail, plain text; Esc goes back to the list. */
+		get detailId() {
+			return detailId;
 		},
 		reset,
 		select(id: string) {
@@ -35,6 +40,16 @@ export function createLiveFocus(options: {
 		handleInput(data: string): { consume: true } | undefined {
 			if (!selectedId) return undefined;
 			if (isKeyRelease(data)) return { consume: true };
+			if (detailId) {
+				if (matchesKey(data, "escape")) {
+					detailId = undefined;
+					options.render();
+				} else if (matchesKey(data, "ctrl+c")) {
+					reset();
+					return undefined;
+				}
+				return { consume: true };
+			}
 			if (matchesKey(data, "escape")) {
 				reset();
 				return { consume: true };
@@ -75,6 +90,11 @@ export function createLiveFocus(options: {
 					selectedId = rows[number].id;
 					options.render();
 				} else {
+					if (matchesKey(data, "s")) {
+						detailId = selectedId;
+						options.render();
+						return { consume: true };
+					}
 					const verb = matchesKey(data, "enter")
 						? "do"
 						: undefined;

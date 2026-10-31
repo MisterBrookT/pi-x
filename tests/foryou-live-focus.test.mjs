@@ -43,10 +43,17 @@ test("arrows and numbers select without acting; Enter does it once", () => {
 	assert.equal(f.focus.selectedId, undefined);
 });
 
-test("s and l no longer act on the Mac list (only Enter do and d remove)", () => {
+test("s opens plain detail (no action), Esc goes back to the same selection; l does nothing", () => {
 	const f = fixture();
 	f.focus.focus();
-	for (const k of ["s", "l"]) assert.deepEqual(f.focus.handleInput(k), { consume: true });
+	f.focus.handleInput("2");
+	assert.deepEqual(f.focus.handleInput("l"), { consume: true });
+	assert.deepEqual(f.focus.handleInput("s"), { consume: true });
+	assert.equal(f.focus.detailId, "b");
+	assert.deepEqual(f.focus.handleInput("\r"), { consume: true }, "Enter inside detail does nothing");
+	f.focus.handleInput("\x1b");
+	assert.equal(f.focus.detailId, undefined);
+	assert.equal(f.focus.selectedId, "b");
 	assert.deepEqual(f.actions, []);
 });
 

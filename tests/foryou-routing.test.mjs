@@ -659,7 +659,7 @@ test("Mac list focus never changes height: same line count, every line fits 72 c
  const before=live();f.key("\x1b[B");const focused=live();f.key("\x1b[B");const moved=live();f.key("\x1b");const after=live();
  assert.equal(before[0],"For you 3");assert.equal(before.length,2);
  for (const v of [before,focused,moved,after]) { assert.equal(v.length,before.length); for (const l of v) { assert.ok(visibleWidth(l)<=72,l); assert.ok(l.trim(),"no blank lines"); } }
- assert.equal(focused[0],"For you 3   enter do  d remove  u undo  esc");assert.match(focused[1],/^1\/3  Do the thing/);assert.match(moved[1],/^2\/3  First ask with a much longer.* \.\.\.$/);
+ assert.equal(focused[0],"For you 3   enter do  s show  d remove  u undo  esc");assert.match(focused[1],/^1\/3  Do the thing/);assert.match(moved[1],/^2\/3  First ask with a much longer.* \.\.\.$/);
  f.key("\x1b[B");f.key("\x1b[C");assert.match(live()[1],/^2\/3/,"→ steps");f.key("\x1b[D");assert.match(live()[1],/^1\/3/,"← steps back");f.key("\x1b");
  assert.doesNotMatch(before.join("\n"),/only shows/,"full text only when selected");
  assert.deepEqual(after,before);assert.doesNotMatch(before.join("\n"),/·|Tab/);
@@ -749,4 +749,14 @@ test("Mac choose mode: d or Backspace removes the selected row (live ask off liv
  assert.deepEqual(readLive(d).map(a=>a.why),["Ask a"],"Backspace removed b for good");
  assert.deepEqual(f.answers,[["c",{answer:"done"}]],"card row: loop done through the hub");
  assert.deepEqual(f.pi.sent,[],"remove never sends anything");
+});
+
+test("Mac list s shows the card's plain detail (title, source, prepared, notes), no option list; Esc back to the 2-line list", async t => {
+ const d=tmp(loop("c"));
+ const f=await liveKeyboard(t,d);
+ const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
+ f.key("\x1b[B");const list=live();f.key("s");const v=live();
+ assert.equal(v[0],"esc back");assert.match(v.join("\n"),/Loop c/);assert.doesNotMatch(v.join("\n"),/Do it here|Discuss|Later|Not important/);
+ for (const l of v) assert.ok(l.length<=72);
+ f.key("\x1b");assert.deepEqual(live(),list);assert.deepEqual(f.pi.sent,[]);assert.equal(f.notes.find(n=>n.title),undefined);
 });

@@ -22,7 +22,20 @@ export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 	return [...asks, ...cards].map((r, i) => ({ r, i })).sort((a, b) => b.r.at - a.r.at || b.i - a.i).map(x => x.r);
 }
 
-export const CHOOSE_HINT = "enter do  d remove  u undo  esc";
+export const CHOOSE_HINT = "enter do  s show  d remove  u undo  esc";
+
+/** Plain full detail for s: title, source, the whole text, prepared draft, latest notes. Wrapped to 72, at most 10 lines. */
+export function forYouDetail(id: string, dir?: string, now = Date.now()): string[] | undefined {
+	const a = readLive(dir, now).find(x => x.id === id);
+	const parts: string[] = a ? [`${a.who ?? whoOf(a.source)}  ${sourceName(a.source)}`, a.why]
+		: (() => { const it = waitingHeads(dir, now).find(h => h.it.id === id)?.it; if (!it) return [];
+			const notes = (it.note ?? "").split("\n").filter(Boolean).slice(-3);
+			return [it.title, it.source, ...(it.why && it.why !== it.title ? [it.why] : []), ...(it.prepared ? [`Prepared: ${it.prepared}`] : []), ...notes]; })();
+	if (!parts.length) return undefined;
+	const lines = parts.flatMap(p => { const out: string[] = []; let t = p.replace(/\s+/g, " ").trim(); while (t.length > W) { const k = t.lastIndexOf(" ", W) > 20 ? t.lastIndexOf(" ", W) : W; out.push(t.slice(0, k)); t = t.slice(k).trim(); } if (t) out.push(t); return out; });
+	const head = "esc back", room = 9;
+	return [head, ...(lines.length > room ? [...lines.slice(0, room - 1), cut(lines[room - 1], W - 4) + " ..."] : lines)];
+}
 export const REMOVED_NOTE = "removed, u undo";
 const W = 72;
 

@@ -30,7 +30,7 @@ import { expandForYou, withForYou } from "./foryou-mention.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 import { livePrompt, readLive, takeLive } from "./live-strip.ts";
-import { forYouLines, forYouRows } from "./for-you-list.ts";
+import { forYouDetail, forYouLines, forYouRows } from "./for-you-list.ts";
 import { paths } from "./proactive.ts";
 import { existsSync as foldExists, rmSync as foldRm, writeFileSync as foldWrite } from "node:fs";
 import { join as foldJoin } from "node:path";
@@ -321,7 +321,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	};
 	const liveWidget = (ctx: any) => {
 		const rows = visibleRows(), selected = liveFocus.selectedId;
-		const lines = forYouLines(rows, selected, readFolded(deps.dir), !!pending), key = JSON.stringify(lines ?? null);
+		const detail = liveFocus.detailId ? forYouDetail(liveFocus.detailId, deps.dir) : undefined;
+		const lines = detail ?? forYouLines(rows, selected, readFolded(deps.dir), !!pending), key = JSON.stringify(lines ?? null);
 		if (key === liveShown || (!liveShown && !lines)) return;
 		liveShown = key;
 		ctx.ui.setWidget?.("foryou-live", lines);
