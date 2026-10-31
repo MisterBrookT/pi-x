@@ -111,6 +111,7 @@ export const cardLines = (it: { line?: string; related?: unknown[]; title: strin
 ];
 
 /** A session to hand the task to, as one option in the card's list. */
+export const LIVE_HINT = "Tab choose, ↑↓ or 1–9, Enter reply, s show, l later, Esc back";
 export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? `, ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
@@ -294,16 +295,16 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		cardLog(deps.dir, "widget", { id: it?.id ?? null, left: it?.left });
 		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
 	};
-	// Focus stays in the existing strip; only its instruction line changes.
+	// Focus stays in the existing strip; nothing changes size.
 	let liveShown = "", liveContext: ExtensionContext | undefined, removeLiveInput: (() => void) | undefined;
 	const liveWidget = (ctx: any) => {
 		const L = readLive(deps.dir), selected = liveFocus.selectedId;
 		const key = JSON.stringify([L, selected, !!shown]);
 		if (key === liveShown || (!liveShown && !L.length && !selected)) return;
 		liveShown = key;
-		const at = L.findIndex(a => a.id === selected);
-		const hint = selected ? at < 0 ? "Handled elsewhere, Esc back" : `${at + 1} selected, ↑↓ or 1–9, Enter reply, s show, l later, ${shown ? "Tab card, " : ""}Esc back` : "Tab to choose, Enter reply, s show, l later";
-		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}  ${a.why}   ${a.source}${a.verb === "do" ? "   Enter to do it" : ""}`), hint] : undefined);
+		// Focus must not change the strip's height (a height change makes the whole TUI jump):
+		// the hint is the same in both states and the selected row only swaps one space for a marker.
+		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}${a.id === selected ? "›" : " "} ${a.why}   ${a.source}${a.verb === "do" ? "   Enter to do it" : ""}`), LIVE_HINT] : undefined);
 	};
 	const actLive = (id: string, verb: LiveAction, ctx: ExtensionContext) => {
 		// Claim by id, exactly like the phone endpoint; a stale selection never replies twice.

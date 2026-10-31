@@ -615,7 +615,7 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	const w = widgets.find(x => x[0] === "foryou-live");
-	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "Tab to choose, Enter reply, s show, l later"]);
+	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "Tab choose, ↑↓ or 1–9, Enter reply, s show, l later, Esc back"]);
 	await pi.commands["/live"].handler("1 reply", fy);
 	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
 	await pi.commands["/live"].handler("1 later", fy);
@@ -646,6 +646,21 @@ test("Mac Tab focuses existing strip without a dialog; arrows/Enter match phone 
  assert.match(f.pi.sent[0],/Reply now\].*Second ask/);
  assert.equal(readLive(d).length,1);assert.equal(f.notes.length,0,"no modal or redesign");
  assert.equal(f.key("s"),undefined,"typing resumes outside focus");
+});
+
+test("Mac Tab focus keeps the strip the same size: same line count and line widths, only a row marker changes (no jitter)", async t => {
+ const { addLive } = await import("../plugins/foryou/live-strip.ts");
+ const { visibleWidth } = await import("@earendil-works/pi-tui");
+ const d=tmp();addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Do the thing",verb:"do"});
+ const f=await liveKeyboard(t,d);
+ const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
+ const before=live();f.key("\t");const focused=live();f.key("\x1b[B");const moved=live();f.key("\x1b");const after=live();
+ assert.notDeepEqual(focused,before,"selection is visible");
+ for (const v of [focused,moved,after]) {
+  assert.equal(v.length,before.length);
+  assert.deepEqual(v.map(visibleWidth),before.map(visibleWidth),"no line gets longer, so nothing wraps differently");
+ }
+ assert.match(focused[0],/^1›/);assert.match(moved[1],/^2›/);assert.deepEqual(after,before);
 });
 
 test("Mac shortcut focuses live asks with a draft; s/l preserve the draft and phone semantics", async t => {
