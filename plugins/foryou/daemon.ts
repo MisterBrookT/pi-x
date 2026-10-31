@@ -308,8 +308,10 @@ type Doc = Msg & { resolved?: boolean; test?: boolean };
 		// brook's rule (10-31, 郑雯清 mid-conversation): friends' WeChat never lands in his For you chat while he is in it.
 		// The card is already made; urgent ones get one line, the rest nothing (not even a held batch).
 		const quiet = active ? forwards.filter(personalQuiet) : [];
+		// The strip above his input (Mac and phone) IS the card for these: he taps Reply/Show/Later when he wants.
+		for (const f of quiet) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) });
 		for (const f of quiet.filter(f => f.urgent)) { const ok = await hubPrepare(quietLine(f)); log(`forward: ${f.source.name} -> ${ok ? "one line (personal, urgent, mid-thread)" : "one line not delivered"}`); }
-		if (quiet.some(f => !f.urgent)) log(`forward: ${quiet.filter(f => !f.urgent).map(f => f.source.name).join(", ")} -> card only (personal, brook is in a thread with For you)`);
+		if (quiet.some(f => !f.urgent)) log(`forward: ${quiet.filter(f => !f.urgent).map(f => f.source.name).join(", ")} -> strip only (personal, brook is in a thread with For you)`);
 		const now_ = forwards.filter(f => !quiet.includes(f) && (f.own || f.urgent || fast || f.source.chat === "private" || !!f.source.always));
 		const later_ = forwards.filter(f => !quiet.includes(f) && !now_.includes(f));
 		if (active && now_.length) {
