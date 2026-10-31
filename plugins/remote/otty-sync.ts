@@ -7,9 +7,11 @@ import { findOrphans, parseOttyPanes, parsePs, reconcile, type OttyPiPane, type 
 
 export const pixRunDir = () => join(homedir(), ".pix", "run");
 
-/** Each Pi writes ~/.pix/run/<pid>.json with its session id, so the hub can map pid → session → Otty pane. */
-export function writePidFile(sessionId: string, dir = pixRunDir(), pid = process.pid) {
-  try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, sessionId })); } catch {}
+/** Each Pi writes ~/.pix/run/<pid>.json with its session id, so the hub can map pid → session → Otty pane.
+ *  loaded (commit, code fingerprint, loadedAt) says which Pix code this session runs, so auto-reload can be checked. */
+export type Loaded = { commit?: string; code: string; loadedAt: number };
+export function writePidFile(sessionId: string, dir = pixRunDir(), pid = process.pid, loaded?: Loaded) {
+  try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, sessionId, ...loaded })); } catch {}
 }
 export function removePidFile(dir = pixRunDir(), pid = process.pid) { try { unlinkSync(join(dir, `${pid}.json`)); } catch {} }
 

@@ -7,6 +7,7 @@ import { unlink } from "node:fs/promises";
 import { appendFileSync, existsSync, renameSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Image, Text } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -144,6 +145,11 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
   };
   // Reload this session when Pix code on disk changes, so the hub and phone never run stale code.
   const pixRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+  const loaded = (() => {
+    let commit: string | undefined;
+    try { commit = execFileSync("git", ["-C", pixRoot, "rev-parse", "--short", "HEAD"], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+    return { commit, code: createHash("sha1").update(pixCodeVersion(pixRoot)).digest("hex").slice(0, 12), loadedAt: Date.now() };
+  })();
   const autoReload = !autoReloadEnabled() ? undefined : createAutoReload({
     version: () => pixCodeVersion(pixRoot),
     // Async subagent runs count too: a reload kills their parent workflow tracker even though the children live on.
@@ -429,7 +435,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     if (useRelay) relayKey ||= await readRelayKey(options.relayKeyPath);
     await ensureHub(useRelay, wait);
     sessionId = next.sessionManager.getSessionId();
-    writePidFile(sessionId);
+    writePidFile(sessionId, undefined, undefined, loaded);
     uploadedMedia.clear();
     busy = !next.isIdle();
     connected = true;
