@@ -48,7 +48,7 @@ test("daemon: fast tick every ~1 min on shared cursors; asks mid-thread go to Fo
 	assert.match(src, /tick\(cfg, true\)/);
 	assert.match(src, /fastSources\(cfg, state/);
 	assert.match(src, /underBudget\(fastJudged, Date\.now\(\), fastBudget\(\)\)/);
-	assert.match(src, /filter\(f => f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private" \|\|/);
+	assert.match(src, /filter\(f => !quiet\.includes\(f\) && \(f\.own \|\| f\.urgent \|\| fast \|\| f\.source\.chat === "private" \|\|/);
 	assert.match(src, /addLive\(P\.dir/);
 	assert.match(src, /mine\.length && !forced\.length \? \{ own: true \}/, "his own reply is marked");
 	assert.match(src, /now_\.filter\(f => !f\.own\)\) addLive/, "it forwards at once but makes no strip row");

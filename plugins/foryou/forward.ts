@@ -119,3 +119,17 @@ ${list || "(none)"}${o.board ? `
 Where each session stands now:
 ${o.board}` : ""}`;
 }
+
+/** Work/school WeChat chats (Minara, lab): not "personal" even though they come through WeChat. */
+export const WORK_WECHAT = new Set(["yyh951102", "56753723085@chatroom", "25208562031@chatroom", "zwh277092075"]);
+/**
+ * Friends' WeChat (not work, school or money): while brook is chatting with For you it must not land in that chat.
+ * Its card is made quietly; only urgent ones (due today, someone blocked on him now) get one line.
+ */
+export function personalQuiet(f: Forward): boolean {
+	if (f.own || f.source.always || f.source.project || !/^wechat/.test(f.source.kind)) return false;
+	const id = f.sourceKey.replace(/^wechat[^:]*:/, "");
+	return !WORK_WECHAT.has(id) && !/(工作|实验室|lab|学校|课题|minara|kairos|报销|付款|转账)/i.test(f.source.name);
+}
+/** The one line an urgent personal message gets mid-thread, instead of the full batch. */
+export const quietLine = (f: Forward) => `[For you: one line] ${f.who || f.source.name}: ${(f.gist || f.why).replace(/\s+/g, " ").slice(0, 160)} (card in For you; source key ${f.sourceKey})`;

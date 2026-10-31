@@ -25,7 +25,7 @@ import { applyLineEdits, linesForPrompt, readLines, writeLines } from "./proacti
 import { ensureUnlocked } from "./unlock.ts";
 import { readStatus, statusBoard } from "./session-status.ts";
 import { clearQueue, heldPrompt, holdBatch, readQueue, threadActive, brookActiveAt, urgentLine } from "../core/foryou-queue.ts";
-import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, reviewPrompt, type Forward } from "./forward.ts";
+import { filterPrompt, forwardPrompt, mineClosing, mustPass, parseFilter, personalQuiet, quietLine, reviewPrompt, type Forward } from "./forward.ts";
 import { readRules, ruleVerdict } from "./filtered.ts";
 import { fastSources, fromKnown, knownPeople, underBudget } from "./fast-lane.ts";
 import { behavior } from "../core/behavior.ts";
@@ -305,8 +305,13 @@ type Doc = Msg & { resolved?: boolean; test?: boolean };
 		// once and the page shows them as a live strip; only the rest waits for the thread to go quiet.
 		// brook's own reply that may close a loop goes now too (it is not an ask, so no strip row): held, its card
 		// stayed open after he answered (Knight, 10-28 17:08).
-		const now_ = forwards.filter(f => f.own || f.urgent || fast || f.source.chat === "private" || !!f.source.always);
-		const later_ = forwards.filter(f => !now_.includes(f));
+		// brook's rule (10-31, 郑雯清 mid-conversation): friends' WeChat never lands in his For you chat while he is in it.
+		// The card is already made; urgent ones get one line, the rest nothing (not even a held batch).
+		const quiet = active ? forwards.filter(personalQuiet) : [];
+		for (const f of quiet.filter(f => f.urgent)) { const ok = await hubPrepare(quietLine(f)); log(`forward: ${f.source.name} -> ${ok ? "one line (personal, urgent, mid-thread)" : "one line not delivered"}`); }
+		if (quiet.some(f => !f.urgent)) log(`forward: ${quiet.filter(f => !f.urgent).map(f => f.source.name).join(", ")} -> card only (personal, brook is in a thread with For you)`);
+		const now_ = forwards.filter(f => !quiet.includes(f) && (f.own || f.urgent || fast || f.source.chat === "private" || !!f.source.always));
+		const later_ = forwards.filter(f => !quiet.includes(f) && !now_.includes(f));
 		if (active && now_.length) {
 			const sent = await hubPrepare(forwardPrompt(now_, new Date(), cfg.me));
 			if (sent) { for (const f of now_.filter(f => !f.own)) addLive(P.dir, { source: f.source.name, sourceKey: f.sourceKey, why: f.why, ...(f.source.always ? { verb: "do" as const, refs: f.ids } : {}), ...(f.who ? { who: f.who } : {}), ...(f.gist ? { gist: f.gist } : {}) }); }
