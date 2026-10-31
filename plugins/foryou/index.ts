@@ -31,6 +31,14 @@ import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 import { livePrompt, readLive, takeLive } from "./live-strip.ts";
 import { forYouLines, forYouRows } from "./for-you-list.ts";
+import { paths } from "./proactive.ts";
+import { existsSync as foldExists, rmSync as foldRm, writeFileSync as foldWrite } from "node:fs";
+import { join as foldJoin } from "node:path";
+/** ctrl+\\ folds the Mac For you list to its header; a marker file keeps it across renders and reloads. */
+export const FOLD_KEY = "ctrl+\\";
+const foldFile = (dir?: string) => foldJoin(paths(dir).dir, "list-folded");
+export const readFolded = (dir?: string) => foldExists(foldFile(dir));
+export const toggleFolded = (dir?: string) => { if (readFolded(dir)) foldRm(foldFile(dir), { force: true }); else foldWrite(foldFile(dir), ""); };
 import { waitingHeads } from "./proactive-store.ts";
 import { createLiveFocus, type LiveAction } from "./live-focus.ts";
 
@@ -301,7 +309,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	let liveShown = "", liveContext: ExtensionContext | undefined, removeLiveInput: (() => void) | undefined;
 	const liveWidget = (ctx: any) => {
 		const rows = forYouRows(deps.dir), selected = liveFocus.selectedId;
-		const lines = forYouLines(rows, selected), key = JSON.stringify(lines ?? null);
+		const lines = forYouLines(rows, selected, readFolded(deps.dir)), key = JSON.stringify(lines ?? null);
 		if (key === liveShown || (!liveShown && !lines)) return;
 		liveShown = key;
 		ctx.ui.setWidget?.("foryou-live", lines);
@@ -413,6 +421,10 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!isCoordinator(ctx) || ctx.mode !== "tui" || !ctx.ui.onTerminalInput) return;
 		removeLiveInput = ctx.ui.onTerminalInput(data => {
 			if (showing || matchesKey(data, CARD_KEY)) return undefined;
+			if (!liveFocus.selectedId && matchesKey(data, FOLD_KEY)) {
+				if (!isKeyRelease(data)) { toggleFolded(deps.dir); liveWidget(ctx); }
+				return { consume: true };
+			}
 			// ↓ on an empty input opens the list (Tab stays completion; ↓ there does nothing in Pi).
 			if (!liveFocus.selectedId && matchesKey(data, "down") && !ctx.ui.getEditorText() && forYouRows(deps.dir).length) {
 				if (!isKeyRelease(data)) void focusForYou(ctx).catch(e => ctx.ui.notify(String(e), "error"));

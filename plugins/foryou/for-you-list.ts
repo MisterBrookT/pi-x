@@ -25,14 +25,22 @@ export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 export const CHOOSE_HINT = "↑↓ or 1–9, Enter reply, s show, l later, Esc back";
 const W = 72;
 
+/** Rows shown at once; more show as one "..." line. */
+export const SHOWN = 3;
+
 /**
- * "For you N", one short row each, then one reserved line: blank normally, the selected row's full text
- * while choosing. Line count never depends on focus, so the TUI never jumps.
+ * "For you N", at most 3 rows, a "..." line (or blank), then one reserved line: blank normally, the selected
+ * row's full text while choosing. The line count depends only on fold, never on focus or count, so the TUI never jumps.
+ * Folded: the header alone. Never over Pi's 10-line widget cap, so Pi never adds "(widget truncated)".
  */
-export function forYouLines(rows: ForYouRow[], selected?: string): string[] | undefined {
+export function forYouLines(rows: ForYouRow[], selected?: string, folded = false): string[] | undefined {
 	if (!rows.length) return undefined;
-	const sel = rows.find(r => r.id === selected);
+	const at = rows.findIndex(r => r.id === selected), sel = rows[at];
 	const head = `For you ${rows.length}${sel ? `   ${CHOOSE_HINT}` : ""}`;
-	const body = rows.slice(0, 9).map((r, i) => cut(`${i + 1}${r.id === selected ? "›" : " "}${short(r.who, 12).padEnd(12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}   ${r.source}`, W));
-	return [cut(head, W), ...body, sel ? short(sel.full, W) : " "];
+	if (folded && !sel) return [cut(head, W)];
+	// The window follows the selection, so row 5 can be chosen; numbers stay the list's own.
+	const from = Math.max(0, Math.min(at - SHOWN + 1, rows.length - SHOWN));
+	const body = rows.slice(from, from + SHOWN).map((r, k) => cut(`${from + k + 1}${r.id === selected ? "›" : " "}${short(r.who, 12).padEnd(12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}   ${r.source}`, W));
+	while (body.length < SHOWN) body.push(" ");
+	return [cut(head, W), ...body, rows.length > SHOWN ? "..." : " ", sel ? short(sel.full, W) : " "];
 }

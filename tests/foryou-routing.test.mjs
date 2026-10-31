@@ -616,7 +616,7 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	const w = widgets.find(x => x[0] === "foryou-live");
-	assert.deepEqual(w[1], ["For you 2", "1 G             @brook review   Feishu", "2 Knight        Knight asks for the CSV   WeChat", " "], "newest first, reserved last line");
+	assert.deepEqual(w[1], ["For you 2", "1 G             @brook review   Feishu", "2 Knight        Knight asks for the CSV   WeChat", " ", " ", " "], "newest first, reserved last line");
 	await pi.commands["/live"].handler("2 reply", fy);
 	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
 	await pi.commands["/live"].handler("1 later", fy);
@@ -685,7 +685,7 @@ test("Mac cards and live asks are one list: Enter on a card row opens its picker
  const d=tmp(loop("a"));addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting too"});
  const f=await liveKeyboard(t,d);
  assert.equal(f.widgets.find(([key])=>key==="foryou-card")?.[1],undefined,"no second card widget");
- const list=f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];assert.equal(list.length,4);assert.ok(list.some(l=>/Loop a/.test(l)));
+ const list=f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];assert.equal(list.length,6);assert.ok(list.some(l=>/Loop a/.test(l)));
  const row=list.findIndex(l=>/Loop a/.test(l));
  f.key("\x1b[B");f.key(String(row));f.key("\r");await new Promise(r=>setTimeout(r,10));
  assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
@@ -705,4 +705,22 @@ test("switching to RPC or another session removes terminal input ownership", asy
  assert.equal(f.installed(),false);assert.equal(f.removed(),1);
  for(const start of f.pi.handlers.session_start) await start({}, {...f.ctx,sessionManager:{getSessionId:()=>"other"}});
  assert.equal(f.installed(),false);
+});
+
+test("Mac For you list shows at most 3 rows then one '...' line; height fixed whatever the count; ctrl+\\ folds to the header and the fold survives a reload", async t => {
+ const { addLive } = await import("../plugins/foryou/live-strip.ts");
+ const d=tmp(loop("c"));for (const k of "abcdef") addLive(d,{source:`WeChat: ${k}`,sourceKey:`wechat:${k}`,why:`Ask ${k}`});
+ const f=await liveKeyboard(t,d);
+ const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
+ const v=live();assert.equal(v.length,6);assert.equal(v[0],"For you 7");assert.equal(v[4],"...");assert.doesNotMatch(v.join("\n"),/more|truncated/);
+ for (let i=0;i<5;i++) f.key("\x1b[B");const deep=live();assert.equal(deep.length,6);assert.match(deep.slice(1,4).join("\n"),/^5›/m,"window follows the selection");f.key("\x1b");
+ assert.deepEqual(f.key("\x1c"),{consume:true});assert.deepEqual(live(),["For you 7"]);
+ const g=await liveKeyboard(t,d);assert.deepEqual(g.widgets.filter(([k])=>k==="foryou-live").at(-1)[1],["For you 7"],"fold remembered");
+ g.key("\x1c");assert.equal(g.widgets.filter(([k])=>k==="foryou-live").at(-1)[1].length,6);
+});
+
+test("For you list with 1 row keeps the same 6-line height", async () => {
+ const { forYouLines } = await import("../plugins/foryou/for-you-list.ts");
+ const v=forYouLines([{id:"x",kind:"ask",who:"A",gist:"g",full:"g",source:"WeChat",at:0,urgent:false}]);
+ assert.deepEqual(v.map(l=>l.trim()?"x":" "),["x","x"," "," "," "," "]);
 });
