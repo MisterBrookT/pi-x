@@ -1,8 +1,8 @@
 /**
  * Sessions coordinate with each other directly, so brook only hears about real decisions.
  *
- * Tool `chat`: board (who is doing what, who claims what), set (my doing / claims), send (note | ask | handoff | reply).
- * - note: arrives on the receiver's next turn, never wakes it. ask / handoff / reply: wake it (until the hop limit).
+ * Tool `chat`: board (who is doing what, who claims what), set (my doing / claims), send (one kind, like a normal chat).
+ * - Every message wakes the receiver (until the hop limit). wait=true keeps the sender waiting for an answer.
  * - Claims are enforced: edit / write on a file another live session claims is blocked with "ask <owner> first".
  */
 import { HELPER_STUCK } from "../core/helper-stuck.ts";
@@ -29,10 +29,12 @@ const MSG_CHECK = "pix-chat-check";
 /** Sessions that never join chat. (For you joins: it hands work out and gets replies back here.) */
 const OFF = new Set<string>();
 
+const REPLY = `Reply with chat send to="{from}" thread="{thread}" if you need to; settle it yourselves and involve brook only for things that leave this machine, deletions, or a conflict you cannot resolve.`;
 const HOW = {
-  note: "FYI only; no answer expected.",
-  ask: `Answer with chat send kind="reply" to="{from}" thread="{thread}" (add grant=[path] to let them edit a file you claim). Settle it yourselves; involve brook only for things that leave this machine, deletions, or a conflict you cannot resolve.`,
-  handoff: `This task is now yours. When done (or if you cannot do it), send kind="reply" to="{from}" thread="{thread}" with the result.`,
+  chat: REPLY,
+  note: REPLY,
+  ask: `Answer with chat send to="{from}" thread="{thread}" (add grant=[path] to let them edit a file you claim). Settle it yourselves; involve brook only for things that leave this machine, deletions, or a conflict you cannot resolve.`,
+  handoff: `This task is now yours. When done (or if you cannot do it), send to="{from}" thread="{thread}" with the result.`,
   reply: "This answers your earlier message; continue your work with it. Reply again only if something is still open.{grant}",
 };
 
@@ -145,15 +147,15 @@ export default function (pi: ExtensionAPI) {
     const abs = resolve(ctx.cwd, path);
     const o = owner(abs, me.name) ?? owner(path, me.name);
     if (o && !granted.has(abs)) return { block: true, reason: `${abs} is claimed by session "${o.name}" (doing: ${o.doing || "?"}). ` +
-      `Ask it: chat send kind="ask" to="${o.name}" naming the file. Do not work around this with bash. ` +
+      `Ask it: chat send to="${o.name}" naming the file. Do not work around this with bash. ` +
       `When the owner allows it, it sends chat with grant=["${abs}"] (or drops the claim), and the edit will pass.` };
   });
 
   pi.registerMessageRenderer(MSG, (message, { expanded }, theme) => {
     const n = message.details as Note;
     // One quiet line; the text shows when expanded (the model always gets all of it).
-    const head = `${theme.fg("dim", `↳ ${n.kind} from ${n.from}`)}`;
-    return new Text(expanded ? `${head}${theme.fg("dim", `, thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", ` · ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
+    const head = `${theme.fg("dim", `↳ ${n.from}`)}`;
+    return new Text(expanded ? `${head}${theme.fg("dim", `, thread ${n.thread}`)}\n${n.text}` : `${head}${theme.fg("dim", `  ${n.text.replace(/\s+/g, " ").slice(0, 60)}${n.text.length > 60 ? "…" : ""}`)}`, 0, 0);
   });
 
   pi.registerMessageRenderer(MSG_CHECK, (message, _o, theme) => new Text(theme.fg("dim", `${(message.details as { text: string }).text.split(":")[0]}`), 0, 0));
@@ -164,25 +166,27 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "chat",
     label: "Chat",
-    description: "Coordinate with other Pi sessions on this Mac, instead of asking brook to relay. " +
+    description: "Chat with other Pi sessions on this Mac, instead of asking brook to relay. " +
+      "send: a message to=session; it always reaches them (wakes them if idle). To answer, send on the same thread. " +
+      "wait=true: you expect an answer; it shows as waiting and check= can wake you if none comes. " +
+      "grant=[path]: let them edit a file you claim. " +
       "board: who is doing what and who claims which files / machines / services. " +
       "set: publish what I am doing and what I claim (absolute file paths, or names like a800c, nd-fresh); other sessions cannot edit my claimed files. " +
-      "close: stop waiting on a handoff/ask that will not get a formal reply (thread, or to=session). " +
-      "send: kind note (FYI, does not wake them), ask (they answer), handoff (they own the task and report back), reply (answer an ask/handoff; pass its thread). " +
-      "To let another session edit a file you claim, reply with grant=[path]. " +
+      "close: stop waiting (thread, or to=session). " +
       "Before editing files or using machines another session might own, check the board; if claimed, ask the owner.",
     parameters: Type.Object({
       action: StringEnum(["board", "set", "send", "close"]),
       to: Type.Optional(Type.String({ description: "Session name (unique prefix works)" })),
-      kind: Type.Optional(StringEnum([...KINDS])),
+      kind: Type.Optional(StringEnum([...KINDS], { description: "Old field, ignored: every message is chat" })),
+      wait: Type.Optional(Type.Boolean({ description: "send: you expect an answer (shows as waiting; check= can wake you)" })),
       message: Type.Optional(Type.String()),
-      label: Type.Optional(Type.String({ maxLength: 60, description: "ask/handoff: a short task summary (≤40 chars) shown in your footer while you wait, e.g. 'restyle leaderboard'" })),
+      label: Type.Optional(Type.String({ maxLength: 60, description: "wait: a short task summary (≤40 chars) shown in your footer while you wait, e.g. 'restyle leaderboard'" })),
       thread: Type.Optional(Type.String({ description: "Thread id when replying; close: the wait to stop (or to= a session to close all waits on it, or thread=\"all\")" })),
       doing: Type.Optional(Type.String({ description: "set: one line on what this session is doing" })),
       name: Type.Optional(Type.String({ description: "set: give this session a task name (news-infra) instead of the folder name; the old name keeps forwarding" })),
       claims: Type.Optional(Type.Array(Type.String(), { description: "set: full list of claims (replaces the old list)" })),
       grant: Type.Optional(Type.Array(Type.String(), { description: "send: claimed files the receiver may now edit" })),
-      check: Type.Optional(StringEnum(["off", "fixed", "exponential"], { description: "ask/handoff: when to wake you to check on it if no reply came (like a background job). Default: exponential for handoff, off for ask. You are also woken at once if the receiver exits or stops working without replying." })),
+      check: Type.Optional(StringEnum(["off", "fixed", "exponential"], { description: "wait: when to wake you to check on it if no reply came (like a background job). Default off. You are also woken at once if the receiver exits or stops working without replying." })),
       checkMinutes: Type.Optional(Type.Number({ minimum: 1, maximum: 1440, description: "First check after this many minutes (default 15); fixed repeats it, exponential doubles it up to 1 h" })),
     }),
     renderCall(args, theme) {
@@ -221,17 +225,19 @@ export default function (pi: ExtensionAPI) {
         if (!p.to || !p.message) return "send needs to and message";
         const to = find(p.to, undefined, me.name);
         if (typeof to !== "string") return to.error;
-        const kind = (p.kind ?? "note") as Kind;
+        // One kind. Old kinds map to chat; ask/handoff still mean "I wait for an answer".
+        const kind: Kind = "chat";
+        const waits = (p as any).wait ?? (p.kind === "ask" || p.kind === "handoff");
         const hop = p.thread ? (hops.get(p.thread) ?? 0) + 1 : 0;
         const grant = p.grant?.map((g) => resolve(ctx.cwd, g));
         const n = send(me.name, to, kind, p.message, { thread: p.thread, hop, grant });
         hops.set(n.thread, hop);
         sent = { ...n, to };
         const live = board().some((x) => x.name === to);
-        const chk = checkFor(kind, (p as any).check, (p as any).checkMinutes, n.at);
-        setWaiting(w => sentNote(w, { thread: n.thread, to, kind, at: n.at, message: p.message, label: (p as any).label, check: chk }, live));
-        return `Sent ${kind} to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
-          (!live ? " It is not running now; the message waits until it comes back." : kind === "note" ? " It will see it on its next turn." : " Its answer will arrive as a message.") +
+        const chk = waits ? checkFor(p.kind === "handoff" ? "handoff" : "ask", (p as any).check, (p as any).checkMinutes, n.at) : undefined;
+        if (waits) setWaiting(w => sentNote(w, { thread: n.thread, to, kind: "ask", at: n.at, message: p.message, label: (p as any).label, check: chk }, live));
+        return `Sent to ${to} (thread ${n.thread}${hop ? `, reply ${hop}/${MAX_HOPS}` : ""}).` +
+          (!live ? " It is not running now; the message waits until it comes back." : waits ? " Its answer will arrive as a message." : "") +
           (chk ? ` First check in ${Math.round(chk.every / 60_000)} min (${chk.mode}).` : "");
       })();
       const details = p.action === "send" && sent ? { sent } : {};

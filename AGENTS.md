@@ -21,6 +21,10 @@
 
 - Don't ask brook before reloading. Commit the fix and let `remote-autoreload` pick it up: each session reloads by itself once plugin files have been stable for 2 min and it is idle with no jobs or questions. Then confirm the pickup, and run `npm run deploy:relay` for phone changes.
 
+## Chat
+
+- The `chat` tool has one kind: every message wakes the receiver (idle: new turn; busy: after the current turn). Answer on the same thread. `wait=true` (+ optional `check`) marks that the sender expects an answer. Old kinds (note/ask/handoff/reply) are still accepted and map to chat.
+
 ## Design
 
 - Follow `docs/design.md` (palette, type, avatars, actions) for every UI change on phone and Mac.

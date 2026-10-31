@@ -52,7 +52,7 @@ test("chat plugin: sending an ask shows 'Waiting for pix', survives reload, clea
   t.after(() => peer.close());
   const start = () => {
     const handlers = {}, tools = {}, status = new Map();
-    const pi = { on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "for-you" };
+    const pi = { events: { on() {}, emit() {} }, on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "for-you" };
     registerChat(pi);
     const ctx = { cwd: "/for-you", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
     for (const f of handlers.session_start) f({}, ctx);
@@ -90,7 +90,7 @@ test("phone: a session waiting on another shows the same quiet 'Waiting for pix'
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
   await page.locator("#phoneWaits").waitFor();
-  assert.equal(await page.locator("#phoneWaits").textContent(), "Waiting for pix", "under the input, not in the chat");
+  assert.equal(await page.locator("#phoneWaits .sr-t").textContent(), "Waiting for pix", "under the input, not in the chat");
   assert.equal(await page.locator(".peer-wait-line").count(), 0);
   if (process.env.PIX_SHOT) await page.screenshot({ path: process.env.PIX_SHOT });
   assert.equal(await page.locator(".bubble.typing").count(), 0, "not shown as running");
@@ -190,7 +190,7 @@ test("chat plugin: a handoff carries a check schedule; when the receiver leaves 
   process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
   const peer = chat.join_({ name: "minara-2", cwd: "/x", pid: process.pid, at: 0, status: "busy", doing: "", claims: [] }, () => {}, root);
   const handlers = {}, tools = {}, status = new Map(), sent = [];
-  const pi = { on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage: (m, o) => sent.push({ m, o }), getSessionName: () => "for-you" };
+  const pi = { events: { on() {}, emit() {} }, on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage: (m, o) => sent.push({ m, o }), getSessionName: () => "for-you" };
   registerChat(pi);
   const ctx = { cwd: "/for-you", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
   for (const f of handlers.session_start) f({}, ctx);
@@ -228,4 +228,27 @@ test("regression: a non-waking note shows when it arrives (no turn), not after b
   assert.deepEqual(noteDelivery(false), { triggerTurn: false });
   assert.notEqual(noteDelivery(false).deliverAs, "nextTurn");
   assert.deepEqual(noteDelivery(true), { triggerTurn: true, deliverAs: "followUp" });
+});
+
+test("chat is chat: one kind, every message wakes; wait=true keeps the sender waiting; old kinds still map", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "chat-one-"));
+  process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
+  const { wakes, KINDS } = chat;
+  assert.equal(wakes({ kind: "note", hop: 0 }), true, "old notes wake too");
+  assert.equal(wakes({ kind: "chat", hop: 3 }), false, "hop limit still stops loops");
+  assert.ok(KINDS.includes("chat"));
+  const peer = chat.join_({ name: "news-docs", cwd: "/x", pid: process.pid, at: 0, status: "idle", doing: "", claims: [] }, () => {}, root);
+  t.after(() => peer.close());
+  const handlers = {}, tools = {}, status = new Map();
+  registerChat({ events: { on() {}, emit() {} }, on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool: (x) => { tools[x.name] = x; }, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "for-you" });
+  const ctx = { cwd: "/for-you", hasUI: true, ui: { setStatus: (k, v) => v === undefined ? status.delete(k) : status.set(k, v) } };
+  for (const f of handlers.session_start) f({}, ctx);
+  t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
+  const send = (p) => tools.chat.execute("1", { action: "send", to: "news-docs", message: "please deploy", ...p }, undefined, undefined, ctx);
+  assert.match((await send({})).content[0].text, /^Sent to news-docs/);
+  assert.equal(W.loadWaiting(W.waitingPath(root, "for-you")).waits.length, 0, "plain chat does not wait");
+  await send({ wait: true, label: "deploy" });
+  assert.equal(W.loadWaiting(W.waitingPath(root, "for-you")).waits.length, 1);
+  const r = await send({ kind: "note" });
+  assert.equal(r.details.sent.kind, "chat", "old kind maps to chat");
 });

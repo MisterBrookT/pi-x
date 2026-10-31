@@ -6,8 +6,8 @@
  *
  * - Address = session name, so a restart keeps it and queued mail waits for the name to come back.
  * - Board: what each live session is doing and which files / machines / services it claims.
- * - Kinds: note (read on the next turn, never wakes), ask (wakes; the answer wakes the asker),
- *   handoff (wakes; the receiver owns the task and reports when done).
+ * - One kind: chat. Every message wakes the receiver (idle: starts a turn; busy: after the current turn).
+ *   Old kinds (note, ask, handoff, reply) are still read and mapped to chat, so older sessions keep working.
  * - Loop stop: every automatic reply in a thread raises hop; at MAX_HOPS mail stops waking anyone.
  */
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, watch, type FSWatcher } from "node:fs";
@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 
 export const chatRoot = () => process.env.PIX_CHAT_DIR ?? join(homedir(), ".pi/agent/chat");
 export const MAX_HOPS = 3;
-export const KINDS = ["note", "ask", "handoff", "reply"] as const;
+export const KINDS = ["chat", "note", "ask", "handoff", "reply"] as const;
 export type Kind = (typeof KINDS)[number];
 
 export type Peer = { name: string; cwd: string; pid: number; session?: string; at: number; status?: string; doing?: string; claims?: string[];
@@ -118,7 +118,7 @@ function logLine(root: string, n: Note, to: string) {
 }
 
 /** Does this message wake the receiver? Notes never; anything past the hop limit never. */
-export const wakes = (n: Note) => n.kind !== "note" && n.hop < MAX_HOPS;
+export const wakes = (n: Note) => n.hop < MAX_HOPS;
 
 /** Join under a name: publish the board entry, deliver queued and new mail. */
 export function join_(me: Peer, onNote: (n: Note) => void, root = chatRoot()) {

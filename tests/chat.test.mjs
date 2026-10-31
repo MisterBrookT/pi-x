@@ -28,7 +28,7 @@ test("board, names, claims, kinds, hop limit, and mail that waits for a restart"
   chat.send("bench", "book", "reply", "yes", { thread: ask.thread, hop: 1 }, root);
   await wait(() => got.book.length);
   assert.equal(got.book[0].thread, ask.thread);
-  assert.equal(chat.wakes({ kind: "note", hop: 0 }), false, "notes never wake");
+  assert.equal(chat.wakes({ kind: "note", hop: 0 }), true, "chat is chat: old notes wake too");
   assert.equal(chat.wakes({ kind: "reply", hop: chat.MAX_HOPS }), false, "hop limit stops waking");
   assert.match(format({ kind: "reply", from: "x", thread: "t", hop: chat.MAX_HOPS, text: "hi" }), /reply limit/);
 
@@ -67,7 +67,7 @@ test("title: the terminal tab shows the board name, '<name>' with no prefix, and
   process.env.PIX_CHAT_DIR = root; t.after(() => { delete process.env.PIX_CHAT_DIR; });
   const registerChat = await jiti.import("../plugins/chat/index.ts", { default: true });
   const handlers = {}, titles = [];
-  registerChat({ on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "minara" });
+  registerChat({ events: { on() {}, emit() {} }, on: (e, f) => { (handlers[e] ??= []).push(f); }, registerTool() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName: () => "minara" });
   const ctx = { cwd: "/w/minara", hasUI: true, sessionManager: { getSessionId: () => "S1" }, ui: { setStatus() {}, setTitle: (x) => titles.push(x) } };
   for (const f of handlers.session_start) f({}, ctx);
   t.after(() => { for (const f of handlers.session_shutdown) f({}, ctx); });
