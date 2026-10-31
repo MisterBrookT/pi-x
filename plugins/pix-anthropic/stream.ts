@@ -55,6 +55,7 @@ const ANTHROPIC_VERSION = "2023-06-01";
 
 function isFastModeUnsupported(status: number, message: string): boolean {
 	return (status === 400 && /invalid_request/i.test(message) && /speed/i.test(message) && /not support/i.test(message)) ||
+		(status === 400 && /invalid_request/i.test(message) && /fast mode/i.test(message) && /not enabled/i.test(message)) ||
 		(status === 429 && /rate_limit_error/i.test(message) && /fast mode/i.test(message));
 }
 
