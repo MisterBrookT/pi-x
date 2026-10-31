@@ -30,7 +30,7 @@ test("unfocused keys remain editor input; opening selects the first live row", (
 	assert.equal(f.renders(), 1);
 });
 
-test("arrows and numbers select without acting; Enter replies once", () => {
+test("arrows and numbers select without acting; Enter does it once", () => {
 	const f = fixture();
 	f.focus.focus();
 	assert.deepEqual(f.focus.handleInput("\x1b[B"), { consume: true });
@@ -39,22 +39,16 @@ test("arrows and numbers select without acting; Enter replies once", () => {
 	assert.equal(f.focus.selectedId, "c");
 	assert.deepEqual(f.actions, []);
 	f.focus.handleInput("\r");
-	assert.deepEqual(f.actions, [["c", "reply"]]);
+	assert.deepEqual(f.actions, [["c", "do"]]);
 	assert.equal(f.focus.selectedId, undefined);
 });
 
-for (const [key, verb] of [
-	["s", "show"],
-	["l", "later"],
-])
-	test(`${key} performs the matching phone action on the selected row`, () => {
-		const f = fixture();
-		f.focus.focus();
-		f.focus.handleInput("2");
-		f.focus.handleInput(key);
-		assert.deepEqual(f.actions, [["b", verb]]);
-		assert.equal(f.focus.selectedId, undefined);
-	});
+test("s and l no longer act on the Mac list (only Enter do and d remove)", () => {
+	const f = fixture();
+	f.focus.focus();
+	for (const k of ["s", "l"]) assert.deepEqual(f.focus.handleInput(k), { consume: true });
+	assert.deepEqual(f.actions, []);
+});
 
 test("Escape returns focus without action; unknown keys cannot modify the editor while focused", () => {
 	const f = fixture();
@@ -72,7 +66,7 @@ test("selection follows stable ids when the phone removes an earlier row", () =>
 	f.focus.handleInput("2");
 	f.rows([{ id: "b" }, { id: "c" }]);
 	f.focus.handleInput("\r");
-	assert.deepEqual(f.actions, [["b", "reply"]]);
+	assert.deepEqual(f.actions, [["b", "do"]]);
 });
 
 test("an ask handled on the phone cannot turn Enter into a different ask's reply", () => {

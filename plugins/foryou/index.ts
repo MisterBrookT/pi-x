@@ -346,6 +346,14 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	});
 	// A card row: Enter or s opens its picker, l puts it off (through the hub, like the phone).
 	const actRow = (id: string, verb: LiveAction, ctx: ExtensionContext) => {
+		// Enter on the Mac list: "do it". No picker; For you decides how (delegate, do it, new session).
+		if (verb === "do") {
+			const a = takeLive(id, deps.dir);
+			if (a) { liveWidget(ctx); pi.sendUserMessage(`[do] live ask ${a.sourceKey}: ${a.who ? `${a.who}: ` : ""}${a.gist ?? a.why} (${a.source})`, ctx.isIdle() ? undefined : { deliverAs: "followUp" }); return; }
+			// Card: the hub's "do" answer, the phone's route to For you; it leaves the waiting list.
+			if (waitingHeads(deps.dir, Date.now()).some(h => h.it.id === id)) { void (deps.answer ?? answerViaHub)(id, { answer: "do" }).then(() => check(ctx)).catch(e => ctx.ui.notify(String(e), "error")); return; }
+			ctx.ui.notify("That ask was already handled.", "info"); return;
+		}
 		if (readLive(deps.dir).some(a => a.id === id)) return actLive(id, verb, ctx);
 		const at = waitingHeads(deps.dir, Date.now()).findIndex(h => h.it.id === id);
 		if (at < 0) { ctx.ui.notify("That ask was already handled.", "info"); return; }

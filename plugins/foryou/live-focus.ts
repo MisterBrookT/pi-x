@@ -1,6 +1,6 @@
 import { isKeyRelease, matchesKey } from "@earendil-works/pi-tui";
 
-export type LiveAction = "reply" | "show" | "later";
+export type LiveAction = "reply" | "show" | "later" | "do";
 
 /** Input ownership for the existing strip, not a second editor or renderer. */
 export function createLiveFocus(options: {
@@ -76,12 +76,8 @@ export function createLiveFocus(options: {
 					options.render();
 				} else {
 					const verb = matchesKey(data, "enter")
-						? "reply"
-						: matchesKey(data, "s")
-							? "show"
-							: matchesKey(data, "l")
-								? "later"
-								: undefined;
+						? "do"
+						: undefined;
 					if (verb) {
 						const id = selectedId;
 						reset();

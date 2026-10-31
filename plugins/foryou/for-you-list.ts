@@ -22,7 +22,7 @@ export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 	return [...asks, ...cards].map((r, i) => ({ r, i })).sort((a, b) => b.r.at - a.r.at || b.i - a.i).map(x => x.r);
 }
 
-export const CHOOSE_HINT = "←→ or ↑↓, Enter reply, s show, l later, d remove, Esc back";
+export const CHOOSE_HINT = "enter do  d remove  u undo  esc";
 export const REMOVED_NOTE = "removed, u undo";
 const W = 72;
 
