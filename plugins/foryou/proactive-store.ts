@@ -324,7 +324,7 @@ export function waitingCards(dir?: string, live: LiveSession[] = [], now = Date.
 export function stillWaiting(id: string, dir?: string, now = Date.now()) { return readAll(dir).some(i => i.id === id && needsYou(i, now)); }
 
 /** Waiting loops, one per line of work: related asks share a card (the oldest leads). */
-function waitingHeads(dir: string | undefined, now: number): { it: Item; related: Item[] }[] {
+export function waitingHeads(dir: string | undefined, now: number): { it: Item; related: Item[] }[] {
 	const all = readAll(dir).filter(i => needsYou(i, now)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 	const out: { it: Item; related: Item[] }[] = [];
 	for (const i of all) {

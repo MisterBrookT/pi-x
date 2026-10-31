@@ -30,6 +30,8 @@ import { expandForYou, withForYou } from "./foryou-mention.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 import { livePrompt, readLive, takeLive } from "./live-strip.ts";
+import { forYouLines, forYouRows } from "./for-you-list.ts";
+import { waitingHeads } from "./proactive-store.ts";
 import { createLiveFocus, type LiveAction } from "./live-focus.ts";
 
 const TOOL = "loops";
@@ -111,7 +113,6 @@ export const cardLines = (it: { line?: string; related?: unknown[]; title: strin
 ];
 
 /** A session to hand the task to, as one option in the card's list. */
-export const LIVE_HINT = "Tab choose, ↑↓ or 1–9, Enter reply, s show, l later, Esc back";
 export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? `, ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
@@ -293,18 +294,17 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!!key !== badged) { badged = !!key; (deps.badge ?? ottyBadge)(badged); }
 		shown = key;
 		cardLog(deps.dir, "widget", { id: it?.id ?? null, left: it?.left });
-		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
+		ctx.ui.setWidget?.("foryou-card", undefined);
+		liveWidget(ctx);
 	};
 	// Focus stays in the existing strip; nothing changes size.
 	let liveShown = "", liveContext: ExtensionContext | undefined, removeLiveInput: (() => void) | undefined;
 	const liveWidget = (ctx: any) => {
-		const L = readLive(deps.dir), selected = liveFocus.selectedId;
-		const key = JSON.stringify([L, selected, !!shown]);
-		if (key === liveShown || (!liveShown && !L.length && !selected)) return;
+		const rows = forYouRows(deps.dir), selected = liveFocus.selectedId;
+		const lines = forYouLines(rows, selected), key = JSON.stringify(lines ?? null);
+		if (key === liveShown || (!liveShown && !lines)) return;
 		liveShown = key;
-		// Focus must not change the strip's height (a height change makes the whole TUI jump):
-		// the hint is the same in both states and the selected row only swaps one space for a marker.
-		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}${a.id === selected ? "›" : " "} ${a.why}   ${a.source}${a.verb === "do" ? "   Enter to do it" : ""}`), LIVE_HINT] : undefined);
+		ctx.ui.setWidget?.("foryou-live", lines);
 	};
 	const actLive = (id: string, verb: LiveAction, ctx: ExtensionContext) => {
 		// Claim by id, exactly like the phone endpoint; a stale selection never replies twice.
@@ -314,11 +314,19 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (verb !== "later") pi.sendUserMessage(livePrompt(a, verb), ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 	};
 	const liveFocus = createLiveFocus({
-		rows: () => readLive(deps.dir),
+		rows: () => forYouRows(deps.dir),
 		render: () => { if (liveContext) liveWidget(liveContext); },
-		act: (id, verb) => { if (liveContext) actLive(id, verb, liveContext); },
+		act: (id, verb) => { if (liveContext) actRow(id, verb, liveContext); },
 		gone: () => liveContext?.ui.notify("That ask was already handled.", "info"),
 	});
+	// A card row: Enter or s opens its picker, l puts it off (through the hub, like the phone).
+	const actRow = (id: string, verb: LiveAction, ctx: ExtensionContext) => {
+		if (readLive(deps.dir).some(a => a.id === id)) return actLive(id, verb, ctx);
+		const at = waitingHeads(deps.dir, Date.now()).findIndex(h => h.it.id === id);
+		if (at < 0) { ctx.ui.notify("That ask was already handled.", "info"); return; }
+		const run = verb === "later" ? (deps.answer ?? answerViaHub)(id, { answer: "later" }).then(() => check(ctx)) : answer(ctx, at);
+		void run.catch(e => ctx.ui.notify(String(e), "error"));
+	};
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
 		liveWidget(ctx);
@@ -395,6 +403,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	};
 	pi.registerShortcut(CARD_KEY, { description: "Choose a waiting For you card or live ask", handler: async ctx => {
 		if (!isCoordinator(ctx) || ctx.mode !== "tui" || showing) return;
+		// ⌘⇧Y goes straight to the first card's picker; ↓ on an empty input chooses from the whole list.
 		if (currentCard(deps.dir, [])) { liveFocus.reset(); await answer(ctx); }
 		else await focusForYou(ctx);
 	} });
@@ -404,12 +413,8 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!isCoordinator(ctx) || ctx.mode !== "tui" || !ctx.ui.onTerminalInput) return;
 		removeLiveInput = ctx.ui.onTerminalInput(data => {
 			if (showing || matchesKey(data, CARD_KEY)) return undefined;
-			// A second Tab reaches the card without first handling every live ask.
-			if (liveFocus.selectedId && matchesKey(data, "tab") && currentCard(deps.dir, [])) {
-				if (!isKeyRelease(data)) { liveFocus.reset(); void answer(ctx).catch(e => ctx.ui.notify(String(e), "error")); }
-				return { consume: true };
-			}
-			if (!liveFocus.selectedId && matchesKey(data, "tab") && !ctx.ui.getEditorText() && (readLive(deps.dir).length || shown)) {
+			// ↓ on an empty input opens the list (Tab stays completion; ↓ there does nothing in Pi).
+			if (!liveFocus.selectedId && matchesKey(data, "down") && !ctx.ui.getEditorText() && forYouRows(deps.dir).length) {
 				if (!isKeyRelease(data)) void focusForYou(ctx).catch(e => ctx.ui.notify(String(e), "error"));
 				return { consume: true };
 			}
@@ -419,11 +424,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
 	// Older loop prompts were stored as plain user messages: fold them the same way when drawn.
 	pi.registerCommand?.("live", {
-		description: "Act on a live ask: /live <n> reply|show|later",
+		description: "Act on a For you row: /live <n> reply|show|later (n as numbered in the list)",
 		handler: async (args: string, ctx: any) => {
-			const [n, verb = "reply"] = String(args ?? "").trim().split(/\s+/), a = readLive(deps.dir)[Number(n) - 1];
+			const [n, verb = "reply"] = String(args ?? "").trim().split(/\s+/), a = forYouRows(deps.dir)[Number(n) - 1];
 			if (!a || !["reply", "show", "later"].includes(verb)) { ctx.ui.notify("Usage: /live <n> reply, show or later", "info"); return; }
-			actLive(a.id, verb as LiveAction, ctx);
+			actRow(a.id, verb as LiveAction, ctx);
 		},
 	});
 	pi.registerMarkdownTransformer?.((md, c) => {

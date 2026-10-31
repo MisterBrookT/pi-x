@@ -206,8 +206,9 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	assert.equal(shown.length, 0, "the card never pops up by itself: For you keeps working");
-	assert.equal(widgets[0][0], "foryou-card");
-	assert.deepEqual(widgets[0][1], ["● Loop a   Tab"], "one quiet line; details are behind the shortcut");
+	const list = widgets.filter(w => w[0] === "foryou-live").at(-1)[1];
+	assert.equal(list[0], "For you 1");
+	assert.match(list[1], /^1 .*Loop a/, "one quiet row; details are behind the shortcut");
 	await cardCmd(pi, fy);
 	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_ALL]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
@@ -615,8 +616,8 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	const w = widgets.find(x => x[0] === "foryou-live");
-	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "Tab choose, ↑↓ or 1–9, Enter reply, s show, l later, Esc back"]);
-	await pi.commands["/live"].handler("1 reply", fy);
+	assert.deepEqual(w[1], ["For you 2", "1 G             @brook review   Feishu", "2 Knight        Knight asks for the CSV   WeChat", " "], "newest first, reserved last line");
+	await pi.commands["/live"].handler("2 reply", fy);
 	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
 	await pi.commands["/live"].handler("1 later", fy);
 	assert.equal(pi.sent.length, 1, "later does not wake For you");
@@ -637,37 +638,35 @@ async function liveKeyboard(t, dir, draft = "") {
  return { pi, ctx, widgets, notes, key: data => input?.(data), installed: () => typeof input === "function", removed: () => removed };
 }
 
-test("Mac Tab focuses existing strip without a dialog; arrows/Enter match phone Reply now", async t => {
+test("Mac ↓ on an empty input focuses the list without a dialog; arrows/Enter match phone Reply now", async t => {
  const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
  const d = tmp();addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Second ask"});
  const f=await liveKeyboard(t,d);
  assert.equal(f.installed(),true);
- assert.deepEqual(f.key("\t"),{consume:true});f.key("\x1b[B");f.key("\r");
- assert.match(f.pi.sent[0],/Reply now\].*Second ask/);
+ assert.deepEqual(f.key("\x1b[B"),{consume:true});f.key("\x1b[B");f.key("\r");
+ assert.match(f.pi.sent[0],/Reply now\].*First ask/, "newest first, ↓ moves to the older one");
  assert.equal(readLive(d).length,1);assert.equal(f.notes.length,0,"no modal or redesign");
  assert.equal(f.key("s"),undefined,"typing resumes outside focus");
 });
 
-test("Mac Tab focus keeps the strip the same size: same line count and line widths, only a row marker changes (no jitter)", async t => {
+test("Mac list focus never changes height: same line count, every line fits 72 columns (no wrap), full text only in the reserved line", async t => {
  const { addLive } = await import("../plugins/foryou/live-strip.ts");
  const { visibleWidth } = await import("@earendil-works/pi-tui");
- const d=tmp();addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Do the thing",verb:"do"});
+ const d=tmp(loop("c"));addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask with a much longer full sentence that only shows when selected, never in the row"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Do the thing",verb:"do"});
  const f=await liveKeyboard(t,d);
  const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
- const before=live();f.key("\t");const focused=live();f.key("\x1b[B");const moved=live();f.key("\x1b");const after=live();
- assert.notDeepEqual(focused,before,"selection is visible");
- for (const v of [focused,moved,after]) {
-  assert.equal(v.length,before.length);
-  assert.deepEqual(v.map(visibleWidth),before.map(visibleWidth),"no line gets longer, so nothing wraps differently");
- }
- assert.match(focused[0],/^1›/);assert.match(moved[1],/^2›/);assert.deepEqual(after,before);
+ const before=live();f.key("\x1b[B");const focused=live();f.key("\x1b[B");const moved=live();f.key("\x1b");const after=live();
+ assert.equal(before[0],"For you 3");assert.equal(before.at(-1)," ","reserved line is blank, no hint until choosing");
+ for (const v of [focused,moved,after]) { assert.equal(v.length,before.length); for (const l of v) assert.ok(visibleWidth(l)<=72,l); }
+ assert.match(focused[0],/^For you 3   ↑↓/);assert.match(focused[1],/^1›/);assert.match(moved[2],/^2›/);assert.match(moved.at(-1),/First ask with a much longer/);
+ assert.deepEqual(after,before);assert.doesNotMatch(before.join("\n"),/·|Tab/);
 });
 
 test("Mac shortcut focuses live asks with a draft; s/l preserve the draft and phone semantics", async t => {
  const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
- const d=tmp();addLive(d,{source:"A",sourceKey:"wechat:a",why:"Show this"});addLive(d,{source:"B",sourceKey:"wechat:b",why:"Later this"});
+ const d=tmp();addLive(d,{source:"A",sourceKey:"wechat:a",why:"Later this"});addLive(d,{source:"B",sourceKey:"wechat:b",why:"Show this"});
  const f=await liveKeyboard(t,d,"unfinished draft");
- assert.equal(f.key("\t"),undefined,"normal draft completion remains available");
+ assert.equal(f.key("\x1b[B"),undefined,"normal draft completion remains available");
  await cardCmd(f.pi,f.ctx);f.key("s");assert.match(f.pi.sent[0],/tapped Show\].*Show this/);
  await cardCmd(f.pi,f.ctx);f.key("l");assert.equal(f.pi.sent.length,1);assert.deepEqual(readLive(d),[]);
  assert.equal(f.ctx.ui.getEditorText(),"unfinished draft");
@@ -675,33 +674,28 @@ test("Mac shortcut focuses live asks with a draft; s/l preserve the draft and ph
 
 test("Mac stale strip selection never replies to another row; shutdown releases the terminal hook", async t => {
  const { addLive, takeLive } = await import("../plugins/foryou/live-strip.ts");
- const d=tmp(),first=addLive(d,{source:"A",sourceKey:"wechat:a",why:"Already handled"});addLive(d,{source:"B",sourceKey:"wechat:b",why:"Still waiting"});
- const f=await liveKeyboard(t,d);f.key("\t");takeLive(first.id,d);f.key("\r");
+ const d=tmp();addLive(d,{source:"B",sourceKey:"wechat:b",why:"Still waiting"});const first=addLive(d,{source:"A",sourceKey:"wechat:a",why:"Already handled"});
+ const f=await liveKeyboard(t,d);f.key("\x1b[B");takeLive(first.id,d);f.key("\r");
  assert.deepEqual(f.pi.sent,[]);
  f.pi.handlers.session_shutdown.forEach(fn=>fn({},f.ctx));assert.equal(f.removed(),1);
 });
 
-test("Mac card advertises Tab and opens the same existing picker without changing the widget shape", async t => {
- const d=tmp(loop("a")),f=await liveKeyboard(t,d);
- assert.deepEqual(f.widgets.find(([key])=>key==="foryou-card")[1],["● Loop a   Tab"]);
- assert.deepEqual(f.key("\t"),{consume:true});await new Promise(r=>setTimeout(r,10));
- assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
-});
-
-test("Mac keeps cards reachable while live asks wait: second Tab or the existing shortcut opens the card", async t => {
+test("Mac cards and live asks are one list: Enter on a card row opens its picker, l puts it off through the hub", async t => {
  const {addLive}=await import("../plugins/foryou/live-strip.ts");
  const d=tmp(loop("a"));addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting too"});
  const f=await liveKeyboard(t,d);
- f.key("\t");assert.equal(f.notes.length,0,"first Tab stays in the strip");
- assert.equal(f.key("\x1b[121;10u"),undefined,"the existing shortcut still reaches Pi's dispatcher while focused");
- f.key("\t");await new Promise(r=>setTimeout(r,10));assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
- const count=f.notes.length;await cardCmd(f.pi,f.ctx);assert.ok(f.notes.length>count,"the existing shortcut still prioritizes a waiting card");
+ assert.equal(f.widgets.find(([key])=>key==="foryou-card")?.[1],undefined,"no second card widget");
+ const list=f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];assert.equal(list.length,4);assert.ok(list.some(l=>/Loop a/.test(l)));
+ const row=list.findIndex(l=>/Loop a/.test(l));
+ f.key("\x1b[B");f.key(String(row));f.key("\r");await new Promise(r=>setTimeout(r,10));
+ assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
+ assert.equal(f.key("\x1b[121;10u"),undefined,"⌘⇧Y still reaches Pi's dispatcher");
  assert.deepEqual(f.pi.sent,[]);
 });
 
 test("Mac live reply while busy queues a follow-up, never steering or sending externally", async t => {
  const {addLive}=await import("../plugins/foryou/live-strip.ts");const d=tmp();addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting"});
- const f=await liveKeyboard(t,d);f.ctx.isIdle=()=>false;f.key("\t");f.key("\r");
+ const f=await liveKeyboard(t,d);f.ctx.isIdle=()=>false;f.key("\x1b[B");f.key("\r");
  assert.deepEqual(f.pi.deliveries,[{deliverAs:"followUp"}]);
 });
 
