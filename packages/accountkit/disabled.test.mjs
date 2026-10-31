@@ -20,10 +20,10 @@ test("disabled accounts stay visible in generic inventory and Claude compatibili
   assert.deepEqual(kit.plan().map(a => a.id), ["ok"]);
 });
 
-test("global route stays pinned but stale session pins are pruned for disabled accounts", () => {
+test("stale global and session pins to disabled accounts are pruned", () => {
   kit.setChoice("blocked");
-  assert.equal(kit.choice(), "blocked"); assert.deepEqual(kit.plan(), []);
-  assert.equal(kit.sessionAccount("s").id, undefined); assert.equal(kit.footerLabel(), "");
+  assert.deepEqual(kit.plan().map(a => a.id), ["ok"]); assert.equal(kit.choice(), "auto");
+  assert.equal(kit.sessionAccount("s").id, "ok");
   kit.setChoice("auto"); kit.setSessionAccount("s", { pin: "blocked", active: "blocked" }); kit.setActive("blocked");
   assert.equal(kit.sessionAccount("s").id, undefined);
   assert.deepEqual(kit.plan(Date.now(), "s").map(a => a.id), ["ok"]);
