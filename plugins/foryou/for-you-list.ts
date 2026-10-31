@@ -11,7 +11,7 @@ const sourceName = (s: string) => s.split(":")[0].trim();
 const cut = (t: string, n: number) => t.length > n ? `${t.slice(0, n - 1)}…` : t;
 const whoOf = (s: string) => (s.split(":").slice(1).join(":").trim() || s).trim();
 
-/** Urgent (due within a day) first, then newest. */
+/** Newest first, by time only. */
 export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 	const asks: ForYouRow[] = readLive(dir, now).map(a => ({ id: a.id, kind: "ask", who: a.who ?? whoOf(a.source), gist: a.gist ?? a.why, full: a.why, source: sourceName(a.source), at: Date.parse(a.at), urgent: false }));
 	const cards: ForYouRow[] = waitingHeads(dir, now).map(({ it }) => {
@@ -19,32 +19,25 @@ export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 		return { id: it.id, kind: "card", who: whoOf(it.source), gist: it.title, full: it.why || it.title, source: sourceName(it.source), ...(it.due ? { due: it.due } : {}), at: Date.parse(it.at), urgent: !Number.isNaN(due) && due - now < DAY };
 	});
 	// Ties (same ms) keep the later-added row first.
-	return [...asks, ...cards].map((r, i) => ({ r, i })).sort((a, b) => Number(b.r.urgent) - Number(a.r.urgent) || b.r.at - a.r.at || b.i - a.i).map(x => x.r);
+	return [...asks, ...cards].map((r, i) => ({ r, i })).sort((a, b) => b.r.at - a.r.at || b.i - a.i).map(x => x.r);
 }
 
-export const CHOOSE_HINT = "↑↓ or 1–9, Enter reply, s show, l later, Esc back";
+export const CHOOSE_HINT = "←→ or ↑↓, Enter reply, s show, l later, Esc back";
 const W = 72;
 
-/** Rows shown at once; more show as one "..." line. */
-export const SHOWN = 3;
+export const SHOWN = 1;
 
 /**
- * "For you N", then at most 3 rows; when there are more, the last row ends with " ...". No blank or reserved lines.
- * While choosing, the selected row shows its full text in place. Folded: the header alone.
- * Never over Pi's 10-line widget cap, so Pi never adds "(widget truncated)".
+ * Two lines: "For you N" (plus the keys while choosing), then one row: the newest item, or the selected one
+ * as "2/9" with its full text. " ..." ends the row when more exist. Folded: the header alone.
+ * Line count depends only on fold, never on focus.
  */
 export function forYouLines(rows: ForYouRow[], selected?: string, folded = false): string[] | undefined {
 	if (!rows.length) return undefined;
 	const at = rows.findIndex(r => r.id === selected), sel = rows[at];
 	const head = `For you ${rows.length}${sel ? `   ${CHOOSE_HINT}` : ""}`;
 	if (folded && !sel) return [cut(head, W)];
-	// The window follows the selection, so row 5 can be chosen; numbers stay the list's own.
-	const from = Math.max(0, Math.min(at - SHOWN + 1, rows.length - SHOWN));
-	const shown = rows.slice(from, from + SHOWN), more = from + SHOWN < rows.length;
-	const body = shown.map((r, k) => {
-		const last = more && k === shown.length - 1, room = last ? W - 4 : W;
-		const text = r.id === selected ? `${from + k + 1}›${r.full}` : `${from + k + 1} ${short(r.who, 12).padEnd(12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}   ${r.source}`;
-		return cut(text, room) + (last ? " ..." : "");
-	});
-	return [cut(head, W), ...body];
+	const more = rows.length > 1, room = more ? W - 4 : W, r = sel ?? rows[0];
+	const text = sel ? `${at + 1}/${rows.length}  ${r.full}` : `1  ${short(r.who, 12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}  ${r.source}`;
+	return [cut(head, W), cut(text, room) + (more ? " ..." : "")];
 }
