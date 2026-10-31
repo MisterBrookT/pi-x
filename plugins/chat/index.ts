@@ -17,6 +17,10 @@ import { BACKGROUND_STATE_QUERY, type BackgroundState } from "../core/background
 import { checkFor, closeWaits, loadWaiting, noticeText, receivedNote, sameWaiting, saveWaiting, sentNote, tick, waitingLines, waitingPath, waitingText, type Waiting } from "./waiting.ts";
 
 const WAIT_STATUS = "pix-chat";
+/** A waking note starts a turn. Any other note shows at once, at its real time, without a turn (Pi appends it when
+ *  idle, after the current turn when busy) and still reaches the model as context; "nextTurn" hid it until
+ *  brook's next message, so it looked like a reply to him. */
+export const noteDelivery = (wake: boolean) => wake ? { triggerTurn: true, deliverAs: "followUp" as const } : { triggerTurn: false };
 const WAITS_STATUS = "pix-chat-waits";  // the footer shows this on its own line
 const TICK_MS = 30_000;
 
@@ -79,7 +83,7 @@ export default function (pi: ExtensionAPI) {
     setWaiting(w => receivedNote(w, n));
     for (const f of n.grant ?? []) granted.add(f);
     pi.sendMessage({ customType: MSG, display: true, details: n, content: format(n) },
-      wakes(n) ? { triggerTurn: true, deliverAs: "followUp" } : { deliverAs: "nextTurn" });
+      noteDelivery(wakes(n)));
   };
 
   pi.on("session_start", (_e, ctx) => {

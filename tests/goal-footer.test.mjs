@@ -164,7 +164,7 @@ test("background work shows in the status row above the input with a live spinne
 	h.ctx.ui.setStatus("pix-background", "1 job running · look 18:00 · /jobs");
 	assert.doesNotMatch(h.render().join("\n"), /running/);
 	const [line] = h.row();
-	assert.match(line, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Background 1 job running, look 18:00$/);
+	assert.match(line, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 background job running, next check 18:00$/);
 	h.ctx.ui.setStatus("pix-background", undefined);
 	assert.deepEqual(h.row(), [" "]);
 });
@@ -197,7 +197,7 @@ test("footer keeps long-term info only; waits go to the one-line status row, no 
 	assert.deepEqual(h.render(120), idle, "footer unchanged by temporary status");
 	const row = h.row(120);
 	assert.equal(row.length, 1);
-	assert.match(row[0], /Waiting for minara-3: restyle leaderboard, 12m  minara-2, 3m  Background 2 jobs running$/);
+	assert.match(row[0], /Waiting for minara-3: restyle leaderboard, 12m  minara-2, 3m  2 background jobs running$/);
 	assert.doesNotMatch(row[0], /·|\/jobs/);
 	const narrow = h.row(30)[0];
 	assert.ok(visibleWidth(narrow) <= 30);assert.match(narrow.replace(/\x1b\[[0-9;]*m/g, ""), /\.\.\.$/);

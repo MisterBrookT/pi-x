@@ -19,13 +19,15 @@ for (const [layout, viewport] of [["iPhone", { width: 402, height: 874 }], ["iPa
 		await page.goto(`${base}/#token=${token}`);
 		await page.getByText("go", { exact: true }).waitFor();
 		const sel = "#phoneWaits .sr-t";
-		await page.waitForFunction(s => /Background/.test(document.querySelector(s)?.textContent || ""), sel);
-		assert.match(await page.locator(sel).textContent(), /^Background 3 jobs running, next check \d\d:\d\d$/);
+		await page.waitForFunction(s => /background/.test(document.querySelector(s)?.textContent || ""), sel);
+		assert.match(await page.locator(sel).textContent(), /^3 background jobs running, next check \d\d:\d\d$/);
 		const row = await page.locator("#phoneWaits").boundingBox(), box = await page.locator("#form .box").boundingBox();
 		assert.ok(row.y + row.height <= box.y + 1, "row sits just above the input");
 		assert.ok(!/background|jobs running/i.test(await page.locator("#piFooter").innerText()), "not in the footer");
 		assert.ok(!/background task/.test(await page.locator("#messages").innerText()), "not in the chat");
 		assert.equal(await page.locator("#todoBar").isVisible(), true, "todo pill stays");
+		const f0 = await page.locator("#phoneWaits .spin").textContent(); await page.waitForTimeout(250);
+		assert.match(f0, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/); assert.notEqual(await page.locator("#phoneWaits .spin").textContent(), f0, "same dots spinner as the Mac, animated");
 		await page.screenshot({ path: `.shots/waits-${layout}.png` });
 		await put({ busy: true, waiting: 0, peerWait: "Waiting for news-infra" });
 		await page.waitForFunction(s => /news-infra/.test(document.querySelector(s)?.textContent || ""), sel);

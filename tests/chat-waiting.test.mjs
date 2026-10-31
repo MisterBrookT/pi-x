@@ -222,3 +222,10 @@ test("stale waits: a reply from the same peer on another thread closes its older
   assert.equal(W.noticeText({ waits: [{ thread: "b", to: "minara-2", kind: "ask", at: 0, live: true }], notices: [{ thread: "x", text: "No reply from minara-2", at: 0 }] }), undefined);
   assert.equal(W.noticeText({ waits: [], notices: [{ thread: "x", text: "No reply from minara-2", at: 0 }] }), "No reply from minara-2");
 });
+
+test("regression: a non-waking note shows when it arrives (no turn), not after brook's next message", async () => {
+  const { noteDelivery } = await import("../plugins/chat/index.ts");
+  assert.deepEqual(noteDelivery(false), { triggerTurn: false });
+  assert.notEqual(noteDelivery(false).deliverAs, "nextTurn");
+  assert.deepEqual(noteDelivery(true), { triggerTurn: true, deliverAs: "followUp" });
+});

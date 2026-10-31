@@ -19,7 +19,7 @@ import { resolveLabels } from "../core/pin-label.ts";
 export function statusRowText(statuses: ReadonlyMap<string, string>): string | undefined {
   const clean = (t?: string) => t?.replace(/\s*·\s*\/jobs\s*$/, "").replace(/\s*·\s*/g, ", ").replace(/\s{3,}/g, "  ").trim();
   const waits = clean(statuses.get("pix-chat-waits")), work = clean(statuses.get("pix-background"));
-  const parts = [waits ? `Waiting for ${waits}` : "", work ? `Background ${work}` : ""].filter(Boolean);
+  const parts = [waits ? `Waiting for ${waits}` : "", work ? work.replace(/(\d+) job(s?)\b/, "$1 background job$2").replace(/\blook (\d)/, "next check $1") : ""].filter(Boolean);
   return parts.length ? parts.join("  ") : undefined;
 }
 

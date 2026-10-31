@@ -971,14 +971,14 @@ test("iPad footer shows the Mac footer's jobs, goal and waiting lines", async (t
   const hub = await startRemoteHub({ token, port: 0 });
   t.after(() => hub.close());
   const base = `http://127.0.0.1:${hub.port}`;
-  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", footer: { work: "2 jobs", core: "goal: ship", waits: "minara", status: "Waiting for minara  Background 2 jobs running" }, messages: [{ id: "a", role: "user", text: "hi" }] }) });
+  await fetch(`${base}/agent/s1`, { method: "PUT", headers: auth, body: JSON.stringify({ name: "pix", cwd: "/tmp", footer: { work: "2 jobs", core: "goal: ship", waits: "minara", status: "Waiting for minara  2 background jobs running" }, messages: [{ id: "a", role: "user", text: "hi" }] }) });
   const browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1180, height: 820 } });
   await page.addInitScript(() => { localStorage.pixRemoteSession = "s1"; });
   await page.goto(`${base}/#token=${token}`);
   await page.waitForFunction(() => /minara/.test(document.querySelector("#phoneWaits")?.textContent || ""));
-  assert.equal(await page.locator("#phoneWaits .sr-t").textContent(), "Waiting for minara  Background 2 jobs running");
+  assert.equal(await page.locator("#phoneWaits .sr-t").textContent(), "Waiting for minara  2 background jobs running");
   const text = await page.locator("#piFooter").innerText();
   assert.ok(text.includes("goal: ship"));assert.ok(!/minara|2 jobs/.test(text), "temporary status left the footer");
 });
