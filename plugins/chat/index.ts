@@ -39,7 +39,7 @@ const HOW = {
 };
 
 export function format(n: Note): string {
-  const how = HOW[n.kind].replaceAll("{from}", n.from).replaceAll("{thread}", n.thread)
+  const how = (HOW[n.kind as keyof typeof HOW] ?? HOW.chat).replaceAll("{from}", n.from).replaceAll("{thread}", n.thread)
     .replace("{grant}", n.grant?.length ? ` You may now edit: ${n.grant.join(", ")}.` : "");
   const stop = n.hop >= MAX_HOPS ? `\n\nThis thread hit the ${MAX_HOPS}-reply limit, so it did not wake you. Do not reply automatically; tell brook what is open.` : "";
   return `[chat ${n.kind} from session "${n.from}", thread ${n.thread}]\n\n${n.text}\n\n${how}${stop}`;
