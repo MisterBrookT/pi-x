@@ -27,8 +27,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPixAnthropicStream } from "./stream.ts";
-import { claudeAuth, readClaudeToken } from "./claude-auth.ts";
-import { accounts, leftFromUsage, ready, recordUsage, usage } from "./accountkit.ts";
+import { claudeAuth } from "./claude-auth.ts";
+import { pollAccountUsage } from "./account-usage.ts";
 import { accountsHub, accountsRelayAllowed } from "./accounts-hub.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 
@@ -191,17 +191,15 @@ export default async function (pi: ExtensionAPI) {
 	// Accounts on the phone page (usage, which account each session runs on, move a session).
 	registerHubPlugin("accounts", accountsHub(), accountsRelayAllowed);
 
-	// accountkit: % left of brook's own login (5-hour / weekly window), shared via ~/.pix/accounts-usage.json.
-	// One poll per 5 min across sessions (skip when another session checked recently).
+	// Poll only the current routable plan login; never renew the default/disabled login as a side effect.
+	const stopped = new AbortController();
+	let polling = false;
 	const poll = async () => {
-		for (const a of accounts().filter(ready)) {
-			if (Date.now() - (usage()[a.id]?.checkedAt ?? 0) < 4 * 60_000) continue;
-			try {
-				const token = a.configDir ? await readClaudeToken(a.configDir) : (await claudeAuth.resolve({ signal: AbortSignal.timeout(20_000) }) as { auth: { apiKey: string } }).auth.apiKey;
-				const r = await fetch("https://api.anthropic.com/api/oauth/usage", { headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(15_000) });
-				if (r.ok) recordUsage(a.id, leftFromUsage(await r.json()));
-			} catch { /* offline or not logged in: keep the last numbers */ }
-		}
+		if (stopped.signal.aborted || polling) return;
+		polling = true;
+		try { await pollAccountUsage(AbortSignal.any([stopped.signal, AbortSignal.timeout(20_000)])); }
+		catch { /* offline or not logged in: keep the last numbers */ }
+		finally { polling = false; }
 	};
 	let timer: ReturnType<typeof setInterval> | undefined;
 	if (typeof pi.on === "function") pi.on("session_start", (_e, ctx) => {
@@ -209,6 +207,12 @@ export default async function (pi: ExtensionAPI) {
 		try { ctx.ui.setStatus("pix-account", undefined); } catch {}
 		void poll();
 		timer ??= setInterval(() => void poll(), 5 * 60_000); timer.unref?.();
+	});
+
+	if (typeof pi.on === "function") pi.on("session_shutdown", () => {
+		stopped.abort();
+		if (timer) clearInterval(timer);
+		timer = undefined;
 	});
 
 	if (debug) {
