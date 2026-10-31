@@ -35,7 +35,8 @@ const unrelated = JSON.stringify({ error: { type: "permission_error", message: "
 const success = () => new Response('event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
 function inventory(accounts) {
   writeFileSync(join(home, "accounts.json"), JSON.stringify({ accounts }));
-  for (const name of ["accounts-usage.json", "session-accounts.json"]) writeFileSync(join(home, name), "{}");
+  // Each inventory fixture is a fresh scenario; organization denials now intentionally survive requests.
+  for (const name of ["accounts-usage.json", "session-accounts.json", "accounts-health.json"]) writeFileSync(join(home, name), "{}");
 }
 async function run(fetch, apiKey = "sk-ant-oat01-own") {
   let last;

@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attemptAccounts, isOAuthOrganizationDenied, isQuota, outcomes, inventory, plan } from "./index.ts";
 process.env.PIX_HOME = mkdtempSync(join(tmpdir(), "accountkit-test-"));
+// Health now intentionally survives requests; unrelated cases must not share denial state.
+test.beforeEach(() => writeFileSync(join(process.env.PIX_HOME, "accounts-health.json"), "{}"));
 
 const denied = JSON.stringify({ error: { type: "permission_error", details: { error_code: "oauth_not_allowed_for_organization" } } });
 const accounts = [{ id: "a", label: "A" }, { id: "b", label: "B" }];

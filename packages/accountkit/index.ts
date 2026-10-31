@@ -7,12 +7,13 @@
  * cooling down after a quota/429; unknown % counts as usable. Usage is cached in ~/.pix/accounts-usage.json
  * so every session and the footer read the same numbers.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+
 import crypto from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
-export interface Account { id: string; label: string; provider?: string; configDir?: string; dir?: string }
+export interface Account { id: string; label: string; provider?: string; configDir?: string; dir?: string; disabled?: boolean; disabledReason?: string; disabledAt?: number }
 export interface Usage { left?: number; resetsAt?: string; coolUntil?: number; checkedAt?: number }
 
 const dir = () => process.env.PIX_HOME ?? join(homedir(), ".pix");
@@ -47,8 +48,29 @@ export function recordUsage(id: string, u: Usage): void { const all = usage(); a
 
 /** A profile is ready once its Claude Code login exists (own always is). */
 export function ready(a: Account): boolean {
+	if (a.disabled) return false;
 	if (a.provider === "codex") return !!a.dir && existsSync(join(a.dir, "auth.json"));
 	return !a.configDir || existsSync(join(a.configDir, ".claude.json")) || existsSync(join(a.configDir, ".credentials.json"));
+}
+
+/** Disabled/unready profiles and a recent OAuth organization denial are not usable logins. */
+export function routable(a: Account, now = Date.now()): boolean {
+	const health = outcomes()[a.id];
+	return ready(a) && !(health?.reason === "oauth_org_denied" && Number.isFinite(health.at) && now < health.at + 6 * 3600_000);
+}
+
+function pruneSkippedPointers(eligible: Set<string>): void {
+	const u = usage();
+	if (u._active && !eligible.has(u._active.id)) { delete u._active; write("accounts-usage.json", u); }
+	const sessions = sessionAccounts();
+	let changed = false;
+	for (const entry of Object.values(sessions)) {
+		for (const key of ["pin", "active"] as const) {
+			const id = entry[key];
+			if (id && !eligible.has(id)) { delete entry[key]; changed = true; }
+		}
+	}
+	if (changed) write("session-accounts.json", sessions);
 }
 
 const resting = (a: Account, now: number) => { const u = usage()[a.id]; return !!(u?.coolUntil && now < u.coolUntil); };
@@ -59,8 +81,9 @@ const resting = (a: Account, now: number) => { const u = usage()[a.id]; return !
  * higher band of % left; ties stay. Resting (after quota/429) accounts go last.
  */
 export function plan(now = Date.now(), session?: string): Account[] {
-	const all = accounts().filter(ready), c = choice();
-	if (c !== "auto") return accounts().filter(a => a.id === c);
+	const all = accounts().filter(a => routable(a, now)), c = choice();
+	pruneSkippedPointers(new Set(all.map(a => a.id)));
+	if (c !== "auto") return all.filter(a => a.id === c);
 	const u = usage(), b = (a: Account) => band(u[a.id]?.left);
 	const awake = all.filter(a => !resting(a, now)), tired = all.filter(a => resting(a, now));
 	// A session brook moved to an account runs there first (others stay as quota fallback).
@@ -92,10 +115,12 @@ export function setSessionAccount(session: string, v: SessionAccount): void {
 /** The account a session's next request goes to (its pin, else auto's pick), without changing anything. */
 export function sessionAccount(session: string, now = Date.now()): { id?: string; pinned: boolean } {
 	const c = choice();
-	if (c !== "auto") return { id: c, pinned: true };
+	const available = accounts().filter(a => routable(a, now)), eligible = (id?: string) => available.some(a => a.id === id);
+	if (c !== "auto") return { id: eligible(c) ? c : undefined, pinned: true };
 	const m = sessionAccounts()[session];
-	if (m?.pin && accounts().some(a => a.id === m.pin)) return { id: m.pin, pinned: true };
-	return { id: m?.active ?? usage()._active?.id, pinned: false };
+	if (m?.pin && eligible(m.pin)) return { id: m.pin, pinned: true };
+	const id = eligible(m?.active) ? m?.active : usage()._active?.id;
+	return { id: eligible(id) ? id : undefined, pinned: false };
 }
 
 /** Make an account the current one in auto mode (it stays until another is in a strictly higher band). */
@@ -133,7 +158,8 @@ function recordOutcome(id: string, response: Response, reason: AccountOutcome["r
 /** Run the existing account order once, never retrying a denied account within this pass.
  * HTTP and credentials remain the caller's adapters. Organization denial is auth, not quota. */
 export async function attemptAccounts(order: Account[], send: (account: Account) => Promise<Response>, options: { oauth: boolean; signal?: AbortSignal; unavailable?: Set<string>; onSuccess?: (account: Account) => void; onRotate?: (from: string, to: string, status: number) => void } ): Promise<Response> {
-	const candidates = order.filter((a, i) => !options.unavailable?.has(a.id) && order.findIndex(other => other.id === a.id) === i);
+	const disabled = new Set(inventory().filter(a => a.disabled).map(a => a.id));
+	const candidates = order.filter((a, i) => routable(a) && !disabled.has(a.id) && !options.unavailable?.has(a.id) && order.findIndex(other => other.id === a.id) === i);
 	if (!candidates.length) throw new Error("AccountKit: no account ready");
 	let response!: Response;
 	for (let n = 0; n < candidates.length; n++) {

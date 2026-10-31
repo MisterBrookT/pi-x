@@ -1,0 +1,125 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as k from "./index.ts";
+const now = 2_000_000_000_000;
+function fixture(t) {
+	const old = process.env.PIX_HOME,
+		route = process.env.PIX_CLAUDE_ROUTE;
+	const root = mkdtempSync(join(tmpdir(), "account-routable-"));
+	process.env.PIX_HOME = root;
+	delete process.env.PIX_CLAUDE_ROUTE;
+	t.after(() => {
+		if (old === undefined) delete process.env.PIX_HOME;
+		else process.env.PIX_HOME = old;
+		if (route === undefined) delete process.env.PIX_CLAUDE_ROUTE;
+		else process.env.PIX_CLAUDE_ROUTE = route;
+		rmSync(root, { recursive: true, force: true });
+	});
+	const put = (f, v) => writeFileSync(join(root, f), JSON.stringify(v));
+	const get = (f) => JSON.parse(readFileSync(join(root, f), "utf8"));
+	put("accounts.json", {
+		accounts: [
+			{ id: "disabled", disabled: true },
+			{ id: "unready", configDir: join(root, "missing") },
+			{ id: "denied" },
+			{ id: "good" },
+			{ id: "cool" },
+		],
+	});
+	put("accounts-health.json", {
+		denied: { reason: "oauth_org_denied", status: 403, at: now - 1000 },
+	});
+	put("accounts-usage.json", {
+		_active: { id: "denied" },
+		disabled: { left: 99 },
+		denied: { left: 99 },
+		good: { left: 40 },
+		cool: { left: 99, coolUntil: now + 60_000 },
+	});
+	return { put, get };
+}
+test("auto excludes disabled, unready and recent org denials, keeps quota cooling last", (t) => {
+	fixture(t);
+	assert.deepEqual(
+		k.plan(now).map((a) => a.id),
+		["good", "cool"],
+	);
+});
+test("global pinned route fails closed for each unroutable account without changing route", (t) => {
+	fixture(t);
+	for (const id of ["disabled", "unready", "denied"]) {
+		process.env.PIX_CLAUDE_ROUTE = id;
+		assert.deepEqual(k.plan(now), []);
+		assert.equal(k.choice(), id);
+	}
+	process.env.PIX_CLAUDE_ROUTE = "cool";
+	assert.deepEqual(
+		k.plan(now).map((a) => a.id),
+		["cool"],
+	);
+});
+test("denial expires exactly at six hours; other 403s and unauthorized are not permanent exclusions", (t) => {
+	const f = fixture(t);
+	for (const [reason, at, excluded] of [
+		["oauth_org_denied", now - 6 * 3600_000 + 1, true],
+		["oauth_org_denied", now - 6 * 3600_000, false],
+		["other", now, false],
+		["unauthorized", now, false],
+	]) {
+		f.put("accounts-health.json", { denied: { status: 403, reason, at } });
+		assert.equal(
+			k.plan(now).some((a) => a.id === "denied"),
+			!excluded,
+		);
+	}
+});
+test("plan persists removal of all skipped global/session pointers, preserving unrelated session fields", (t) => {
+	const f = fixture(t);
+	f.put("session-accounts.json", {
+		one: { pin: "denied", active: "disabled", at: 10, extra: "keep" },
+		two: { pin: "unready", active: "missing" },
+		three: { pin: "good", active: "good" },
+	});
+	assert.equal(k.plan(now, "one")[0].id, "good");
+	const sessions = f.get("session-accounts.json");
+	assert.equal(sessions.one.pin, undefined);
+	assert.equal(sessions.one.active, "good");
+	assert.equal(sessions.one.extra, "keep");
+	assert.equal(sessions.two.pin, undefined);
+	assert.equal(sessions.two.active, undefined);
+	assert.equal(sessions.three.pin, "good");
+	assert.equal(f.get("accounts-usage.json")._active, undefined);
+});
+test("read-only session summaries do not advertise unavailable accounts", (t) => {
+	const f = fixture(t);
+	f.put("session-accounts.json", { one: { pin: "denied", active: "unready" } });
+	assert.deepEqual(k.sessionAccount("one", now), {
+		id: undefined,
+		pinned: false,
+	});
+	process.env.PIX_CLAUDE_ROUTE = "denied";
+	assert.deepEqual(k.sessionAccount("one", now), {
+		id: undefined,
+		pinned: true,
+	});
+});
+test("stale supplied orders cannot send unready or health-denied accounts", async (t) => {
+	fixture(t);
+	const calls = [];
+	await k.attemptAccounts(
+		[
+			{ id: "unready", configDir: "/no-such-profile" },
+			{ id: "denied" },
+			{ id: "good" },
+		],
+		async (a) => {
+			calls.push(a.id);
+			return new Response("ok");
+		},
+		{ oauth: true },
+	);
+	assert.deepEqual(calls, ["good"]);
+});
