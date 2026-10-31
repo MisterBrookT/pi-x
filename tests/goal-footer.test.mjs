@@ -99,7 +99,7 @@ test("a recoverable model error and supplementary input do not make the goal ind
 	await h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
 	await h.emit("agent_settled");
 	await h.emit("input", { source: "interactive", text: "Also check the other case." });
-	assert.match(h.render()[0], /goal on · 1\/10/);
+	assert.match(h.render()[0], /goal on  1\/10/);
 	await h.emit("agent_end", { messages: [{ role: "assistant", stopReason: "error" }] });
 	await h.emit("agent_settled");
 	assert.match(h.render()[0], /goal paused/, "an unrecovered failure still pauses safely, and says so");
@@ -109,11 +109,11 @@ test("reload preserves the active goal footer and continuation count", async (t)
 	const h = await harness(t);
 	await h.command("Keep the session goal.");
 	await h.emit("agent_settled");
-	assert.match(h.render()[0], /goal on · 1\/10/);
+	assert.match(h.render()[0], /goal on  1\/10/);
 	await h.emit("session_shutdown", { reason: "reload" });
 	await h.emit("session_start", { reason: "reload" });
-	assert.match(h.render()[0], /goal on · 1\/10/);
-	assert.equal(h.render().length, 3, "goal status does not add another footer line");
+	assert.match(h.render()[0], /goal on  1\/10/);
+	assert.equal(h.render().length, 2, "goal status does not add another footer line");
 	await h.command("pause");
 	await h.emit("session_shutdown", { reason: "reload" });
 	await h.emit("session_start", { reason: "reload" });
@@ -126,7 +126,7 @@ test("footer shows remote control only while this Pi session is exposed", async 
 	assert.doesNotMatch(h.render()[0], /remote/);
 	h.ctx.ui.setStatus("pix-remote", "remote on");
 	assert.match(h.render()[0], /remote on/);
-	assert.equal(h.render().length, 3);
+	assert.equal(h.render().length, 2);
 	for (const width of [1, 6, 10, 20, 40, 80]) {
 		for (const line of h.render(width)) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width >= 10) assert.match(h.render(width)[0], /remote on/);
@@ -143,7 +143,7 @@ test("goal visibility takes priority over a long path and all footer lines fit o
 	await h.command("A goal.");
 	for (const width of [1, 6, 10, 20, 40, 80, 160]) {
 		const lines = h.render(width);
-		assert.equal(lines.length, 3);
+		assert.equal(lines.length, 2);
 		for (const line of lines) assert.ok(visibleWidth(line) <= width, `${width}: ${line}`);
 		if (width >= 10) assert.match(lines[0], /goal on/);
 	}
@@ -157,7 +157,7 @@ test("running background work sits on the bottom line with a live spinner", asyn
 	h.ctx.ui.setStatus("pix-background", "1 job running · /jobs");
 	const [top, bottom] = h.render();
 	assert.doesNotMatch(top, /running/);
-	assert.match(bottom, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job running · \/jobs/);
+	assert.match(bottom, /^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] 1 job running  \/jobs/);
 	h.ctx.ui.setStatus("pix-background", undefined);
 	assert.doesNotMatch(h.render()[1], /running/);
 });
@@ -181,18 +181,19 @@ test("footer repaints periodically only while background work runs", async (t) =
 	assert.equal(h.renders(), before, "repaint timer stops once work finishes");
 });
 
-test("footer: waits are always the last line; one entry per pending session, else a dim 'waiting: none'", async (t) => {
+test("footer: always two lines with stable widths; waits inline only when pending, no 'waiting: none', no '·'", async (t) => {
 	const h = await harness(t);
-	const idle = h.render();
-	assert.match(idle.at(-1), /waiting: none/);
+	const idle = h.render(120);
+	assert.equal(idle.length, 2);
+	assert.doesNotMatch(idle.join("\n"), /waiting/);
 	h.ctx.ui.setStatus("pix-chat-waits", "minara-3: restyle leaderboard · 12m   minara-2 · 3m");
-	const lines = h.render();
-	assert.equal(lines.length, idle.length, "the layout never jumps");
-	assert.match(lines.at(-1), /minara-3: restyle leaderboard · 12m/);
-	assert.doesNotMatch(lines.slice(0, -1).join("\n"), /minara/);
+	const lines = h.render(120);
+	assert.deepEqual(lines.map(visibleWidth), idle.map(visibleWidth), "the layout never jumps");
+	assert.match(lines[1], /waiting: minara-3: restyle leaderboard  12m/);
+	assert.doesNotMatch(lines.join("\n"), /·/);
 	for (const line of h.render(30)) assert.ok(visibleWidth(line) <= 30);
 	h.ctx.ui.setStatus("pix-chat-waits", undefined);
-	assert.match(h.render().at(-1), /waiting: none/);
+	assert.deepEqual(h.render(120).map(visibleWidth), idle.map(visibleWidth));
 });
 
 test("footer never exceeds a narrow pane, even with a background job label", async (t) => {
@@ -250,12 +251,12 @@ test("footer: what this session pinned shows as 'Docs 1 · Links 1' on the first
 	pinArtifact(h.sm.getSessionId(), { title: "Site", url: "https://x.dev" }, d);
 	pinArtifact("someone-else", { url: "https://y.dev" }, d);
 	await h.emit("session_start");
-	assert.match(h.render(200)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/);
+	assert.match(h.render(200)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1  Links 1/);
 	assert.match(h.render(200)[0], /\x1b\]8;;https:\/\/byterum\.feishu\.cn\/docx\/A1\x07Docs 1\x1b\]8;;\x07/, "Docs 1 opens the doc itself, not the hub");
 	assert.doesNotMatch(h.render(200)[0], /open=pinned/);	// Regression: with remote on and a chat notice, the pins were dropped for lack of room. They always show now.
 	const set = h.ctx.ui.setStatus;
 	set("pix-remote", "remote on"); set("pix-chat", "No reply from minara-2 · something long enough to crowd the line");
-	assert.match(h.render(90)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1 · Links 1/, "pins survive a crowded line");
+	assert.match(h.render(90)[0].replace(/\x1b\]8;;[^\x07]*\x07/g, ""), /Docs 1  Links 1/, "pins survive a crowded line");
 });
 
 test("a reply from another session is background work: the goal holds (no continuations) while it is open, shows the next check, then continues once", async (t) => {
@@ -270,7 +271,7 @@ test("a reply from another session is background work: the goal holds (no contin
 	const before = h.wakes().length;
 	for (let i = 0; i < 3; i++) await h.emit("agent_settled");
 	assert.equal(h.wakes().length, before, "no continuation wakes while a reply is pending");
-	assert.match(h.render()[0], /goal waiting · check 02:16/);
+	assert.match(h.render()[0], /goal waiting  check 02:16/);
 	waits = 0;
 	await h.emit("agent_settled");
 	assert.equal(h.wakes().length, before + 1, "one continuation once nothing is pending");
