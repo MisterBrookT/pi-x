@@ -841,8 +841,12 @@ export function createPixAnthropicStream(config: PixAnthropicStreamConfig = {}) 
 									: `Unrecognized Anthropic stop_reason: ${event.delta.stop_reason}`;
 							}
 						}
-						if (event.usage?.output_tokens) {
-							output.usage.output = event.usage.output_tokens;
+						if (event.usage) {
+							for (const [field, wire] of [["input", "input_tokens"], ["cacheRead", "cache_read_input_tokens"], ["cacheWrite", "cache_creation_input_tokens"]] as const) {
+								const value = event.usage[wire];
+								if (typeof value === "number" && Number.isFinite(value) && value >= 0) output.usage[field] = Math.max(output.usage[field], value);
+							}
+							if (event.usage.output_tokens) output.usage.output = event.usage.output_tokens;
 							output.usage.totalTokens =
 								output.usage.input +
 								output.usage.output +
