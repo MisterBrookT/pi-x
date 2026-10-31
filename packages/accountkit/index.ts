@@ -7,9 +7,10 @@
  * cooling down after a quota/429; unknown % counts as usable. Usage is cached in ~/.pix/accounts-usage.json
  * so every session and the footer read the same numbers.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+
 import crypto from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface Account { id: string; label: string; provider?: string; configDir?: string; dir?: string; disabled?: boolean; disabledReason?: string; disabledAt?: number }
@@ -65,7 +66,8 @@ function pruneSkippedPointers(eligible: Set<string>): void {
 	let changed = false;
 	for (const entry of Object.values(sessions)) {
 		for (const key of ["pin", "active"] as const) {
-			if (entry[key] && !eligible.has(entry[key]!)) { delete entry[key]; changed = true; }
+			const id = entry[key];
+			if (id && !eligible.has(id)) { delete entry[key]; changed = true; }
 		}
 	}
 	if (changed) write("session-accounts.json", sessions);

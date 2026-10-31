@@ -26,11 +26,11 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createPixAnthropicStream } from "./stream.ts";
-import { claudeAuth } from "./claude-auth.ts";
+import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { pollAccountUsage } from "./account-usage.ts";
 import { accountsHub, accountsRelayAllowed } from "./accounts-hub.ts";
-import { registerHubPlugin } from "../core/hub-plugin.ts";
+import { claudeAuth } from "./claude-auth.ts";
+import { createPixAnthropicStream } from "./stream.ts";
 
 const PROVIDER_ID = "pix-anthropic";
 const BASE_URL = process.env.PIX_ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";

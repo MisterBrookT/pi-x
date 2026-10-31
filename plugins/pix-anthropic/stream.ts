@@ -13,15 +13,19 @@
  *   6. Full X-Stainless-* header set, x-client-request-id, keep-alive
  */
 
-import { plan, choice, isQuota, attemptAccounts, setActive, setSessionAccount, type Account } from "./accountkit.ts";
-import { readClaudeToken } from "./claude-auth.ts";
+import fs from "node:fs";
 import {
 	type AssistantMessage,
 	type AssistantMessageEventStream,
 	type Context,
+	calculateCost,
+	createAssistantMessageEventStream,
+	getCurrentSystemPrompt,
+	getCurrentTools,
 	type ImageContent,
 	type Message,
 	type Model,
+	normalizeContext,
 	type SimpleStreamOptions,
 	type StopReason,
 	type TextContent,
@@ -29,18 +33,15 @@ import {
 	type Tool,
 	type ToolCall,
 	type ToolResultMessage,
-	calculateCost,
-	createAssistantMessageEventStream,
-	getCurrentSystemPrompt,
-	getCurrentTools,
-	normalizeContext,
 } from "@earendil-works/pi-ai";
-import fs from "node:fs";
+import { fastModeActiveFor, recordFastModeFallback } from "../core/fast-mode.ts";
+import { type Account, attemptAccounts, choice, isQuota, plan, setActive, setSessionAccount } from "./accountkit.ts";
+import { readClaudeToken } from "./claude-auth.ts";
 import {
-	CLAUDE_CODE_MAX_OUTPUT_TOKENS,
 	applyClaudeToolPrefix,
 	buildBetaHeader,
 	buildCoworkBetas,
+	CLAUDE_CODE_MAX_OUTPUT_TOKENS,
 	claudeCodeSystemInstruction,
 	coworkHeaders,
 	coworkUserAgent,
@@ -49,7 +50,6 @@ import {
 	stripClaudeToolPrefix,
 	wrapFetchForCch,
 } from "./fingerprint.ts";
-import { fastModeActiveFor, recordFastModeFallback } from "../core/fast-mode.ts";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 

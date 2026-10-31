@@ -21,6 +21,8 @@ test("file-based Pi session reload refreshes pix-anthropic's changed auth module
 		.replace('"./accounts-hub.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/pix-anthropic/accounts-hub.ts", import.meta.url))))
 		.replace('"../core/hub-plugin.ts"', JSON.stringify(fileURLToPath(new URL("../plugins/core/hub-plugin.ts", import.meta.url))));
 	await writeFile(entry, source);
+	// Polling is tested separately; this fixture isolates transitive auth-module reloading.
+	await writeFile(join(dir, "account-usage.ts"), "export async function pollAccountUsage() {}\n");
 	const writeAuth = marker => writeFile(auth, `export const claudeAuth = { name: "Claude Code", async resolve() { return { auth: { apiKey: "${marker}" }, source: "test" }; }, async check() { return { type: "api_key", source: "test" }; } };\n`);
 	await writeAuth("before-reload");
 	const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
