@@ -83,7 +83,7 @@ export const forYouHub = (options: ForYouHubOptions = {}): HubPlugin => hub => {
 			}
 			const liveMatch = method === "POST" && path.match(/^\/api\/foryou\/live\/([A-Za-z0-9_-]{1,40})\/(reply|show|later)$/);
 			if (liveMatch) {
-				const a = takeLive(liveMatch[1], dir);
+				const a = takeLive(liveMatch[1], dir, liveMatch[2] === "later");
 				if (!a) return { status: 404, body: { error: "no such ask" } };
 				if (liveMatch[2] !== "later") { const text = livePrompt(a, liveMatch[2] as "reply" | "show"); if (!hub.queue(forYouSession.id, text)) await (options.start ?? startForYou)(text).catch(() => {}); }
 				hub.publish("foryou", forYou());

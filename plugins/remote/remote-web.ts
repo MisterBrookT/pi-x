@@ -610,7 +610,8 @@ let follow=true,touching=false,userScrollUntil=0;
 function atBottom(){const c=$("chat");return c.scrollHeight-c.scrollTop-c.clientHeight<4}
 function nearBottom(){return follow}
 function toBottom(){const c=$("chat");c.scrollTop=c.scrollHeight}
-function setFollow(on){follow=on;$("toBottom").hidden=on}
+/* ↓ sits just above the composer (live strip included), never over its buttons. */function placeToBottom(){const b=$("toBottom"),f=$("form");if(b.hidden||!f)return;b.style.bottom=Math.max(12,innerHeight-f.getBoundingClientRect().top+10)+'px'}
+function setFollow(on){follow=on;$("toBottom").hidden=on;placeToBottom()}addEventListener('resize',placeToBottom);if(window.ResizeObserver)new ResizeObserver(placeToBottom).observe($("form"));
 function userScrolling(){touching=true;userScrollUntil=Date.now()+1200}
 function anchor(){const c=$("chat"),top=c.getBoundingClientRect().top;for(const el of $("messages").children){const r=el.getBoundingClientRect();if(r.bottom>top+1&&el.dataset.key)return{key:el.dataset.key,offset:r.top-top}}return null}
 function restore(a){if(!a)return;const el=[...$("messages").children].find(e=>e.dataset.key===a.key);if(!el)return;const c=$("chat");c.scrollTop+=el.getBoundingClientRect().top-c.getBoundingClientRect().top-a.offset}

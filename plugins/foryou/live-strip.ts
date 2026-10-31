@@ -19,14 +19,21 @@ export function readLive(dir?: string, now = Date.now()): LiveAsk[] {
 const write = (list: LiveAsk[], dir?: string) => { const f = file(dir), t = `${f}.${process.pid}.tmp`; writeFileSync(t, JSON.stringify(list, null, 2)); renameSync(t, f); };
 
 /** One entry per chat: a newer ask from the same chat replaces the older one. */
+/** Later (×) holds that chat off the strip this long, so a re-forward does not bring it straight back. */
+export const LATER_MS = 3 * 3_600_000;
+const heldFile = (dir?: string) => join(paths(dir).dir, "live-held.json");
+const readHeld = (dir?: string): Record<string, number> => { try { return JSON.parse(readFileSync(heldFile(dir), "utf8")); } catch { return {}; } };
+
 export function addLive(dir: string | undefined, a: Omit<LiveAsk, "id" | "at">, now = Date.now()): LiveAsk {
 	const it = { id: randomUUID().slice(0, 8), at: new Date(now).toISOString(), ...a, why: a.why.replace(/\s+/g, " ").slice(0, 160), ...(a.who ? { who: a.who.slice(0, 30) } : {}), ...(a.gist ? { gist: a.gist.slice(0, 80) } : {}), ...(a.verb ? { verb: a.verb } : {}), ...(a.refs?.length ? { refs: a.refs.slice(0, 40) } : {}) };
+	if (now - (readHeld(dir)[a.sourceKey] ?? -Infinity) < LATER_MS) return it;
 	write([...readLive(dir, now).filter(x => x.sourceKey !== a.sourceKey), it].slice(-12), dir);
 	return it;
 }
-export function takeLive(id: string, dir?: string): LiveAsk | undefined {
+export function takeLive(id: string, dir?: string, later = false, now = Date.now()): LiveAsk | undefined {
 	const list = readLive(dir), hit = list.find(a => a.id === id);
 	if (hit) write(list.filter(a => a.id !== id), dir);
+	if (hit && later) { const h = Object.fromEntries(Object.entries(readHeld(dir)).filter(([, t]) => now - t < LATER_MS)); h[hit.sourceKey] = now; const f = heldFile(dir), t = `${f}.${process.pid}.tmp`; writeFileSync(t, JSON.stringify(h)); renameSync(t, f); }
 	return hit;
 }
 export const liveExists = (dir?: string) => existsSync(file(dir));
