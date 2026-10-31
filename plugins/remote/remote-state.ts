@@ -124,11 +124,13 @@ const quietHtml = (line: string, text: string) => `<details class="loop-ctx quie
 const loopPromptHtml = (s: { title: string; you?: string }, text: string) => `<p><b>${escapeText(s.title)}</b>${s.you ? `<br>You: ${escapeText(s.you)}` : ""}</p><details class="loop-ctx"><summary>Details</summary><pre>${escapeText(text)}</pre></details>`;
 
 /** Build remote messages from Pi agent messages; tool results attach to the assistant call that produced them. */
-export function remoteMessages(messages: readonly any[], files?: MentionContext): RemoteMessage[] {
+/** `from`: skip (not render) messages before this index; ids keep their full-branch index so they stay stable. */
+export function remoteMessages(messages: readonly any[], files?: MentionContext, from = 0): RemoteMessage[] {
   const result: RemoteMessage[] = [];
   const tools = new Map<string, RemoteTool>();
   const args = new Map<string, any>();
   messages.forEach((message, index) => {
+    if (index < from) return;
     const timestamp = typeof message?.timestamp === "number" ? message.timestamp : 0;
     const id = `${timestamp}-${index}`;
     if (message?.role === "user") {
