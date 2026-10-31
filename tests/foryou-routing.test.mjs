@@ -627,7 +627,8 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 
 async function liveKeyboard(t, dir, draft = "") {
  const pi = fakePi(), widgets = [], notes = [];
- register(pi, { dir, sessions: async () => [], cardPollMs: 60_000 });
+ const answers = [];
+ register(pi, { dir, sessions: async () => [], cardPollMs: 60_000, answer: async (id, body) => (answers.push([id, body]), "ok") });
  const ctx = macCtx("pix-foryou", [], notes, widgets); ctx.mode = "tui";
  let input, removed = 0;
  ctx.ui.getEditorText = () => draft;
@@ -635,7 +636,7 @@ async function liveKeyboard(t, dir, draft = "") {
  for (const start of pi.handlers.session_start) await start({}, ctx);
  await new Promise(resolve => setTimeout(resolve, 10));
  t.after(() => pi.handlers.session_shutdown.forEach(fn => fn({}, ctx)));
- return { pi, ctx, widgets, notes, key: data => input?.(data), installed: () => typeof input === "function", removed: () => removed };
+ return { pi, ctx, widgets, notes, answers, key: data => input?.(data), installed: () => typeof input === "function", removed: () => removed };
 }
 
 test("Mac ↓ on an empty input focuses the list without a dialog; arrows/Enter match phone Reply now", async t => {
@@ -732,4 +733,21 @@ test("For you list with 1 row is just header and row, no blank lines", async () 
  const { forYouLines } = await import("../plugins/foryou/for-you-list.ts");
  const v=forYouLines([{id:"x",kind:"ask",who:"A",gist:"g",full:"g",source:"WeChat",at:0,urgent:false}]);
  assert.equal(v.length,2);assert.ok(v.every(l=>l.trim()));
+});
+
+test("Mac choose mode: d or Backspace removes the selected row (live ask off live.json, card done via hub), header says 'removed, u undo', u restores, height stays 2", async t => {
+ const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
+ const d=tmp(loop("c"));addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"Ask a"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Ask b"});
+ const f=await liveKeyboard(t,d);
+ const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
+ f.key("\x1b[B");assert.match(live()[0],/d remove/);
+ assert.deepEqual(f.key("d"),{consume:true});
+ let v=live();assert.equal(v.length,2);assert.match(v[0],/^For you 2   removed, u undo$/);assert.match(v[1],/^1\/2  Ask a/,"selection moves to the next item");
+ f.key("u");v=live();assert.match(v[0],/^For you 3/);assert.match(v[1],/^1\/3  Ask b/,"undo restores and reselects it");
+ assert.equal(readLive(d).length,2,"nothing written before the undo window ends");
+ f.key("\x7f");assert.match(live()[1],/^1\/2  Ask a/);f.key("\x1b[C");f.key("d");
+ f.pi.handlers.session_shutdown.forEach(fn=>fn({},f.ctx));
+ assert.deepEqual(readLive(d).map(a=>a.why),["Ask a"],"Backspace removed b for good");
+ assert.deepEqual(f.answers,[["c",{answer:"done"}]],"card row: loop done through the hub");
+ assert.deepEqual(f.pi.sent,[],"remove never sends anything");
 });

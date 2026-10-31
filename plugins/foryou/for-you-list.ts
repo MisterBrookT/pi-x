@@ -22,7 +22,8 @@ export function forYouRows(dir?: string, now = Date.now()): ForYouRow[] {
 	return [...asks, ...cards].map((r, i) => ({ r, i })).sort((a, b) => b.r.at - a.r.at || b.i - a.i).map(x => x.r);
 }
 
-export const CHOOSE_HINT = "←→ or ↑↓, Enter reply, s show, l later, Esc back";
+export const CHOOSE_HINT = "←→ or ↑↓, Enter reply, s show, l later, d remove, Esc back";
+export const REMOVED_NOTE = "removed, u undo";
 const W = 72;
 
 export const SHOWN = 1;
@@ -32,10 +33,10 @@ export const SHOWN = 1;
  * as "2/9" with its full text. " ..." ends the row when more exist. Folded: the header alone.
  * Line count depends only on fold, never on focus.
  */
-export function forYouLines(rows: ForYouRow[], selected?: string, folded = false): string[] | undefined {
-	if (!rows.length) return undefined;
+export function forYouLines(rows: ForYouRow[], selected?: string, folded = false, removed = false): string[] | undefined {
+	if (!rows.length) return removed ? [`For you 0   ${REMOVED_NOTE}`] : undefined;
 	const at = rows.findIndex(r => r.id === selected), sel = rows[at];
-	const head = `For you ${rows.length}${sel ? `   ${CHOOSE_HINT}` : ""}`;
+	const head = `For you ${rows.length}${removed ? `   ${REMOVED_NOTE}` : sel ? `   ${CHOOSE_HINT}` : ""}`;
 	if (folded && !sel) return [cut(head, W)];
 	const more = rows.length > 1, room = more ? W - 4 : W, r = sel ?? rows[0];
 	const text = sel ? `${at + 1}/${rows.length}  ${r.full}` : `1  ${short(r.who, 12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}  ${r.source}`;

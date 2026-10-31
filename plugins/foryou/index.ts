@@ -35,6 +35,8 @@ import { paths } from "./proactive.ts";
 import { existsSync as foldExists, rmSync as foldRm, writeFileSync as foldWrite } from "node:fs";
 import { join as foldJoin } from "node:path";
 /** ctrl+\\ folds the Mac For you list to its header; a marker file keeps it across renders and reloads. */
+/** How long "removed, u undo" stays before the removal is written. */
+export const UNDO_MS = 5_000;
 export const FOLD_KEY = "ctrl+\\";
 const foldFile = (dir?: string) => foldJoin(paths(dir).dir, "list-folded");
 export const readFolded = (dir?: string) => foldExists(foldFile(dir));
@@ -307,9 +309,19 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	};
 	// Focus stays in the existing strip; nothing changes size.
 	let liveShown = "", liveContext: ExtensionContext | undefined, removeLiveInput: (() => void) | undefined;
+	// d / Backspace removes a row at once on screen; the store changes after UNDO_MS unless u brings it back.
+	let pending: { id: string; timer: ReturnType<typeof setTimeout> } | undefined;
+	const visibleRows = () => forYouRows(deps.dir).filter(r => r.id !== pending?.id);
+	const commitRemove = () => {
+		const p = pending; if (!p) return;
+		clearTimeout(p.timer); pending = undefined;
+		// Live ask: off live.json. Card: the loop is done (handled), through the hub like the phone.
+		if (!takeLive(p.id, deps.dir)) void (deps.answer ?? answerViaHub)(p.id, { answer: "done" }).catch(() => {});
+		if (liveContext) liveWidget(liveContext);
+	};
 	const liveWidget = (ctx: any) => {
-		const rows = forYouRows(deps.dir), selected = liveFocus.selectedId;
-		const lines = forYouLines(rows, selected, readFolded(deps.dir)), key = JSON.stringify(lines ?? null);
+		const rows = visibleRows(), selected = liveFocus.selectedId;
+		const lines = forYouLines(rows, selected, readFolded(deps.dir), !!pending), key = JSON.stringify(lines ?? null);
 		if (key === liveShown || (!liveShown && !lines)) return;
 		liveShown = key;
 		ctx.ui.setWidget?.("foryou-live", lines);
@@ -322,7 +334,12 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (verb !== "later") pi.sendUserMessage(livePrompt(a, verb), ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 	};
 	const liveFocus = createLiveFocus({
-		rows: () => forYouRows(deps.dir),
+		rows: visibleRows,
+		remove: id => {
+			commitRemove();
+			pending = { id, timer: setTimeout(commitRemove, UNDO_MS) };
+			(pending.timer as { unref?: () => void }).unref?.();
+		},
 		render: () => { if (liveContext) liveWidget(liveContext); },
 		act: (id, verb) => { if (liveContext) actRow(id, verb, liveContext); },
 		gone: () => liveContext?.ui.notify("That ask was already handled.", "info"),
@@ -421,6 +438,10 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		if (!isCoordinator(ctx) || ctx.mode !== "tui" || !ctx.ui.onTerminalInput) return;
 		removeLiveInput = ctx.ui.onTerminalInput(data => {
 			if (showing || matchesKey(data, CARD_KEY)) return undefined;
+			if (pending && matchesKey(data, "u") && (liveFocus.selectedId || !ctx.ui.getEditorText())) {
+				if (!isKeyRelease(data)) { const id = pending.id; clearTimeout(pending.timer); pending = undefined; if (liveFocus.selectedId) liveFocus.select(id); liveWidget(ctx); }
+				return { consume: true };
+			}
 			if (!liveFocus.selectedId && matchesKey(data, FOLD_KEY)) {
 				if (!isKeyRelease(data)) { toggleFolded(deps.dir); liveWidget(ctx); }
 				return { consume: true };
@@ -511,7 +532,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
 	pi.on("session_shutdown", () => {
-		clearInterval(timer); close?.abort();
+		clearInterval(timer); close?.abort(); commitRemove();
 		removeLiveInput?.(); removeLiveInput = undefined;
 		liveContext = undefined; liveFocus.reset();
 	});

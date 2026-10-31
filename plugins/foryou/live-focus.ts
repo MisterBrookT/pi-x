@@ -8,6 +8,8 @@ export function createLiveFocus(options: {
 	render(): void;
 	act(id: string, verb: LiveAction): void;
 	gone(): void;
+	/** d / Backspace: remove the row (undoable); selection moves to the next row. */
+	remove?(id: string, next: string | undefined): void;
 }) {
 	let selectedId: string | undefined;
 	const reset = () => {
@@ -19,6 +21,10 @@ export function createLiveFocus(options: {
 			return selectedId;
 		},
 		reset,
+		select(id: string) {
+			selectedId = id;
+			options.render();
+		},
 		focus(): boolean {
 			const first = options.rows()[0];
 			if (!first) return false;
@@ -43,6 +49,13 @@ export function createLiveFocus(options: {
 			if (index < 0) {
 				reset();
 				options.gone();
+				return { consume: true };
+			}
+			if (options.remove && (matchesKey(data, "d") || matchesKey(data, "backspace"))) {
+				const id = selectedId, rest = rows.filter((row) => row.id !== id);
+				selectedId = rest.length ? rest[Math.min(index, rest.length - 1)].id : undefined;
+				options.remove(id, selectedId);
+				options.render();
 				return { consume: true };
 			}
 			const step =
