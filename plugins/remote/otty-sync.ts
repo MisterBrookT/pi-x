@@ -63,10 +63,10 @@ export function defaultDeps(port: number, sessionsDir = join(homedir(), ".pi", "
 export interface OttySyncState { states: Record<string, PaneState>; unregistered: OttyPiPane[] }
 
 /** One pass. Returns hub ids to drop; never kills the hub's own pid, a child pi, or an unmapped one. */
-export async function ottySyncTick(deps: OttySyncDeps, hubIds: string[], missing: Record<string, number>, keep: (id: string) => boolean, protect: Set<number>, graceMs = 60_000) {
+export async function ottySyncTick(deps: OttySyncDeps, hubIds: string[], missing: Record<string, number>, keep: (id: string) => boolean, protect: Set<number>, graceMs = 60_000, connected: (id: string) => boolean = () => false, nameOf: (id: string) => string | undefined = () => undefined) {
   const raw = await deps.otty();
   const panes = raw === null ? null : parseOttyPanes(raw);
-  const r = reconcile(hubIds, panes, deps.now(), missing, graceMs, keep);
+  const r = reconcile(hubIds, panes, deps.now(), missing, graceMs, keep, connected, nameOf);
   const killed: number[] = [];
   if (panes) {
     const connected = new Set((await deps.connections()).split("\n").filter(l => l.startsWith("p")).map(l => Number(l.slice(1))));

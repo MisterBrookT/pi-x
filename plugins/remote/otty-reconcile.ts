@@ -3,7 +3,7 @@
 
 export type PaneState = "processing" | "idle" | "awaiting" | "dead";
 
-export interface OttyPiPane { paneId: string; sessionId: string; name: string; cwd: string; state: PaneState }
+export interface OttyPiPane { paneId: string; agent?: string; sessionId: string; name: string; cwd: string; state: PaneState }
 
 /** Otty's agent_session_id is the JSONL basename, e.g. 2026-10-15T09-45-53-909Z_<hub id>. */
 export function hubIdOf(agentSessionId: string): string {
@@ -16,9 +16,10 @@ export function parseOttyPanes(json: string): OttyPiPane[] {
   try { data = JSON.parse(json)?.data; } catch { return []; }
   if (!Array.isArray(data)) return [];
   return data
-    .filter(p => p?.agent === "Pi" && typeof p.agent_session_id === "string" && p.agent_session_id)
+    .filter(p => typeof p?.agent === "string" && p.agent && typeof p.agent_session_id === "string" && p.agent_session_id)
     .map(p => ({
       paneId: String(p.id),
+      agent: String(p.agent),
       sessionId: hubIdOf(p.agent_session_id),
       name: String(p.process || ""),
       cwd: String(p.cwd || ""),
@@ -41,14 +42,18 @@ export interface ReconcileResult {
  * panes === null means Otty could not be asked (not running, timeout): change nothing,
  * so a hiccup never marks every session dead.
  */
-export function reconcile(hubIds: string[], panes: OttyPiPane[] | null, now: number, missingSince: Record<string, number>, graceMs = 60_000, keep: (id: string) => boolean = () => false): ReconcileResult {
+export function reconcile(hubIds: string[], panes: OttyPiPane[] | null, now: number, missingSince: Record<string, number>, graceMs = 60_000, keep: (id: string) => boolean = () => false, connected: (id: string) => boolean = () => false, nameOf: (id: string) => string | undefined = () => undefined): ReconcileResult {
   if (!panes) return { unregistered: [], states: {}, drop: [], missingSince };
   const bySession = new Map(panes.map(p => [p.sessionId, p]));
   const hub = new Set(hubIds);
   const states: Record<string, PaneState> = {}, next: Record<string, number> = {}, drop: string[] = [];
+  const claimed = new Set<string>();
   for (const id of hubIds) {
-    const pane = bySession.get(id);
-    if (pane) { states[id] = pane.state; continue; }
+    // Session id first; a connected session whose pane id differs (Claude Code, a resumed file) by pane name.
+    const pane = bySession.get(id) ?? (connected(id) ? panes.find(p => !hub.has(p.sessionId) && !claimed.has(p.paneId) && p.name && p.name === nameOf(id)) : undefined);
+    if (pane) { claimed.add(pane.paneId); states[id] = pane.state; continue; }
+    // A session talking to the hub right now is alive whatever Otty says.
+    if (connected(id)) continue;
     // Sessions Otty never hosts (the For you daemon, phone-started chats) are not judged here.
     if (keep(id)) continue;
     const since = missingSince[id] ?? now;
@@ -56,7 +61,7 @@ export function reconcile(hubIds: string[], panes: OttyPiPane[] | null, now: num
     states[id] = "dead";
     if (now - since >= graceMs) drop.push(id);
   }
-  return { unregistered: panes.filter(p => !hub.has(p.sessionId)), states, drop, missingSince: next };
+  return { unregistered: panes.filter(p => (p.agent ?? "Pi") === "Pi" && !hub.has(p.sessionId) && !claimed.has(p.paneId)), states, drop, missingSince: next };
 }
 
 export interface PiProcess { pid: number; ppid: number; ageSec: number; command: string }

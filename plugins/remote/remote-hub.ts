@@ -640,11 +640,13 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   const port = typeof address === "object" && address ? address.port : options.port ?? remoteDefaultPort;
   const ottyDeps = options.ottySync?.(port);
   let syncing = false;
+  // One line per hub start, so ~/.pix/logs/orphan-pi.log shows the sync is running even before any kill.
+  ottyDeps?.log(`${new Date().toISOString()} otty sync started hub pid=${process.pid}`);
   const ottyTimer = ottyDeps && setInterval(async () => {
     if (syncing) return; syncing = true;
     try {
       // Phone-started chats have no Otty pane; they are judged by their own heartbeat only.
-      const r = await ottySyncTick(ottyDeps, [...sessions.keys()], missing, id => sessions.get(id)?.origin === "phone", new Set([process.pid]));
+      const r = await ottySyncTick(ottyDeps, [...sessions.keys()], missing, id => sessions.get(id)?.origin === "phone", new Set([process.pid]), 60_000, id => Date.now() - (sessions.get(id)?.seenAt ?? 0) < 90_000, id => sessions.get(id)?.name);
       missing = r.missingSince;
       const before = JSON.stringify([paneStates, unregistered]);
       paneStates = r.states; unregistered = r.unregistered;

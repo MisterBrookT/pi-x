@@ -10,10 +10,10 @@ const otty = JSON.stringify({ command: "pane list", ok: true, data: [
   { id: "p_e", agent: "", agent_session_id: "", agent_state: "", process: "fish", cwd: "/" },
 ] });
 
-test("Otty JSONL basenames map to hub ids; only Pi panes count", () => {
+test("Otty JSONL basenames map to hub ids; every agent pane parses (only Pi panes are listed as unregistered)", () => {
   assert.equal(hubIdOf("2026-10-15T09-45-53-909Z_01a13ef4-33f4"), "01a13ef4-33f4");
   const panes = parseOttyPanes(otty);
-  assert.deepEqual(panes.map(p => [p.sessionId, p.state]), [["01a17640-photo", "idle"], ["pix-foryou", "processing"], ["loop-546a09e3", "awaiting"]]);
+  assert.deepEqual(panes.map(p => [p.sessionId, p.state]), [["01a17640-photo", "idle"], ["pix-foryou", "processing"], ["loop-546a09e3", "awaiting"], ["0b5ab8b1", "idle"]]);
   assert.deepEqual(parseOttyPanes("not json"), []);
 });
 
@@ -117,7 +117,25 @@ test("hub shows unregistered Pi panes and dead labels in the session list", asyn
   const list = await (await fetch(`${base}/api/sessions`, { headers: auth })).json();
   const by = Object.fromEntries(list.map(s => [s.id, s]));
   assert.equal(by["pix-foryou"].pane, "processing");
-  assert.equal(by.gone.pane, "dead");
+  assert.equal(by.gone.pane, undefined, "just heartbeated: never dead while connected");
   assert.equal(by["01a17640-photo"].unregistered, true);
   assert.equal(by["01a17640-photo"].name, "photo-brighten");
+});
+
+test("10-31: any agent pane counts (Claude Code too); a duplicate shell pane with the same name changes nothing; a live hub connection is never dead", () => {
+  const otty = JSON.stringify({ data: [
+    { id: "p_old", agent: null, process: "for-you", cwd: "/x" },
+    { id: "p_live", agent: "Pi", agent_session_id: "2026-10-10T11-34-34-634Z_pix-foryou", process: "for-you", agent_state: "processing", cwd: "/x" },
+    { id: "p_cc", agent: "Claude Code", agent_session_id: "0b5ab8b1-uuid", process: "pix-app", agent_state: "error", cwd: "/p" },
+  ] });
+  const panes = parseOttyPanes(otty);
+  assert.equal(panes.length, 2);
+  const live = new Set(["pix-foryou", "01a-pixapp", "01a-quiet"]);
+  const names = { "pix-foryou": "for-you", "01a-pixapp": "pix-app", "01a-quiet": "quiet" };
+  const r = reconcile(["pix-foryou", "01a-pixapp", "01a-quiet"], panes, 10 ** 9, { "01a-quiet": 0 }, 60_000, () => false, id => live.has(id), id => names[id]);
+  assert.equal(r.states["pix-foryou"], "processing");
+  assert.equal(r.states["01a-pixapp"], "idle", "matched by pane name while connected; an error state reads as idle");
+  assert.equal(r.states["01a-quiet"], undefined, "connected, no pane: no label, never dead");
+  assert.deepEqual(r.drop, []);
+  assert.deepEqual(r.unregistered, [], "the Claude Code pane is claimed by pix-app, not listed twice");
 });
