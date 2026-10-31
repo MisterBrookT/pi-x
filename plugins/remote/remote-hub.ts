@@ -19,6 +19,8 @@ import { createDesktopBroker, desktopIdPattern, type DesktopBroker } from "../de
 import { createDesktopCredentialStore, type DesktopCredentialStore } from "../desktop/remote-desktop-credentials.ts";
 import { createDesktopInput, createDesktopInputController, type DesktopInputController } from "../desktop/remote-desktop-input.ts";
 import { remoteAppHtml, remoteIconSvg, remoteManifest } from "./remote-web.ts";
+import { ottySyncTick, type OttySyncDeps } from "./otty-sync.ts";
+import type { OttyPiPane, PaneState } from "./otty-reconcile.ts";
 import { registeredHubPlugins, type HubPlugin, type HubContext } from "../core/hub-plugin.ts";
 
 export { remoteHost, remoteDefaultPort, remoteTokenPath, remoteUploadsDir, remoteLinksPath, readRemoteLinks } from "../core/hub-paths.ts";
@@ -190,6 +192,8 @@ export interface RemoteHubOptions {
   desktopBroker?: DesktopBroker;
   /** Features that add their own routes, phone events and session fields (For you, …). */
   plugins?: HubPlugin[];
+  /** Reconcile against Otty every 30 s (live panes are the truth for alive; sure orphan pi processes are killed). Off unless given. */
+  ottySync?: (port: number) => OttySyncDeps;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -259,6 +263,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   // A test/injected VNC broker must never accidentally type on the host Mac.
   const desktopInput = createDesktopInput(options.desktopInput ?? createDesktopInputController(options.desktopBroker ? "injected-broker" : process.platform));
 
+  // Otty reconcile results: a label per session, and live Pi panes the hub has no entry for.
+  let paneStates: Record<string, PaneState> = {}, unregistered: OttyPiPane[] = [], missing: Record<string, number> = {};
   const summary = () => [...sessions.values()]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .map(({ id, name, named, cwd, busy, waiting, nextLook, peerWait, updatedAt, messages, todos, question }) => {
@@ -266,8 +272,8 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const preview = last?.background ? `Job ${last.background.id}: ${last.background.state}` : last?.text.slice(0, 140) ?? "";
       // The step it is on now: For you uses this to see what brook is working on.
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
-      return { id, name, named, cwd, busy, waiting, nextLook, ...(peerWait ? { peerWait } : {}), updatedAt, preview, ...(todo ? { todo } : {}), ...extraSummary(id), ...(question ? { asks: true } : {}) };
-    });
+      return { id, name, named, cwd, busy, waiting, nextLook, ...(peerWait ? { peerWait } : {}), updatedAt, preview, ...(todo ? { todo } : {}), ...extraSummary(id), ...(question ? { asks: true } : {}), ...(paneStates[id] ? { pane: paneStates[id] } : {}) };
+    }).concat(unregistered.map(p => ({ id: p.sessionId, name: p.name || "Pi session", named: true, cwd: p.cwd, busy: p.state === "processing", waiting: 0, nextLook: undefined, updatedAt: 0, preview: "", pane: p.state, unregistered: true } as any)));
   const publish = (event: string, data: unknown) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
@@ -628,11 +634,26 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port ?? remoteDefaultPort;
+  const ottyDeps = options.ottySync?.(port);
+  let syncing = false;
+  const ottyTimer = ottyDeps && setInterval(async () => {
+    if (syncing) return; syncing = true;
+    try {
+      // Phone-started chats have no Otty pane; they are judged by their own heartbeat only.
+      const r = await ottySyncTick(ottyDeps, [...sessions.keys()], missing, id => sessions.get(id)?.origin === "phone", new Set([process.pid]));
+      missing = r.missingSince;
+      const before = JSON.stringify([paneStates, unregistered]);
+      paneStates = r.states; unregistered = r.unregistered;
+      for (const id of r.drop) drop(id);
+      if (JSON.stringify([paneStates, unregistered]) !== before) publish("sessions", summary());
+    } catch {} finally { syncing = false; }
+  }, 30_000);
+  ottyTimer && ottyTimer.unref();
   return {
     server,
     port,
     close: () => new Promise<void>((resolve) => {
-      clearInterval(sweep);
+      clearInterval(sweep); if (ottyTimer) clearInterval(ottyTimer);
       for (const p of hubPlugins) p.close?.();
       desktopInput.dispose();
       desktop.dispose();
