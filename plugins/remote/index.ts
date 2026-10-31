@@ -29,7 +29,7 @@ import { prepareRemotePairing, prepareRelayPairing } from "./remote-pair.ts";
 import { deletableSessionFile, launchPi, remoteSessionsDir, type Spawner } from "./remote-mac.ts";
 import { bypassProxyForLoopback } from "./remote-loopback.ts";
 import { startPrivacyCover } from "./privacy-cover.ts";
-import { macControlsHub, macControlsRelayAllowed } from "./mac-controls.ts";
+import { macCommand, macControlsHub, macControlsRelayAllowed, readControls } from "./mac-controls.ts";
 import { registerHubPlugin } from "../core/hub-plugin.ts";
 import { readRelayKey, readRelayOrigin, relayKeyPath, rotateRelayKey, startRemoteRelayAgent } from "./remote-relay-agent.ts";
 
@@ -73,6 +73,16 @@ const nextSession = "__next";
 export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions = {}) {
   // Mac cover and keep-awake: manual toggles in phone Settings (and their shortcuts).
   registerHubPlugin("mac-controls", macControlsHub(), macControlsRelayAllowed);
+  // /awake and /cover share ~/.pix/mac-controls.json with phone Settings and ⌃⌥C / ⌃⌥W. Footer says "awake" only while on.
+  let macUi: any;
+  const showAwake = () => { try { macUi?.setStatus("pix-awake", readControls().awake ? "awake" : undefined); } catch {} };
+  const awakeTimer = setInterval(showAwake, 5000); awakeTimer.unref?.();
+  pi.on("session_start", (_e: any, ctx: any) => { macUi = ctx.ui; showAwake(); });
+  for (const key of ["awake", "cover"] as const) pi.registerCommand(key, {
+    description: key === "awake" ? "Keep the Mac awake: on, off, or toggle" : "Privacy cover over the Mac screen: on, off, or toggle",
+    getArgumentCompletions: (prefix: string) => { const o = ["on", "off", "toggle", "status"].filter(v => v.startsWith(prefix)).map(v => ({ value: v, label: v })); return o.length ? o : null; },
+    handler: async (args: string, ctx: any) => { macUi = ctx.ui; const r = macCommand(key, args); ctx.ui.notify(r.text, r.ok ? "info" : "error"); showAwake(); },
+  });
   bypassProxyForLoopback();
   const port = options.port ?? Number(process.env.PIX_REMOTE_PORT || remoteDefaultPort);
   const base = `http://${remoteHost}:${port}`;

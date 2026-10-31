@@ -96,3 +96,34 @@ test("phone page beacons presence through the relay while visible and says goodb
   assert.match(src, /if\(paired\)\{const here=/, "beacon runs in the relay page only, independent of push");
   assert.match(src, /visibilitychange',here/);
 });
+
+test("/awake and /cover: on, off, no arg toggles, status prints; same file as Settings; bad arg is an error", async () => {
+  const { macCommand } = await import("../plugins/remote/mac-controls.ts");
+  const file = join(mkdtempSync(join(tmpdir(), "mac-cmd-")), "mac-controls.json");
+  assert.deepEqual(macCommand("awake", "", file), { ok: true, text: "Keep awake on" });
+  assert.deepEqual(macCommand("awake", "", file), { ok: true, text: "Keep awake off" });
+  assert.equal(macCommand("cover", "on", file).text, "Mac cover on");
+  assert.equal(macCommand("cover", "toggle", file).text, "Mac cover off");
+  assert.equal(macCommand("awake", "on", file).text, "Keep awake on");
+  assert.equal(macCommand("awake", "status", file).text, "Keep awake on");
+  assert.deepEqual(readControls(file), { cover: false, awake: true });
+  assert.equal(macCommand("awake", "maybe", file).ok, false);
+});
+
+test("hub follows the file: /awake from any Pi starts and stops caffeinate", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const file = join(mkdtempSync(join(tmpdir(), "mac-follow-")), "mac-controls.json");
+  let live = 0;
+  const inst = macControlsHub({ file, caffeinate: () => { live++; return { kill: () => { live--; } }; } })({});
+  writeControls({ awake: true }, file); t.mock.timers.tick(2000);
+  assert.equal(live, 1);
+  writeControls({ awake: false }, file); t.mock.timers.tick(2000);
+  assert.equal(live, 0);
+  inst.close();
+});
+
+test("Pi registers /awake and /cover; footer shows 'awake' only while keep-awake is on", async () => {
+  const src = readFileSync(new URL("../plugins/remote/index.ts", import.meta.url), "utf8");
+  assert.match(src, /for \(const key of \["awake", "cover"\] as const\) pi\.registerCommand\(key/);
+  assert.match(src, /setStatus\("pix-awake", readControls\(\)\.awake \? "awake" : undefined\)/);
+});

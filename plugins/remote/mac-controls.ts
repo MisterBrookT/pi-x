@@ -36,6 +36,8 @@ export const macControlsHub = (opts: { file?: string; caffeinate?: Caffeinate } 
 	let held: { kill(): void } | undefined;
 	const apply = (c: MacControls) => { if (c.awake && !held) held = start(); else if (!c.awake && held) { held.kill(); held = undefined; } return c; };
 	apply(readControls(file));
+	// /awake and /cover in any Pi write the file directly; follow it so caffeinate starts or stops within 2 s.
+	const follow = setInterval(() => apply(readControls(file)), 2000); follow.unref?.();
 	return {
 		route(method, path, body) {
 			if (path !== "/api/mac") return undefined;
@@ -48,6 +50,15 @@ export const macControlsHub = (opts: { file?: string; caffeinate?: Caffeinate } 
 				return { status: 200, body: apply(writeControls(patch, file)) };
 			})();
 		},
-		close() { held?.kill(); held = undefined; },
+		close() { clearInterval(follow); held?.kill(); held = undefined; },
 	};
 };
+
+/** `/awake [on|off]`, `/cover [on|off|toggle]`: no arg toggles. Returns the line to print, or an error. */
+export function macCommand(key: keyof MacControls, arg: string, file = controlsPath()): { ok: boolean; text: string } {
+	const a = arg.trim().toLowerCase(), label = key === "awake" ? "Keep awake" : "Mac cover";
+	if (a && !["on", "off", "toggle", "status"].includes(a)) return { ok: false, text: `Usage: /${key} [on|off|toggle|status]` };
+	const now = readControls(file);
+	const c = a === "status" ? now : writeControls({ [key]: a === "on" ? true : a === "off" ? false : !now[key] }, file);
+	return { ok: true, text: `${label} ${c[key] ? "on" : "off"}` };
+}
