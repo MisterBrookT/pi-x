@@ -17,6 +17,10 @@
 
 - The phone page is served by the relay Worker (`relay/`), not the Mac, so the Mac's autoreload never updates it. A post-commit hook (`scripts/git-hooks/post-commit`, enabled by `npm install` via `core.hooksPath`) deploys the relay whenever a commit touches `relay/` or `src/remote-{web,relay-web,sw}.ts`. Deploy by hand with `npm run deploy:relay`; skip once with `PIX_SKIP_RELAY_DEPLOY=1`.
 
+## Reload
+
+- Don't ask brook before reloading. Commit the fix and let `remote-autoreload` pick it up: each session reloads by itself once plugin files have been stable for 2 min and it is idle with no jobs or questions. Then confirm the pickup, and run `npm run deploy:relay` for phone changes.
+
 ## Design
 
 - Follow `docs/design.md` (palette, type, avatars, actions) for every UI change on phone and Mac.
