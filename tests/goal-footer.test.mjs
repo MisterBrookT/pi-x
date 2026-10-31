@@ -196,6 +196,19 @@ test("footer: always two lines with stable widths; waits inline only when pendin
 	assert.deepEqual(h.render(120).map(visibleWidth), idle.map(visibleWidth));
 });
 
+test("footer: pins stay across back-to-back renders and their files are read at most every 5 s (typing renders the footer per key)", async (t) => {
+	const fs = await import("node:fs"), { join } = await import("node:path"), { tmpdir } = await import("node:os");
+	const d = fs.mkdtempSync(join(tmpdir(), "pins-")); process.env.PIX_ARTIFACTS_DIR = d; t.after(() => delete process.env.PIX_ARTIFACTS_DIR);
+	const h = await harness(t);
+	const { pinArtifact } = await import("../plugins/core/artifacts.ts");
+	pinArtifact(h.sm.getSessionId(), { title: "Plan", url: "https://x.dev/plan" }, d);
+	await h.emit("session_start");
+	const first = h.render(200)[0];
+	assert.match(first, /Plan/);
+	fs.rmSync(d, { recursive: true });
+	for (let i = 0; i < 20; i++) assert.equal(h.render(200)[0], first, `render ${i}: same pins, no re-read`);
+});
+
 test("footer never exceeds a narrow pane, even with a background job label", async (t) => {
 	const h = await harness(t);
 	h.data.setExtensionStatus("pix-background", "1 job running · look 18:00 · /jobs");

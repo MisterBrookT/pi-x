@@ -51,3 +51,14 @@ test("a generic Feishu title ('final') falls back to the first heading; a cached
 	await resolveLabels("s", a, { dir: d, feishu: async () => "Minara Agent 桌面端 v1.5.2 发版验收", model: async () => undefined });
 	assert.equal(pinLabel(loadArtifacts("s", d)[0]), "Minara Agent 桌面端");
 });
+
+test("a pin that cannot be named is not retried on every footer render (each retry spawned `pi -p`)", async () => {
+	const d = mkdtempSync(join(tmpdir(), "pl3-"));
+	pinArtifact("s", { title: "b9e2f1c7d3", url: "https://b9e2f1c7d3.example.com" }, d);
+	let calls = 0;
+	const fail = async () => (calls++, undefined);
+	assert.equal(await resolveLabels("s", loadArtifacts("s", d), { dir: d, feishu: fail, model: fail }), false);
+	const before = calls;
+	for (let i = 0; i < 5; i++) assert.equal(await resolveLabels("s", loadArtifacts("s", d), { dir: d, feishu: fail, model: fail }), false);
+	assert.equal(calls, before, "failure is remembered");
+});

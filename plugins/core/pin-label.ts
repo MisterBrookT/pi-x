@@ -76,18 +76,23 @@ const modelName: Fetcher = a => new Promise(res => {
 });
 
 const pending = new Set<string>();
-/** Fill `label` in the background for pins that have no meaningful title or URL label; saved once, shown on the next read. */
-export function resolveLabels(session: string, items: Artifact[], o: { dir?: string; feishu?: Fetcher; model?: Fetcher } = {}): Promise<void> {
+// Pins that could not be named: not retried for an hour. Without this every footer render spawned `pi -p` again (2026-10-31 typing freezes).
+const failed = new Map<string, number>();
+const RETRY_MS = 3_600_000;
+/** Fill `label` in the background (resolves true when it saved a new label) for pins that have no meaningful title or URL label; saved once, shown on the next read. */
+export function resolveLabels(session: string, items: Artifact[], o: { dir?: string; feishu?: Fetcher; model?: Fetcher } = {}): Promise<boolean> {
 	const dir = o.dir ?? artifactsDir();
-	const need = items.filter(a => (!a.label || meaningless(a.label)) && meaningless(a.title) && !urlLabel(a) && !pending.has(session + a.url));
-	if (!need.length) return Promise.resolve();
+	const need = items.filter(a => (!a.label || meaningless(a.label)) && meaningless(a.title) && !urlLabel(a) && !pending.has(session + a.url) && !(Date.now() - (failed.get(session + a.url) ?? -RETRY_MS) < RETRY_MS));
+	if (!need.length) return Promise.resolve(false);
 	for (const a of need) pending.add(session + a.url);
 	return Promise.all(need.map(async a => [a.url, (await (o.feishu ?? feishuTitle)(a).catch(() => undefined)) ?? (await (o.model ?? modelName)(a).catch(() => undefined))] as const)).then(found => {
+		for (const [url, t] of found) if (!t) failed.set(session + url, Date.now());
 		const got = new Map(found.filter(([, t]) => t) as [string, string][]);
-		if (!got.size) return;
+		if (!got.size) return false;
 		const now = loadArtifacts(session, dir).map(x => got.has(x.url) ? { ...x, label: shorten(got.get(x.url)!) } : x);
 		mkdirSync(dir, { recursive: true });
 		const f = artifactsPath(session, dir), t = `${f}.${process.pid}.tmp`; writeFileSync(t, JSON.stringify(now, null, 1)); renameSync(t, f);
+		return true;
 	}).finally(() => { for (const a of need) pending.delete(session + a.url); });
 }
 

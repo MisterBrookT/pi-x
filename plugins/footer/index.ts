@@ -51,7 +51,15 @@ export default function (pi: ExtensionAPI) {
   const queuedLabel = () => { if (Date.now() - queued.at > 5000) queued = { at: Date.now(), n: queuedCount() }; return queued.n ? `  ${queued.n} queued` : ""; };
   // "Docs 1 · Cookbook… +1": what this session pinned (core/artifacts.ts), each a terminal link straight to its target.
   let pinned: { at: number; links: { label: string; url: string }[] } = { at: 0, links: [] }, sessionId = "";
-  const pinnedLinks = () => { let items: { label: string; url: string }[] = []; if (Date.now() - pinned.at > 5000) items = sessionId ? loadArtifacts(sessionId) : []; if (sessionId) void resolveLabels(sessionId, items).then(() => { pinned.at = 0; }); pinned = { at: Date.now(), links: artifactLinks(items, undefined, pinEnded(), mainLine()) }; return pinned.links; };
+  // Reloaded at most every 5 s; renders in between reuse the last links (every keystroke renders the footer).
+  const pinnedLinks = () => {
+    if (Date.now() - pinned.at > 5000) {
+      const items = sessionId ? loadArtifacts(sessionId) : [];
+      if (sessionId) void resolveLabels(sessionId, items).then((named) => { if (named) pinned.at = 0; });
+      pinned = { at: Date.now(), links: artifactLinks(items, undefined, pinEnded(), mainLine()) };
+    }
+    return pinned.links;
+  };
   const memoryLabel = () => { if (Date.now() - memoryNew.at > 5000) memoryNew = { at: Date.now(), n: memoryUnseen() }; return memoryNew.n ? `Memory +${memoryNew.n}` : "Memory"; };
 
   pi.on("message_start", (event) => {
