@@ -565,9 +565,9 @@ test("Mac: ⌘⇧Y with no card waiting opens the whole unfinished list; picking
   const { unfinishedLines } = await import("../plugins/foryou/index.ts");
   const rows = unfinishedLines({ pending: [{ id: "a", title: "Reply Lowes", due: "2026-10-20" }], onit: [{ id: "b", title: "Backtest" }], later: [{ id: "c", title: "ZIA prep", wakeAt: "2026-10-17T05:55:00Z" }] });
   assert.deepEqual(rows.map(r => r.id), ["a", "b", "c"]);
-  assert.match(rows[0].label, /^needs you Reply Lowes · due /);
+  assert.match(rows[0].label, /^needs you Reply Lowes, due /);
   assert.match(rows[1].label, /^on it     Backtest$/);
-  assert.match(rows[2].label, /^later     ZIA prep · back /);
+  assert.match(rows[2].label, /^later     ZIA prep, back /);
 });
 
 test("judge prompt: a question @-addressed to someone else is theirs; already-tracked work updates its line instead of a new loop", async () => {
@@ -606,13 +606,13 @@ test("Mac: the Unfinished list and the card pager show one row per job (a line w
   const lines = [{ id: "kl", name: "Kairos launch" }];
   const rows = unfinishedLines({ lines, pending: [{ id: "a", title: "Review doc", line: "kl" }, { id: "x", title: "Reply Lowes" }, { id: "b", title: "Arena page", line: "kl" }], onit: [{ id: "c", title: "Deploy", line: "kl" }] });
   assert.deepEqual(rows.map(r => r.id), ["line:kl", "x"]);
-  assert.match(rows[0].label, /^needs you Kairos launch · 3 tasks · 2 need you$/);
+  assert.match(rows[0].label, /^needs you Kairos launch, 3 tasks, 2 need you$/);
   assert.deepEqual(rows[0].tasks, ["a: Review doc (needs you)", "b: Arena page (needs you)", "c: Deploy (on it)"]);
   const one = unfinishedLines({ lines, pending: [{ id: "a", title: "Review doc", line: "kl" }] });
   assert.match(one[0].label, /^needs you Review doc$/, "a lone loop stays a plain row");
   const card = { line: "Kairos launch", related: [{ title: "Arena page" }], title: "Review doc", source: "s", left: 0, choices: [] };
-  assert.match(cardLines(card)[0], /Kairos launch · 2 tasks/);
-  assert.match(cardTitle(card), /^Kairos launch · 2 tasks\n  • Review doc\n  • Arena page/);
+  assert.match(cardLines(card)[0], /Kairos launch, 2 tasks/);
+  assert.match(cardTitle(card), /^Kairos launch, 2 tasks\n  • Review doc\n  • Arena page/);
 });
 
 test("a line with one ask that waits on brook is one row (no second 'Waiting on you' post for the same thing)", async t => {

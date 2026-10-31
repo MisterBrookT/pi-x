@@ -7,7 +7,7 @@ import { boardNameFor } from "../core/chat-board.ts";
  * In every other session this extension does nothing.
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { LOOP_MESSAGE, loopMessage, loopPromptSummary, quietSummary } from "../core/loop-message.ts";
@@ -30,6 +30,7 @@ import { expandForYou, withForYou } from "./foryou-mention.ts";
 import { remoteDefaultPort, remoteTokenPath } from "../core/hub-paths.ts";
 import { isBrookText, markBrookActive } from "../core/foryou-queue.ts";
 import { livePrompt, readLive, takeLive } from "./live-strip.ts";
+import { createLiveFocus, type LiveAction } from "./live-focus.ts";
 
 const TOOL = "loops";
 const MEMORY_TOOL = "memory";
@@ -88,9 +89,9 @@ export const choiceLabel = (c: { label: string; run: string; name?: string }) =>
 /** Every unfinished loop, one line each, for the list brook opens himself (⌘⇧Y when no card waits, or from the card). */
 export function unfinishedLines(v: { pending?: any[]; onit?: any[]; later?: any[]; lines?: { id: string; name: string }[] }): { id: string; label: string; tasks?: string[] }[] {
 	const day = (t: string) => t ? new Date(t).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
-	const row = (i: any, tag: string) => ({ id: i.id, label: `${tag.padEnd(9)} ${i.title}${i.due ? ` · due ${day(i.due)}` : ""}${tag === "later" && i.wakeAt ? ` · back ${day(i.wakeAt)}` : ""}` });
+	const row = (i: any, tag: string) => ({ id: i.id, label: `${tag.padEnd(9)} ${i.title}${i.due ? `, due ${day(i.due)}` : ""}${tag === "later" && i.wakeAt ? `, back ${day(i.wakeAt)}` : ""}` });
 	const tagged = [...(v.pending ?? []).map(i => [i, "needs you"] as const), ...(v.onit ?? []).map(i => [i, "on it"] as const), ...(v.later ?? []).map(i => [i, "later"] as const)];
-	// One row per job: a line with 2+ unfinished loops is one row ("Kairos launch · 3 tasks · 2 need you"), at its first loop's place.
+	// One row per job: a line with 2+ unfinished loops is one row ("Kairos launch, 3 tasks, 2 need you"), at its first loop's place.
 	const jobs = new Map<string, (typeof tagged)[number][]>();
 	for (const t of tagged) if (t[0].line && v.lines?.some(l => l.id === t[0].line)) jobs.set(t[0].line, [...(jobs.get(t[0].line) ?? []), t]);
 	const out: { id: string; label: string; tasks?: string[] }[] = [], done = new Set<string>();
@@ -100,22 +101,22 @@ export function unfinishedLines(v: { pending?: any[]; onit?: any[]; later?: any[
 		if (done.has(t[0].line)) continue;
 		done.add(t[0].line);
 		const you = g.filter(x => x[1] === "needs you").length, name = v.lines!.find(l => l.id === t[0].line)!.name;
-		out.push({ id: `line:${t[0].line}`, label: `${(you ? "needs you" : t[1]).padEnd(9)} ${name} · ${g.length} tasks${you ? ` · ${you} need you` : ""}`, tasks: g.map(x => `${x[0].id}: ${x[0].title} (${x[1]})`) });
+		out.push({ id: `line:${t[0].line}`, label: `${(you ? "needs you" : t[1]).padEnd(9)} ${name}, ${g.length} tasks${you ? `, ${you} need you` : ""}`, tasks: g.map(x => `${x[0].id}: ${x[0].title} (${x[1]})`) });
 	}
 	return out;
 }
 
 export const cardLines = (it: { line?: string; related?: unknown[]; title: string; why?: string; source: string; left: number; choices: { label: string; run: string; name?: string }[] }) => [
-	`● ${((t: string) => t.length > 60 ? `${t.slice(0, 59)}…` : t)(it.line && it.related?.length ? `${it.line} · ${it.related.length + 1} tasks` : it.title)}${it.left ? `  +${it.left}` : ""}   ⌘⇧Y`,
+	`● ${((t: string) => t.length > 60 ? `${t.slice(0, 59)}…` : t)(it.line && it.related?.length ? `${it.line}, ${it.related.length + 1} tasks` : it.title)}${it.left ? `  +${it.left}` : ""}   Tab`,
 ];
 
 /** A session to hand the task to, as one option in the card's list. */
-export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? ` · ${x.hint}` : ""} ›`;
+export const sendLabel = (x: { id: string; name: string; cwd?: string; hint?: string }) => x.id === "new" ? `Do it in a new session (${x.cwd ?? "project"}) ›` : `Do it in ${x.name}${x.hint ? `, ${x.hint}` : ""} ›`;
 
 /** The card in the Mac picker: what it is, then what each button would do (so the decision is clear). */
 export const cardTitle = (it: { autonomy?: string; line?: string; related?: { title: string }[]; prepared?: string; title: string; why?: string; source: string; left: number; at?: number; action?: string; task?: string; choices: { label: string; run: string; name?: string; task?: string }[] }) => [
-	...(it.line && it.related?.length ? [`${it.line} · ${it.related.length + 1} tasks`, `  • ${it.title}`, ...it.related.map(r => `  • ${r.title}`), ""] : [it.title]),
-	`${it.source}${it.autonomy ? ` · ${it.autonomy}` : ""}${it.left ? ` · ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
+	...(it.line && it.related?.length ? [`${it.line}, ${it.related.length + 1} tasks`, `  • ${it.title}`, ...it.related.map(r => `  • ${r.title}`), ""] : [it.title]),
+	`${it.source}${it.autonomy ? `, ${it.autonomy}` : ""}${it.left ? `, ${it.at ?? 1} of ${it.left + 1}   ← → more cards` : ""}`,
 	"",
 	...(it.why ? [it.why, ""] : []),
 	...(it.prepared ? [`Prepared: ${it.prepared}`, ""] : []),
@@ -293,14 +294,30 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		cardLog(deps.dir, "widget", { id: it?.id ?? null, left: it?.left });
 		ctx.ui.setWidget?.("foryou-card", it ? cardLines(it) : undefined);
 	};
-	// Live strip (same as the phone): asks that came in mid-thread, one line each above the editor. /live acts on them.
-	let liveShown = "";
+	// Focus stays in the existing strip; only its instruction line changes.
+	let liveShown = "", liveContext: ExtensionContext | undefined, removeLiveInput: (() => void) | undefined;
 	const liveWidget = (ctx: any) => {
-		const L = readLive(deps.dir), key = L.map(a => a.id).join(",");
-		if (key === liveShown) return;
+		const L = readLive(deps.dir), selected = liveFocus.selectedId;
+		const key = JSON.stringify([L, selected, !!shown]);
+		if (key === liveShown || (!liveShown && !L.length && !selected)) return;
 		liveShown = key;
-		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a: any, i) => `${i + 1}  ${a.why}   ${a.source}${a.verb === "do" ? "   /live " + (i + 1) + " reply to do it" : ""}`), "/live <n> reply, show or later"] : undefined);
+		const at = L.findIndex(a => a.id === selected);
+		const hint = selected ? at < 0 ? "Handled elsewhere, Esc back" : `${at + 1} selected, ↑↓ or 1–9, Enter reply, s show, l later, ${shown ? "Tab card, " : ""}Esc back` : "Tab to choose, Enter reply, s show, l later";
+		ctx.ui.setWidget?.("foryou-live", L.length ? [...L.map((a, i) => `${i + 1}  ${a.why}   ${a.source}${a.verb === "do" ? "   Enter to do it" : ""}`), hint] : undefined);
 	};
+	const actLive = (id: string, verb: LiveAction, ctx: ExtensionContext) => {
+		// Claim by id, exactly like the phone endpoint; a stale selection never replies twice.
+		const a = takeLive(id, deps.dir);
+		liveWidget(ctx);
+		if (!a) { ctx.ui.notify("That ask was already handled.", "info"); return; }
+		if (verb !== "later") pi.sendUserMessage(livePrompt(a, verb), ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+	};
+	const liveFocus = createLiveFocus({
+		rows: () => readLive(deps.dir),
+		render: () => { if (liveContext) liveWidget(liveContext); },
+		act: (id, verb) => { if (liveContext) actLive(id, verb, liveContext); },
+		gone: () => liveContext?.ui.notify("That ask was already handled.", "info"),
+	});
 	const check = async (ctx: any) => {
 		if (!isCoordinator(ctx) || !ctx.hasUI) return;
 		liveWidget(ctx);
@@ -314,7 +331,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	const listAll = async (ctx: any) => {
 		const rows = unfinishedLines(forYouView(deps.dir));
 		if (!rows.length) { ctx.ui.notify("Nothing unfinished.", "info"); return; }
-		const pick = await ctx.ui.select(`Unfinished · ${rows.length}`, rows.map(r => r.label));
+		const pick = await ctx.ui.select(`Unfinished, ${rows.length}`, rows.map(r => r.label));
 		const row = rows.find(r => r.label === pick);
 		if (row?.tasks) pi.sendUserMessage(`Let's look at the job "${row.label.replace(/^\S+(?: you)?\s+/, "")}". Its tasks:\n${row.tasks.map(t => `- ${t}`).join("\n")}\nWhere does each stand, and what do you need from me (once, for the whole job)?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
 		else if (row) pi.sendUserMessage(`Let's look at loop ${row.id}: ${row.label.replace(/^\S+(?: you)?\s+/, "")}. Where does it stand?`, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
@@ -370,7 +387,34 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		} catch (e) { cardLog(deps.dir, "error", { id: it.id, error: String((e as Error)?.stack ?? e) }); throw e; }
 		finally { showing = undefined; close = undefined; await check(ctx).catch(() => {}); }
 	};
-	pi.registerShortcut(CARD_KEY, { description: "Answer the waiting For you card", handler: async (ctx) => { if (isCoordinator(ctx)) await answer(ctx); } });
+	const focusForYou = async (ctx: ExtensionContext) => {
+		if (!isCoordinator(ctx) || ctx.mode !== "tui" || showing) return;
+		liveContext = ctx;
+		if (!liveFocus.focus()) await answer(ctx);
+	};
+	pi.registerShortcut(CARD_KEY, { description: "Choose a waiting For you card or live ask", handler: async ctx => {
+		if (!isCoordinator(ctx) || ctx.mode !== "tui" || showing) return;
+		if (currentCard(deps.dir, [])) { liveFocus.reset(); await answer(ctx); }
+		else await focusForYou(ctx);
+	} });
+	const installLiveInput = (ctx: ExtensionContext) => {
+		removeLiveInput?.(); removeLiveInput = undefined;
+		liveContext = undefined; liveFocus.reset(); liveShown = "";
+		if (!isCoordinator(ctx) || ctx.mode !== "tui" || !ctx.ui.onTerminalInput) return;
+		removeLiveInput = ctx.ui.onTerminalInput(data => {
+			if (showing || matchesKey(data, CARD_KEY)) return undefined;
+			// A second Tab reaches the card without first handling every live ask.
+			if (liveFocus.selectedId && matchesKey(data, "tab") && currentCard(deps.dir, [])) {
+				if (!isKeyRelease(data)) { liveFocus.reset(); void answer(ctx).catch(e => ctx.ui.notify(String(e), "error")); }
+				return { consume: true };
+			}
+			if (!liveFocus.selectedId && matchesKey(data, "tab") && !ctx.ui.getEditorText() && (readLive(deps.dir).length || shown)) {
+				if (!isKeyRelease(data)) void focusForYou(ctx).catch(e => ctx.ui.notify(String(e), "error"));
+				return { consume: true };
+			}
+			return liveFocus.handleInput(data);
+		});
+	};
 	// Pix's own loop prompts (card answers, handoffs) fold to one line on screen; the model still gets all of it.
 	// Older loop prompts were stored as plain user messages: fold them the same way when drawn.
 	pi.registerCommand?.("live", {
@@ -378,8 +422,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		handler: async (args: string, ctx: any) => {
 			const [n, verb = "reply"] = String(args ?? "").trim().split(/\s+/), a = readLive(deps.dir)[Number(n) - 1];
 			if (!a || !["reply", "show", "later"].includes(verb)) { ctx.ui.notify("Usage: /live <n> reply, show or later", "info"); return; }
-			takeLive(a.id, deps.dir); liveWidget(ctx);
-			if (verb !== "later") pi.sendUserMessage(livePrompt(a, verb as "reply" | "show"), ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+			actLive(a.id, verb as LiveAction, ctx);
 		},
 	});
 	pi.registerMarkdownTransformer?.((md, c) => {
@@ -388,11 +431,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		const q = quietSummary(md);
 		if (q) return `↳ ${q}`;
 		const f = loopPromptSummary(md);
-		return f ? `↳ loop **${f.title}**${f.you ? ` · you: ${f.you}` : ""}` : md;
+		return f ? `↳ loop **${f.title}**${f.you ? `, you: ${f.you}` : ""}` : md;
 	});
 	pi.registerMessageRenderer(LOOP_MESSAGE, (message, { expanded, outputPad }, theme) => {
 		const s = (message.details ?? {}) as { title?: string; you?: string };
-		const head = `${theme.fg("accent", "↳ loop")} ${theme.bold(s.title ?? "")}${s.you ? theme.fg("dim", `  · you: ${s.you}`) : ""}`;
+		const head = `${theme.fg("accent", "↳ loop")} ${theme.bold(s.title ?? "")}${s.you ? theme.fg("dim", `, you: ${s.you}`) : ""}`;
 		const box = new Box(outputPad, 0, (t: string) => theme.bg("customMessageBg", t));
 		box.addChild(new Text(expanded ? `${head}\n${theme.fg("dim", String(message.content))}` : head, 0, 0));
 		return box;
@@ -426,6 +469,7 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 	pi.on("session_start", (_e, ctx) => {
 		isForYouProcess = isCoordinator(ctx);
 		apply(ctx);
+		installLiveInput(ctx);
 		clearInterval(timer);
 		timer = setInterval(() => void check(ctx).catch(() => {}), deps.cardPollMs ?? 4000);
 		timer.unref?.();
@@ -448,7 +492,11 @@ export default function (pi: ExtensionAPI, deps: ForYouDeps = {}) {
 		} catch { /* tracking never breaks a turn */ }
 	});
 	pi.on("session_start", (_e, ctx) => { shown = undefined; badged = undefined; void check(ctx).catch(() => {}); });
-	pi.on("session_shutdown", () => { clearInterval(timer); close?.abort(); });
+	pi.on("session_shutdown", () => {
+		clearInterval(timer); close?.abort();
+		removeLiveInput?.(); removeLiveInput = undefined;
+		liveContext = undefined; liveFocus.reset();
+	});
 	// /context html shows this block as "For you memory"; Pi's own /export cannot see it.
 	setInjected("For you memory", async (ctx: any) => isCoordinator(ctx) ? coordinatorContext(deps.dir, await sessions()) : undefined);
 	pi.on("before_agent_start", async (event, ctx) => {

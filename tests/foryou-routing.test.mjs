@@ -81,11 +81,11 @@ test("pile check: closes and merges only open loops it names", () => {
 });
 
 function fakePi() {
-	const handlers = {}, sent = [];
+	const handlers = {}, sent = [], deliveries = [];
 	const commands = {}, renderers = {}, custom = [];
-	return { handlers, sent, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerCommand: (k, c) => { commands['/' + k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, registerMarkdownTransformer: f => { renderers.md = f; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: m => sent.push(m) };
+	return { handlers, sent, deliveries, commands, renderers, custom, registerTool() {}, registerShortcut: (k, c) => { commands[k] = c; }, registerCommand: (k, c) => { commands['/' + k] = c; }, registerMessageRenderer: (t, r) => { renderers[t] = r; }, registerMarkdownTransformer: f => { renderers.md = f; }, sendMessage: (m, o) => custom.push([m, o]), getActiveTools: () => [], setActiveTools() {}, on: (e, h) => { (handlers[e] ??= []).push(h); }, sendUserMessage: (m, options) => { sent.push(m); deliveries.push(options); } };
 }
-const macCtx = (id, picks, notes = [], widgets = []) => ({ hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
+const macCtx = (id, picks, notes = [], widgets = []) => ({ mode: "tui", hasUI: true, cwd: "/nd", isIdle: () => true, sessionManager: { getSessionId: () => id },
 	ui: { select: async (title, options) => (notes.push({ title, options }), (p => typeof p === "function" ? p(options) : p)(picks.shift())), input: async () => picks.shift(), notify: m => notes.push(m), setWidget: (k, v) => widgets.push([k, v]) } });
 /** brook answers the card on the Mac: /card opens the picker (it never pops up by itself). */
 const cardCmd = (pi, ctx) => pi.commands["super+shift+y"].handler(ctx);
@@ -207,7 +207,7 @@ test("Mac: the card shows only in the For you session, with the judge's buttons,
 	await new Promise(r => setTimeout(r, 20));
 	assert.equal(shown.length, 0, "the card never pops up by itself: For you keeps working");
 	assert.equal(widgets[0][0], "foryou-card");
-	assert.deepEqual(widgets[0][1], ["● Loop a   ⌘⇧Y"], "one quiet line; details are behind the shortcut");
+	assert.deepEqual(widgets[0][1], ["● Loop a   Tab"], "one quiet line; details are behind the shortcut");
 	await cardCmd(pi, fy);
 	assert.deepEqual(shown[0].options, ["Fix in backtest (backtest) ›", "Discuss", CARD_ELSE, "Later", CARD_NO, CARD_ALL]);
 	assert.deepEqual(answers, [["a", { answer: "choice", choice: 0, text: undefined }]]);
@@ -326,7 +326,7 @@ test("Mac transcript: Pix's loop prompt is stored as a folded pix-loop message; 
 	assert.equal((await pi.handlers.input[0]({ type: "input", text, source: "interactive" })).action, "continue", "brook's own typing is never touched");
 	const theme = { fg: (_c, t) => t, bold: t => t, bg: (_c, t) => t };
 	const lines = pi.renderers["pix-loop"](m, { expanded: false, outputPad: 0 }, theme).render(80).join("\n");
-	assert.match(lines, /↳ loop 确认是否加入这两个  · you: Draft reply/); assert.doesNotMatch(lines, /proactive-daemon/);
+	assert.match(lines, /↳ loop 确认是否加入这两个, you: Draft reply/); assert.doesNotMatch(lines, /proactive-daemon/);
 });
 
 test("Mac: in For you, a short reply (a button number, later/no/done) answers the waiting card; other text is chat", async () => {
@@ -348,7 +348,7 @@ test("Mac: old loop prompts stored as plain user messages are folded when drawn"
 	const pi = fakePi();
 	register(pi, { dir: tmp(), sessions: async () => [], cardPollMs: 60_000 });
 	const md = `brook answered loop a with his own instruction. Do this instead of the suggested step:\nlatter\n\n(The loop, for context:)\n${actPrompt(loop("a", { title: "确认是否加入这两个" }), "/tmp/p")}`;
-	assert.equal(pi.renderers.md(md, { messageType: "user" }), "↳ loop **确认是否加入这两个** · you: latter");
+	assert.equal(pi.renderers.md(md, { messageType: "user" }), "↳ loop **确认是否加入这两个**, you: latter");
 	assert.equal(pi.renderers.md("hello", { messageType: "user" }), "hello");
 	assert.equal(pi.renderers.md(md, { messageType: "assistant" }), md);
 });
@@ -522,10 +522,10 @@ test("Mac: ⌘⇧Y with no card waiting lists everything unfinished; picking one
 	const pi = fakePi(), shown = [];
 	register(pi, { dir: d, sessions: async () => live, cardPollMs: 60_000 });
 	await cardCmd(pi, macCtx("pix-foryou", [opts => opts[1]], shown));
-	assert.equal(shown[0].title, "Unfinished · 2");
+	assert.equal(shown[0].title, "Unfinished, 2");
 	assert.match(shown[0].options[0], /^on it +Loop p$/);
-	assert.match(shown[0].options[1], /^later +Loop q · back /);
-	assert.match(pi.sent[0], /^Let's look at loop q: Loop q · back .*\. Where does it stand\?$/);
+	assert.match(shown[0].options[1], /^later +Loop q, back /);
+	assert.match(pi.sent[0], /^Let's look at loop q: Loop q, back .*\. Where does it stand\?$/);
 	// Nothing open: a short note, no list.
 	const pi2 = fakePi(), notes = [];
 	register(pi2, { dir: tmp(), sessions: async () => live, cardPollMs: 60_000 });
@@ -541,7 +541,7 @@ test("session names on cards: three sessions in one folder show their unique boa
 	const ses = ["m1", "m2", "m3"].map(id => ({ id, name: "minara", cwd: "/w/minara" }));
 	const it = { ...loop("a"), project: "/w/minara" };
 	const t = sendTargets(it, ses, "/h", label);
-	assert.deepEqual(t.filter(s => s.id !== "new").map(sendLabel), ["Do it in minara ›", "Do it in minara-2 · Three y2 GPU jobs are running… ›", "Do it in minara-3 ›"]);
+	assert.deepEqual(t.filter(s => s.id !== "new").map(sendLabel), ["Do it in minara ›", "Do it in minara-2, Three y2 GPU jobs are running… ›", "Do it in minara-3 ›"]);
 	assert.equal(new Set(t.map(sendLabel)).size, t.length, "no two rows read the same");
 	assert.equal(cardChoices({ ...it, choices: [{ label: "Fix", run: "m3" }] }, ses, label)[0].name, "minara-3");
 	// Mac picker: the card's own choice already names a session, so no generic rows are added.
@@ -615,11 +615,85 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	const w = widgets.find(x => x[0] === "foryou-live");
-	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "/live <n> reply, show or later"]);
+	assert.deepEqual(w[1], ["1  Knight asks for the CSV   WeChat: Knight", "2  @brook review   Feishu: G", "Tab to choose, Enter reply, s show, l later"]);
 	await pi.commands["/live"].handler("1 reply", fy);
 	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
 	await pi.commands["/live"].handler("1 later", fy);
 	assert.equal(pi.sent.length, 1, "later does not wake For you");
 	assert.deepEqual(readLive(d), []);
 	assert.equal(widgets.at(-1)[0], "foryou-live"); assert.equal(widgets.at(-1)[1], undefined, "strip gone");
+});
+
+async function liveKeyboard(t, dir, draft = "") {
+ const pi = fakePi(), widgets = [], notes = [];
+ register(pi, { dir, sessions: async () => [], cardPollMs: 60_000 });
+ const ctx = macCtx("pix-foryou", [], notes, widgets); ctx.mode = "tui";
+ let input, removed = 0;
+ ctx.ui.getEditorText = () => draft;
+ ctx.ui.onTerminalInput = fn => { input = fn; return () => { removed++; input = undefined; }; };
+ for (const start of pi.handlers.session_start) await start({}, ctx);
+ await new Promise(resolve => setTimeout(resolve, 10));
+ t.after(() => pi.handlers.session_shutdown.forEach(fn => fn({}, ctx)));
+ return { pi, ctx, widgets, notes, key: data => input?.(data), installed: () => typeof input === "function", removed: () => removed };
+}
+
+test("Mac Tab focuses existing strip without a dialog; arrows/Enter match phone Reply now", async t => {
+ const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
+ const d = tmp();addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Second ask"});
+ const f=await liveKeyboard(t,d);
+ assert.equal(f.installed(),true);
+ assert.deepEqual(f.key("\t"),{consume:true});f.key("\x1b[B");f.key("\r");
+ assert.match(f.pi.sent[0],/Reply now\].*Second ask/);
+ assert.equal(readLive(d).length,1);assert.equal(f.notes.length,0,"no modal or redesign");
+ assert.equal(f.key("s"),undefined,"typing resumes outside focus");
+});
+
+test("Mac shortcut focuses live asks with a draft; s/l preserve the draft and phone semantics", async t => {
+ const { addLive, readLive } = await import("../plugins/foryou/live-strip.ts");
+ const d=tmp();addLive(d,{source:"A",sourceKey:"wechat:a",why:"Show this"});addLive(d,{source:"B",sourceKey:"wechat:b",why:"Later this"});
+ const f=await liveKeyboard(t,d,"unfinished draft");
+ assert.equal(f.key("\t"),undefined,"normal draft completion remains available");
+ await cardCmd(f.pi,f.ctx);f.key("s");assert.match(f.pi.sent[0],/tapped Show\].*Show this/);
+ await cardCmd(f.pi,f.ctx);f.key("l");assert.equal(f.pi.sent.length,1);assert.deepEqual(readLive(d),[]);
+ assert.equal(f.ctx.ui.getEditorText(),"unfinished draft");
+});
+
+test("Mac stale strip selection never replies to another row; shutdown releases the terminal hook", async t => {
+ const { addLive, takeLive } = await import("../plugins/foryou/live-strip.ts");
+ const d=tmp(),first=addLive(d,{source:"A",sourceKey:"wechat:a",why:"Already handled"});addLive(d,{source:"B",sourceKey:"wechat:b",why:"Still waiting"});
+ const f=await liveKeyboard(t,d);f.key("\t");takeLive(first.id,d);f.key("\r");
+ assert.deepEqual(f.pi.sent,[]);
+ f.pi.handlers.session_shutdown.forEach(fn=>fn({},f.ctx));assert.equal(f.removed(),1);
+});
+
+test("Mac card advertises Tab and opens the same existing picker without changing the widget shape", async t => {
+ const d=tmp(loop("a")),f=await liveKeyboard(t,d);
+ assert.deepEqual(f.widgets.find(([key])=>key==="foryou-card")[1],["● Loop a   Tab"]);
+ assert.deepEqual(f.key("\t"),{consume:true});await new Promise(r=>setTimeout(r,10));
+ assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
+});
+
+test("Mac keeps cards reachable while live asks wait: second Tab or the existing shortcut opens the card", async t => {
+ const {addLive}=await import("../plugins/foryou/live-strip.ts");
+ const d=tmp(loop("a"));addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting too"});
+ const f=await liveKeyboard(t,d);
+ f.key("\t");assert.equal(f.notes.length,0,"first Tab stays in the strip");
+ assert.equal(f.key("\x1b[121;10u"),undefined,"the existing shortcut still reaches Pi's dispatcher while focused");
+ f.key("\t");await new Promise(r=>setTimeout(r,10));assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
+ const count=f.notes.length;await cardCmd(f.pi,f.ctx);assert.ok(f.notes.length>count,"the existing shortcut still prioritizes a waiting card");
+ assert.deepEqual(f.pi.sent,[]);
+});
+
+test("Mac live reply while busy queues a follow-up, never steering or sending externally", async t => {
+ const {addLive}=await import("../plugins/foryou/live-strip.ts");const d=tmp();addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting"});
+ const f=await liveKeyboard(t,d);f.ctx.isIdle=()=>false;f.key("\t");f.key("\r");
+ assert.deepEqual(f.pi.deliveries,[{deliverAs:"followUp"}]);
+});
+
+test("switching to RPC or another session removes terminal input ownership", async t => {
+ const d=tmp(),f=await liveKeyboard(t,d);
+ for(const start of f.pi.handlers.session_start) await start({}, {...f.ctx,mode:"rpc"});
+ assert.equal(f.installed(),false);assert.equal(f.removed(),1);
+ for(const start of f.pi.handlers.session_start) await start({}, {...f.ctx,sessionManager:{getSessionId:()=>"other"}});
+ assert.equal(f.installed(),false);
 });
