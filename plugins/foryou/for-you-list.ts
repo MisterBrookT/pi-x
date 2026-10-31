@@ -29,9 +29,9 @@ const W = 72;
 export const SHOWN = 3;
 
 /**
- * "For you N", at most 3 rows, a "..." line (or blank), then one reserved line: blank normally, the selected
- * row's full text while choosing. The line count depends only on fold, never on focus or count, so the TUI never jumps.
- * Folded: the header alone. Never over Pi's 10-line widget cap, so Pi never adds "(widget truncated)".
+ * "For you N", then at most 3 rows; when there are more, the last row ends with " ...". No blank or reserved lines.
+ * While choosing, the selected row shows its full text in place. Folded: the header alone.
+ * Never over Pi's 10-line widget cap, so Pi never adds "(widget truncated)".
  */
 export function forYouLines(rows: ForYouRow[], selected?: string, folded = false): string[] | undefined {
 	if (!rows.length) return undefined;
@@ -40,7 +40,11 @@ export function forYouLines(rows: ForYouRow[], selected?: string, folded = false
 	if (folded && !sel) return [cut(head, W)];
 	// The window follows the selection, so row 5 can be chosen; numbers stay the list's own.
 	const from = Math.max(0, Math.min(at - SHOWN + 1, rows.length - SHOWN));
-	const body = rows.slice(from, from + SHOWN).map((r, k) => cut(`${from + k + 1}${r.id === selected ? "›" : " "}${short(r.who, 12).padEnd(12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}   ${r.source}`, W));
-	while (body.length < SHOWN) body.push(" ");
-	return [cut(head, W), ...body, rows.length > SHOWN ? "..." : " ", sel ? short(sel.full, W) : " "];
+	const shown = rows.slice(from, from + SHOWN), more = from + SHOWN < rows.length;
+	const body = shown.map((r, k) => {
+		const last = more && k === shown.length - 1, room = last ? W - 4 : W;
+		const text = r.id === selected ? `${from + k + 1}›${r.full}` : `${from + k + 1} ${short(r.who, 12).padEnd(12)}  ${short(r.gist, 40)}${r.due ? `, due ${short(r.due, 16)}` : ""}   ${r.source}`;
+		return cut(text, room) + (last ? " ..." : "");
+	});
+	return [cut(head, W), ...body];
 }

@@ -616,7 +616,7 @@ test("Mac: live asks show as a quiet widget in the For you session; /live <n> re
 	pi.handlers.agent_end[0]({}, fy);
 	await new Promise(r => setTimeout(r, 20));
 	const w = widgets.find(x => x[0] === "foryou-live");
-	assert.deepEqual(w[1], ["For you 2", "1 G             @brook review   Feishu", "2 Knight        Knight asks for the CSV   WeChat", " ", " ", " "], "newest first, reserved last line");
+	assert.deepEqual(w[1], ["For you 2", "1 G             @brook review   Feishu", "2 Knight        Knight asks for the CSV   WeChat"], "newest first, no blank lines");
 	await pi.commands["/live"].handler("2 reply", fy);
 	assert.match(pi.sent.at(-1), /Reply now\].*Knight asks for the CSV/);
 	await pi.commands["/live"].handler("1 later", fy);
@@ -649,16 +649,17 @@ test("Mac ↓ on an empty input focuses the list without a dialog; arrows/Enter 
  assert.equal(f.key("s"),undefined,"typing resumes outside focus");
 });
 
-test("Mac list focus never changes height: same line count, every line fits 72 columns (no wrap), full text only in the reserved line", async t => {
+test("Mac list focus never changes height: same line count, every line fits 72 columns, no blank lines, full text in place on the selected row", async t => {
  const { addLive } = await import("../plugins/foryou/live-strip.ts");
  const { visibleWidth } = await import("@earendil-works/pi-tui");
  const d=tmp(loop("c"));addLive(d,{source:"WeChat: A",sourceKey:"wechat:a",why:"First ask with a much longer full sentence that only shows when selected, never in the row"});addLive(d,{source:"WeChat: B",sourceKey:"wechat:b",why:"Do the thing",verb:"do"});
  const f=await liveKeyboard(t,d);
  const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
  const before=live();f.key("\x1b[B");const focused=live();f.key("\x1b[B");const moved=live();f.key("\x1b");const after=live();
- assert.equal(before[0],"For you 3");assert.equal(before.at(-1)," ","reserved line is blank, no hint until choosing");
- for (const v of [focused,moved,after]) { assert.equal(v.length,before.length); for (const l of v) assert.ok(visibleWidth(l)<=72,l); }
- assert.match(focused[0],/^For you 3   ↑↓/);assert.match(focused[1],/^1›/);assert.match(moved[2],/^2›/);assert.match(moved.at(-1),/First ask with a much longer/);
+ assert.equal(before[0],"For you 3");assert.equal(before.length,4);
+ for (const v of [before,focused,moved,after]) { assert.equal(v.length,before.length); for (const l of v) { assert.ok(visibleWidth(l)<=72,l); assert.ok(l.trim(),"no blank lines"); } }
+ assert.match(focused[0],/^For you 3   ↑↓/);assert.match(focused[1],/^1›/);assert.match(moved[2],/^2›First ask with a much longer/);
+ assert.doesNotMatch(before.join("\n"),/only shows/,"full text only when selected");
  assert.deepEqual(after,before);assert.doesNotMatch(before.join("\n"),/·|Tab/);
 });
 
@@ -685,7 +686,7 @@ test("Mac cards and live asks are one list: Enter on a card row opens its picker
  const d=tmp(loop("a"));addLive(d,{source:"A",sourceKey:"wechat:a",why:"Waiting too"});
  const f=await liveKeyboard(t,d);
  assert.equal(f.widgets.find(([key])=>key==="foryou-card")?.[1],undefined,"no second card widget");
- const list=f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];assert.equal(list.length,6);assert.ok(list.some(l=>/Loop a/.test(l)));
+ const list=f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];assert.equal(list.length,3);assert.ok(list.some(l=>/Loop a/.test(l)));
  const row=list.findIndex(l=>/Loop a/.test(l));
  f.key("\x1b[B");f.key(String(row));f.key("\r");await new Promise(r=>setTimeout(r,10));
  assert.match(f.notes.find(n=>n.title)?.title,/Loop a/);
@@ -707,20 +708,22 @@ test("switching to RPC or another session removes terminal input ownership", asy
  assert.equal(f.installed(),false);
 });
 
-test("Mac For you list shows at most 3 rows then one '...' line; height fixed whatever the count; ctrl+\\ folds to the header and the fold survives a reload", async t => {
+test("Mac For you list shows at most 3 rows, the last ending in ' ...' (no extra line); focus keeps the height; ctrl+\\ folds to the header and the fold survives a reload", async t => {
  const { addLive } = await import("../plugins/foryou/live-strip.ts");
+ const { visibleWidth } = await import("@earendil-works/pi-tui");
  const d=tmp(loop("c"));for (const k of "abcdef") addLive(d,{source:`WeChat: ${k}`,sourceKey:`wechat:${k}`,why:`Ask ${k}`});
  const f=await liveKeyboard(t,d);
  const live=()=>f.widgets.filter(([k])=>k==="foryou-live").at(-1)[1];
- const v=live();assert.equal(v.length,6);assert.equal(v[0],"For you 7");assert.equal(v[4],"...");assert.doesNotMatch(v.join("\n"),/more|truncated/);
- for (let i=0;i<5;i++) f.key("\x1b[B");const deep=live();assert.equal(deep.length,6);assert.match(deep.slice(1,4).join("\n"),/^5›/m,"window follows the selection");f.key("\x1b");
+ const v=live();assert.equal(v.length,4);assert.equal(v[0],"For you 7");assert.match(v[3],/ \.\.\.$/);assert.doesNotMatch(v.join("\n"),/more|truncated/);
+ for (const l of v) assert.ok(visibleWidth(l)<=72);
+ for (let i=0;i<5;i++) f.key("\x1b[B");const deep=live();assert.equal(deep.length,4);assert.match(deep.slice(1).join("\n"),/^5›/m,"window follows the selection");f.key("\x1b");
  assert.deepEqual(f.key("\x1c"),{consume:true});assert.deepEqual(live(),["For you 7"]);
  const g=await liveKeyboard(t,d);assert.deepEqual(g.widgets.filter(([k])=>k==="foryou-live").at(-1)[1],["For you 7"],"fold remembered");
- g.key("\x1c");assert.equal(g.widgets.filter(([k])=>k==="foryou-live").at(-1)[1].length,6);
+ g.key("\x1c");assert.equal(g.widgets.filter(([k])=>k==="foryou-live").at(-1)[1].length,4);
 });
 
-test("For you list with 1 row keeps the same 6-line height", async () => {
+test("For you list with 1 row is just header and row, no blank lines", async () => {
  const { forYouLines } = await import("../plugins/foryou/for-you-list.ts");
  const v=forYouLines([{id:"x",kind:"ask",who:"A",gist:"g",full:"g",source:"WeChat",at:0,urgent:false}]);
- assert.deepEqual(v.map(l=>l.trim()?"x":" "),["x","x"," "," "," "," "]);
+ assert.equal(v.length,2);assert.ok(v.every(l=>l.trim()));
 });
