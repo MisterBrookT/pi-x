@@ -9,6 +9,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { actPrompt, addNote, type Choice, cleanChoices, daemonScript, isOpen, needsYou, parseInbox, paths, pendingItems, publicItem as basePublic, wakeTime, type Item } from "./proactive.ts";
+import { autoLaunchAllowed } from "../core/launch-guard.ts";
 import { focusOttyTab, launchPi, type RemoteMode } from "../core/launch.ts";
 import { relayConfigPath } from "../core/hub-paths.ts";
 import { recentAutoClosed } from "../core/auto-close.ts";
@@ -504,7 +505,9 @@ export async function actItem(id: string, options: { dir?: string; mode?: Remote
 }
 
 /** Start (or resume) the For you session with a prompt, when it is not open. */
-export async function startForYou(prompt: string, options: { mode?: RemoteMode; launch?: typeof launchPi; home?: string } = {}) {
+export async function startForYou(prompt: string, options: { mode?: RemoteMode; launch?: typeof launchPi; home?: string; allowed?: (id: string) => boolean } = {}) {
+	// Automatic: at most once per cooldown, and after a boot only if For you was registered before it.
+	if (!(options.allowed ?? autoLaunchAllowed)(forYouSession.id)) throw new Error("auto-launch held by launch guard");
 	const mode = options.mode ?? (existsSync(relayConfigPath) ? "relay" : "tailnet");
 	await (options.launch ?? launchPi)(forYouFolder(options.home), mode, { prompt, sessionId: forYouSession.id, name: forYouSession.name, model: forYouSession.model, focus: false });
 }

@@ -1,4 +1,5 @@
 // /rc: expose this live Pi session to the Pix Remote web app through a loopback-only hub.
+import { recordRegistered } from "../core/launch-guard.ts";
 import { defaultDeps as ottyDefaultDeps, writePidFile, removePidFile } from "./otty-sync.ts";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -178,7 +179,7 @@ export default function registerRemote(pi: ExtensionAPI, options: RemoteOptions 
     }
     // A phone-started Pi uses the same network mode as the session hosting the hub.
     const launch = async (dir: string, session?: string, first?: { prompt?: string; model?: string }) => { await launchPi(dir, relayKey ? "relay" : "tailnet", { spawn: options.spawn, hasOtty: options.hasOtty, session, ...first }); };
-    try { hub = await startRemoteHub({ token, port, launch, ottySync: p => ottyDefaultDeps(p, options.sessionsDir), version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
+    try { hub = await startRemoteHub({ token, port, launch, ottySync: p => ottyDefaultDeps(p, options.sessionsDir), onRegistered: ids => recordRegistered(ids), version: loadedVersion, onRetire: () => { relayAgent?.stop(); relayAgent = undefined; stopCover?.(); stopCover = undefined; const old = hub; hub = undefined; void old?.close(); logRelay("hub handed to a session with newer Pix code"); }, home: options.home, sessionsDir: options.sessionsDir, memoryRoot: options.memoryRoot, push: createPushSender(join(dirname(options.tokenPath ?? remoteTokenPath), "push.json")) }); }
     catch (error: any) { if (error?.code !== "EADDRINUSE") throw error; }
     if (useRelay) await ensureRelay(wait);
   };

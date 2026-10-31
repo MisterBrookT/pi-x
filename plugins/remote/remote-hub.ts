@@ -194,6 +194,8 @@ export interface RemoteHubOptions {
   plugins?: HubPlugin[];
   /** Reconcile against Otty every 30 s (live panes are the truth for alive; sure orphan pi processes are killed). Off unless given. */
   ottySync?: (port: number) => OttySyncDeps;
+  /** Told the registered session ids whenever the list changes (kept for the post-boot launch guard). */
+  onRegistered?: (ids: string[]) => void;
 }
 
 /** Mac-started work notifies the phone only once Brook has left the Mac this long. */
@@ -274,7 +276,9 @@ export async function startRemoteHub(options: RemoteHubOptions): Promise<RemoteH
       const todo = todos?.find(t => t.status === "active")?.text.slice(0, 160);
       return { id, name, named, cwd, busy, waiting, nextLook, ...(peerWait ? { peerWait } : {}), updatedAt, preview, ...(todo ? { todo } : {}), ...extraSummary(id), ...(question ? { asks: true } : {}), ...(paneStates[id] ? { pane: paneStates[id] } : {}) };
     }).concat(unregistered.map(p => ({ id: p.sessionId, name: p.name || "Pi session", named: true, cwd: p.cwd, busy: p.state === "processing", waiting: 0, nextLook: undefined, updatedAt: 0, preview: "", pane: p.state, unregistered: true } as any)));
+  let lastIds = "";
   const publish = (event: string, data: unknown) => {
+    if (event === "sessions" && options.onRegistered) { const ids = [...sessions.keys()].sort(), key = ids.join(","); if (key !== lastIds) { lastIds = key; options.onRegistered(ids); } }
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const phone of phones) phone.write(frame);
   };
