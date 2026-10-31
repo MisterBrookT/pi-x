@@ -28,7 +28,8 @@ export default function goalExtension(pi: ExtensionAPI) {
 	};
 
 	const show = (ctx: ExtensionContext, waiting = false) => {
-		pi.events.emit(GOAL_TOOL_STATE, { active: goal?.status === "active" });
+		// Paused and blocked goals keep the tool so the agent can resume or complete them.
+		pi.events.emit(GOAL_TOOL_STATE, { active: !!goal && goal.status !== "completed" });
 		// A paused or blocked goal stays visible: a silent pause is how overnight work stalls unnoticed.
 		// Waiting = background work is pending (jobs, subagents, replies from other sessions); show its next check.
 		const next = waiting ? backgroundState(pi).nextLook : undefined;

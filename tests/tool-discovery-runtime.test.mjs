@@ -91,6 +91,19 @@ test("goal schema appears only for an active goal and disappears upon completion
   assert.deepEqual(h.extensionErrors, []);
 });
 
+test("a blocked goal keeps the goal tool, also across reload, so the agent can resume or complete it", async t => {
+  const choices = settings();
+  const h = await goalSession(t, ({ goal }) => goal?.status === "active" ? finish(goal, "blocked", "Waiting on brook.") : say("done"),
+    { extensions: extensions(choices), tools });
+  await h.session.prompt("/goal Check the fixture");
+  await h.until(() => h.state()?.status === "blocked");
+  await h.until(() => h.settledCount() > 0);
+  assert.ok(h.session.getActiveToolNames().includes("goal"), "blocked goal keeps the tool");
+  await h.session.reload();
+  assert.ok(h.session.getActiveToolNames().includes("goal"), "reload with a blocked goal keeps the tool");
+  assert.deepEqual(h.extensionErrors, []);
+});
+
 test("discovery does not leak into another session sharing the same settings", async t => {
   const choices = settings();
   const first = await goalSession(t, ({ index }) => index === 0 ? call("tool_search", { query: "computer" }) : say("done"),
